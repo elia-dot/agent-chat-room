@@ -8,6 +8,12 @@ import type { TurnEvent } from '../types.js';
  */
 export type EngineEvent =
   | { type: 'room.state'; roomId: string; state: RoomState; round: number }
+  /**
+   * Not in PLAN.md section 4.4, because pausing is not a state. A browser watching a room
+   * that another client paused has to learn about it without polling, and the sidebar dot
+   * reads the flag rather than the state.
+   */
+  | { type: 'room.paused'; roomId: string; paused: boolean }
   | {
       type: 'message.start';
       roomId: string;

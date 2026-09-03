@@ -33,6 +33,8 @@ const room = (over: Partial<Room> = {}): Room => ({
   baseBranch: 'main',
   roomBranch: 'acr/fix-add',
   baseSha: 'abc1234',
+  paused: false,
+  nextSpeaker: null,
   worktreePath: '/wt',
   state: 'approved',
   round: 2,
@@ -149,6 +151,7 @@ describe('Renderer', () => {
       state: 'approved',
       round: 2,
       approved: true,
+      paused: false,
       commit: 'deadbee',
       changedFiles: ['math.js'],
     });

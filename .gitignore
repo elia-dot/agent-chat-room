@@ -1,5 +1,7 @@
 node_modules/
 dist/
+packages/web/dist/
+.vite/
 *.tsbuildinfo
 coverage/
 .acr-tmp/

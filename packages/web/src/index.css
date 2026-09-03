@@ -1,0 +1,118 @@
+@import 'tailwindcss';
+
+/*
+ * Dark by class, not by media query, so the toggle in the header actually toggles. The
+ * initial value still comes from `prefers-color-scheme` (see `main.tsx`).
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* One colour per runtime, per PLAN.md section 5.2. The avatar is the only place a
+     runtime's identity shows, so it has to be legible in both themes. */
+  --color-claude: oklch(0.68 0.17 45);
+  --color-codex: oklch(0.66 0.15 155);
+  --color-cursor: oklch(0.62 0.16 255);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    sans-serif;
+}
+
+/* The running dot in the sidebar. `animate-pulse` fades the whole element; this keeps the
+   dot visible and only breathes the halo, which reads better at 8px. */
+@keyframes acr-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 3px transparent;
+    opacity: 0.55;
+  }
+}
+
+.acr-pulse {
+  animation: acr-pulse 1.4s ease-in-out infinite;
+}
+
+/* Markdown inside a bubble. Tailwind's preflight strips list markers and heading sizes,
+   and an agent's answer is markdown, so they have to come back – scoped here rather than
+   pulling in the typography plugin for six rules. */
+.acr-md > :first-child {
+  margin-top: 0;
+}
+.acr-md > :last-child {
+  margin-bottom: 0;
+}
+.acr-md p,
+.acr-md ul,
+.acr-md ol,
+.acr-md pre,
+.acr-md blockquote,
+.acr-md table {
+  margin: 0.5rem 0;
+}
+.acr-md ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.acr-md ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.acr-md h1,
+.acr-md h2,
+.acr-md h3,
+.acr-md h4 {
+  font-weight: 600;
+  margin: 0.75rem 0 0.25rem;
+}
+.acr-md h1 {
+  font-size: 1.15rem;
+}
+.acr-md h2 {
+  font-size: 1.05rem;
+}
+.acr-md a {
+  text-decoration: underline;
+}
+.acr-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: color-mix(in oklch, currentColor 10%, transparent);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+.acr-md pre {
+  overflow-x: auto;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: color-mix(in oklch, currentColor 7%, transparent);
+}
+.acr-md pre code {
+  background: none;
+  padding: 0;
+}
+.acr-md table {
+  border-collapse: collapse;
+}
+.acr-md th,
+.acr-md td {
+  border: 1px solid color-mix(in oklch, currentColor 20%, transparent);
+  padding: 0.25rem 0.5rem;
+}

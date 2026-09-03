@@ -201,7 +201,15 @@ export class RoomStore {
     patch: Partial<
       Pick<
         Room,
-        'state' | 'round' | 'maxRounds' | 'baseSha' | 'worktreePath' | 'closedAt' | 'title'
+        | 'state'
+        | 'paused'
+        | 'nextSpeaker'
+        | 'round'
+        | 'maxRounds'
+        | 'baseSha'
+        | 'worktreePath'
+        | 'closedAt'
+        | 'title'
       >
     >,
   ): Room {
@@ -209,6 +217,8 @@ export class RoomStore {
     const params: Row = { id, updatedAt: nowIso() };
     const map: Record<string, string> = {
       state: 'state',
+      paused: 'paused',
+      nextSpeaker: 'next_speaker',
       round: 'round',
       maxRounds: 'max_rounds',
       baseSha: 'base_sha',
@@ -219,7 +229,10 @@ export class RoomStore {
     for (const [key, column] of Object.entries(map)) {
       if (!(key in patch)) continue;
       sets.push(`${column} = @${key}`);
-      params[key] = (patch as Row)[key] ?? null;
+      // `paused` is a boolean here and an INTEGER in SQLite; better-sqlite3 refuses to bind
+      // a JavaScript boolean, so it is the one column that needs converting on the way in.
+      const value = (patch as Row)[key];
+      params[key] = key === 'paused' ? (value ? 1 : 0) : (value ?? null);
     }
     sets.push('updated_at = @updatedAt');
     this.db.prepare(`UPDATE rooms SET ${sets.join(', ')} WHERE id = @id`).run(params);
@@ -551,6 +564,8 @@ function toRoom(row: Row): Room {
     baseSha: str(row.base_sha),
     worktreePath: str(row.worktree_path),
     state: asText(row.state) as RoomState,
+    paused: Number(row.paused ?? 0) === 1,
+    nextSpeaker: str(row.next_speaker),
     round: Number(row.round),
     maxRounds: Number(row.max_rounds),
     createdAt: asText(row.created_at),

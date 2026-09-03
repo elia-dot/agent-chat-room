@@ -19,6 +19,9 @@ const LEGAL: [RoomState, RoomState][] = [
   ['needs-you', 'running'],
   ['stopped', 'running'],
   ['approved', 'stopped'],
+  // M2: pausing, and a single @mention turn, both come to rest in `idle`.
+  ['running', 'idle'],
+  ['waiting-reviews', 'idle'],
 ];
 
 const ILLEGAL: [RoomState, RoomState][] = [
@@ -28,6 +31,9 @@ const ILLEGAL: [RoomState, RoomState][] = [
   ['approved', 'running'],
   ['approved', 'needs-you'],
   ['needs-you', 'approved'],
+  // Pausing added two edges into `idle` and no way back out of a finished room.
+  ['approved', 'idle'],
+  ['needs-you', 'idle'],
 ];
 
 describe('the room state machine', () => {

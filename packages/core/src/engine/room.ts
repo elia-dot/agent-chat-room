@@ -67,11 +67,27 @@ export interface RoomOutcome {
   state: RoomState;
   round: number;
   approved: boolean;
+  /** The loop stopped because the human held it, not because the room is finished. */
+  paused: boolean;
   /** Set when a turn failed, as opposed to the room simply not being approved. */
   error?: string;
   /** Short sha of the commit the approved round produced. */
   commit?: string;
   changedFiles: string[];
+}
+
+export interface RunOptions {
+  /**
+   * Run exactly one turn, by this runtime, instead of the round loop. This is the
+   * "the next turn is whoever you @mention" rule from PLAN.md section 3: the room lands
+   * back in `idle` afterwards and the human decides what happens next.
+   */
+  directTurn?: string;
+}
+
+export interface PostUserMessageOptions {
+  /** Runtime id from the room's roster. Defaults to the worker. */
+  mention?: string;
 }
 
 interface ReviewOutcome {
@@ -127,6 +143,16 @@ export class RoomEngine {
 
   get messages(): Message[] {
     return this.store.listMessages(this.roomRow.id);
+  }
+
+  /**
+   * Re-read the room row. A long-lived engine caches it, so anything that edits the row
+   * from outside – the server raising the round limit, say – has to say so.
+   */
+  reload(): Room {
+    const row = this.store.getRoom(this.roomRow.id);
+    if (row) this.roomRow = row;
+    return this.roomRow;
   }
 
   /** Subscribe to the engine event stream. Returns an unsubscribe function. */
@@ -323,18 +349,27 @@ export class RoomEngine {
 
   // --- the loop ------------------------------------------------------------
 
-  /** Run rounds until the room approves, needs the human, or is stopped. */
-  async run(): Promise<RoomOutcome> {
+  /** Run rounds until the room approves, needs the human, is paused, or is stopped. */
+  async run(opts: RunOptions = {}): Promise<RoomOutcome> {
     if (this.roomRow.state === 'approved') return this.outcome();
 
     this.stopping = false;
     this.stopReason = undefined;
+    if (opts.directTurn) return await this.runDirectTurn(opts.directTurn);
+
     let lastError: string | undefined;
     let commit: string | undefined;
 
     for (;;) {
       if (this.stopping) {
         this.setState('stopped');
+        break;
+      }
+      if (this.roomRow.paused) {
+        // Checked at the top of a round rather than mid-turn: killing a running worker
+        // would throw away the diff it is half way through writing, and `stop()` is
+        // already there for the human who really means it.
+        this.settle();
         break;
       }
       const round = this.roomRow.round + 1;
@@ -382,6 +417,136 @@ export class RoomEngine {
     this.stopping = true;
     this.stopReason = reason;
     for (const handle of this.active) handle.cancel(reason);
+  }
+
+  /**
+   * Hold the loop. The turn that is already in flight finishes – its diff is real work –
+   * and no further round starts. The room lands in `idle`, which is resumable.
+   */
+  pause(reason = 'paused'): Room {
+    if (!this.roomRow.paused) {
+      this.roomRow = this.store.updateRoom(this.roomRow.id, { paused: true });
+      this.emit({ type: 'room.paused', roomId: this.roomRow.id, paused: true });
+      this.system(reason);
+    }
+    return this.roomRow;
+  }
+
+  /** Clear the hold. Nothing runs until the caller calls `run()`. */
+  resume(): Room {
+    if (this.roomRow.paused) {
+      this.roomRow = this.store.updateRoom(this.roomRow.id, { paused: false });
+      this.emit({ type: 'room.paused', roomId: this.roomRow.id, paused: false });
+    }
+    return this.roomRow;
+  }
+
+  /**
+   * Post a message from the human into the room and hold the loop so they can decide who
+   * answers (PLAN.md section 3: "You can interrupt any time").
+   *
+   * Nothing has to be threaded into a prompt here: every participant carries a
+   * `lastSeenMessageId`, so `unseenFor` picks this message up on the next turn for free.
+   */
+  postUserMessage(text: string, opts: PostUserMessageOptions = {}): Message {
+    const body = text.trim();
+    if (!body) throw new EngineError('a message needs some text');
+
+    const roster = this.participants;
+    let next = this.requireWorker().runtime;
+    if (opts.mention) {
+      const target = roster.find((p) => p.runtime === opts.mention);
+      if (!target) {
+        throw new EngineError(
+          `nobody called "${opts.mention}" is in this room. Try: ${roster
+            .map((p) => `@${p.runtime}`)
+            .join(', ')}`,
+        );
+      }
+      next = target.runtime;
+    }
+
+    const message = this.store.addMessage({
+      roomId: this.roomRow.id,
+      author: 'you',
+      role: 'owner',
+      kind: 'user',
+      round: this.roomRow.round,
+      text: body,
+    });
+    this.emit({ type: 'message.done', roomId: this.roomRow.id, message });
+
+    // Interrupting means the human is steering, so the loop holds rather than racing them
+    // to the next round. Continuing is one click, and it is theirs to make.
+    this.roomRow = this.store.updateRoom(this.roomRow.id, { paused: true, nextSpeaker: next });
+    this.emit({ type: 'room.paused', roomId: this.roomRow.id, paused: true });
+    return message;
+  }
+
+  /**
+   * One turn by one named participant, outside the round loop. A worker's turn still
+   * takes the write lock and still captures a diff; a reviewer's does neither, because a
+   * read-only turn changes nothing there is a diff of.
+   */
+  private async runDirectTurn(runtime: string): Promise<RoomOutcome> {
+    const participant = this.participants.find((p) => p.runtime === runtime);
+    if (!participant) {
+      throw new EngineError(`nobody called "${runtime}" is in this room`);
+    }
+
+    // A direct turn is a side conversation, not a review cycle, so it does not consume a
+    // round. Round 0 only happens before the loop has run at all.
+    const round = Math.max(this.roomRow.round, 1);
+    this.roomRow = this.store.updateRoom(this.roomRow.id, { round, nextSpeaker: null });
+    this.setState('running');
+
+    const cwd = this.workdir();
+    const writes = canWrite(participant.permission);
+    const diffStat = await git.diffStat(cwd, this.baseSha());
+    const diff = writes ? '' : await git.diffSince(cwd, this.baseSha());
+
+    const lock = writes ? await this.acquireLock() : undefined;
+    let turn: { result: TurnResult; stream: TurnStream; messageId: string };
+    try {
+      turn = await this.runParticipantTurn(participant, {
+        round,
+        cwd,
+        diffStat,
+        ...(diff ? { diff } : {}),
+      });
+    } finally {
+      lock?.release();
+    }
+
+    let error: string | undefined;
+    if (turn.result.ok) {
+      const captured = writes ? await git.diffSince(cwd, this.baseSha()) : null;
+      if (writes) this.lastChangedFiles = await git.changedFiles(cwd, this.baseSha());
+      const verdict = participant.role === 'reviewer' ? parseVerdict(turn.result.text) : null;
+      this.postTurnMessage(
+        participant,
+        turn,
+        round,
+        captured,
+        verdict?.ok ? verdict.verdict : null,
+      );
+    } else {
+      error = turn.result.error ?? `${runtime}'s turn failed`;
+      this.system(`${runtime}'s turn failed: ${error}`, round);
+    }
+
+    this.settle();
+    return this.outcome(error ? { error } : {});
+  }
+
+  /**
+   * Where a held or single-turn room comes to rest. `idle` is the only non-terminal state
+   * that means "nothing is running"; a room the tally already sent somewhere terminal keeps
+   * that answer.
+   */
+  private settle(): void {
+    if (isTerminal(this.roomRow.state)) return;
+    this.setState('idle');
   }
 
   /** Remove the worktree and mark the room closed. The branch is left alone. */
@@ -795,6 +960,7 @@ export class RoomEngine {
       state: this.roomRow.state,
       round: this.roomRow.round,
       approved: this.roomRow.state === 'approved',
+      paused: this.roomRow.paused,
       changedFiles: this.lastChangedFiles,
       ...extra,
     };

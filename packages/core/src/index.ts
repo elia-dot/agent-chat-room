@@ -32,7 +32,13 @@ export type {
 export { openDb, migrate, schemaVersion, LATEST_VERSION, migrations } from './store/db.js';
 export type { Db, Migration, OpenDbOptions } from './store/db.js';
 export { RoomEngine, EngineError, deriveTitle } from './engine/room.js';
-export type { CreateRoomInput, RoomEngineOptions, RoomOutcome } from './engine/room.js';
+export type {
+  CreateRoomInput,
+  PostUserMessageOptions,
+  RoomEngineOptions,
+  RoomOutcome,
+  RunOptions,
+} from './engine/room.js';
 export {
   ROOM_STATES,
   canTransition,
