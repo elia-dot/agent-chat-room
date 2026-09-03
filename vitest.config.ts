@@ -26,6 +26,26 @@ export default defineConfig({
           testTimeout: 20_000,
         },
       },
+      {
+        resolve: { alias: { '@agent-chat-room/core': coreSrc } },
+        test: {
+          name: 'server',
+          root: './packages/server',
+          include: ['test/**/*.test.ts'],
+          testTimeout: 20_000,
+        },
+      },
+      {
+        // Node, not jsdom: everything worth pinning in the web app – event reduction,
+        // mention parsing, diff parsing – is a pure module, deliberately.
+        resolve: { alias: { '@agent-chat-room/core': coreSrc } },
+        test: {
+          name: 'web',
+          root: './packages/web',
+          include: ['test/**/*.test.ts'],
+          testTimeout: 20_000,
+        },
+      },
     ],
   },
 });

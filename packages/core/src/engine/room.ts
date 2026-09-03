@@ -145,6 +145,16 @@ export class RoomEngine {
     return this.store.listMessages(this.roomRow.id);
   }
 
+  /**
+   * Re-read the room row. A long-lived engine caches it, so anything that edits the row
+   * from outside – the server raising the round limit, say – has to say so.
+   */
+  reload(): Room {
+    const row = this.store.getRoom(this.roomRow.id);
+    if (row) this.roomRow = row;
+    return this.roomRow;
+  }
+
   /** Subscribe to the engine event stream. Returns an unsubscribe function. */
   subscribe(listener: EngineEventSink): () => void {
     this.listeners.add(listener);
