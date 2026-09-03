@@ -1,4 +1,4 @@
-import { detectAll, isUsable } from '@agent-chat-room/core';
+import { detectAll, isUsable, runtimeReport } from '@agent-chat-room/core';
 
 import { EXIT, type ExitCode } from '../exit.js';
 import { Renderer } from '../render.js';
@@ -20,12 +20,9 @@ export async function doctor(opts: DoctorOptions = {}): Promise<ExitCode> {
   const results = await detectAll();
 
   if (opts.json) {
-    const payload = results.map(({ adapter, detection }) => ({
-      id: adapter.id,
-      displayName: adapter.displayName,
-      ...detection,
-      usable: isUsable(detection),
-    }));
+    // Exactly what `GET /api/runtimes` serves, so the doctor page and this command can
+    // never drift apart.
+    const payload = await runtimeReport();
     process.stdout.write(
       `${JSON.stringify({ node: process.version, runtimes: payload }, null, 2)}\n`,
     );

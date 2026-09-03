@@ -32,6 +32,27 @@ afterEach(() => {
 });
 
 describe('RoomStore', () => {
+  it('round-trips the pause flag and the next speaker', () => {
+    const r = room();
+    expect(r.paused).toBe(false);
+    expect(r.nextSpeaker).toBeNull();
+
+    // `paused` is a boolean here and an INTEGER in the row, so it is worth pinning that it
+    // survives the trip in both directions.
+    const held = store.updateRoom(r.id, { paused: true, nextSpeaker: 'codex' });
+    expect(held.paused).toBe(true);
+    expect(held.nextSpeaker).toBe('codex');
+    expect(store.getRoom(r.id)).toEqual(held);
+
+    const released = store.updateRoom(r.id, { paused: false, nextSpeaker: null });
+    expect(released.paused).toBe(false);
+    expect(released.nextSpeaker).toBeNull();
+
+    // Patching something else leaves both alone.
+    const renamed = store.updateRoom(r.id, { paused: true });
+    expect(store.updateRoom(r.id, { title: 'Renamed' }).paused).toBe(renamed.paused);
+  });
+
   it('round-trips a room with its roster, transcript and turns', () => {
     const r = room();
     expect(store.getRoom(r.id)).toEqual(r);

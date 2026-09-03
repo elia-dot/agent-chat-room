@@ -41,8 +41,15 @@ function script(turns: unknown[]): void {
   process.env.ACR_ECHO_SCRIPT = writeEchoScript({ turns });
 }
 
+/** A second runtime id backed by the same double, so an @mention can name a reviewer. */
+const spyEcho2: AgentAdapter = {
+  ...spyEcho,
+  id: 'echo2',
+  run: (req, sink) => spyEcho.run(req, sink),
+};
+
 function engineOptions(): Parameters<typeof RoomEngine.create>[1] {
-  return { store, adapters: { echo: spyEcho }, timeoutMs: 5000 };
+  return { store, adapters: { echo: spyEcho, echo2: spyEcho2 }, timeoutMs: 5000 };
 }
 
 function open(dir: string, reviewers = 1, maxRounds = 4): Promise<RoomEngine> {
@@ -430,5 +437,150 @@ describe('RoomEngine restart recovery', () => {
     expect(store.getRoom(engine.room.id)!.closedAt).not.toBeNull();
     expect(gitIn(dir, 'branch', '--list', branch)).toContain(branch);
     expect(gitIn(dir, 'worktree', 'list')).not.toContain(worktree);
+  });
+});
+
+describe('RoomEngine interactivity, the part the browser needs', () => {
+  /** A room whose reviewer has a distinct runtime id, so `@echo2` names one participant. */
+  function openMixed(maxRounds = 4): Promise<RoomEngine> {
+    const dir = repo();
+    return RoomEngine.create(
+      {
+        task: 'math.js exports add() but the body subtracts. Fix it.',
+        cwd: dir,
+        agents: ['echo', 'echo2'],
+        maxRounds,
+      },
+      engineOptions(),
+    );
+  }
+
+  it('lets a round finish, then holds instead of starting the next one', async () => {
+    const dir = repo();
+    script([
+      workerTurn(1, 'First pass.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('request-changes', ['math.js:2 drop the stray comment'])),
+      workerTurn(2, 'Dropped the comment.', { 'math.js': FIXED }),
+      reviewTurn(2, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    const events: EngineEvent[] = [];
+    // Pause the moment the worker starts speaking – the hardest moment to get right.
+    let pauseOnce = true;
+    engine.subscribe((e) => {
+      events.push(e);
+      if (e.type === 'message.start' && pauseOnce) {
+        pauseOnce = false;
+        engine.pause('paused by you');
+      }
+    });
+
+    const held = await engine.run();
+    expect(held.paused).toBe(true);
+    expect(held.state).toBe('idle');
+    expect(held.round).toBe(1);
+    // Round 1 finished: killing a running worker would throw away the diff it is writing.
+    expect(store.listTurns(engine.room.id)).toHaveLength(2);
+    expect(store.getRoom(engine.room.id)!.paused).toBe(true);
+    expect(events.some((e) => e.type === 'room.paused' && e.paused)).toBe(true);
+    expect(store.listMessages(engine.room.id).some((m) => m.text === 'paused by you')).toBe(true);
+
+    // Running a still-paused room is a no-op rather than a surprise round 2.
+    expect((await engine.run()).round).toBe(1);
+    expect(store.listTurns(engine.room.id)).toHaveLength(2);
+
+    // Continue picks the loop up where it stopped.
+    engine.resume();
+    expect(engine.room.paused).toBe(false);
+    const outcome = await engine.run();
+    expect(outcome.state).toBe('approved');
+    expect(outcome.round).toBe(2);
+    expect(outcome.paused).toBe(false);
+  });
+
+  it('carries a message you posted mid-room into the next turn"s prompt', async () => {
+    const dir = repo();
+    script([workerTurn(1, 'Done.', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))]);
+
+    const engine = await open(dir);
+    const posted = engine.postUserMessage('Use a named constant for the timeout, please.');
+    expect(posted.kind).toBe('user');
+    expect(posted.author).toBe('you');
+    expect(posted.role).toBe('owner');
+
+    // Interrupting holds the loop and points the next turn at the worker by default.
+    expect(engine.room.paused).toBe(true);
+    expect(engine.room.nextSpeaker).toBe('echo');
+
+    engine.resume();
+    await engine.run();
+
+    const workerPrompt = requests.find((r) => r.prompt.includes('as WORKER'))!.prompt;
+    expect(workerPrompt).toContain('Use a named constant for the timeout, please.');
+    expect(workerPrompt).toContain('## New messages since your last turn');
+  });
+
+  it('routes the next turn to whoever you @mention, and refuses a name nobody has', async () => {
+    const engine = await openMixed();
+    expect(() => engine.postUserMessage('hi', { mention: 'gemini' })).toThrow(
+      /nobody called "gemini"/,
+    );
+    engine.postUserMessage('What do you make of this?', { mention: 'echo2' });
+    expect(engine.room.nextSpeaker).toBe('echo2');
+  });
+
+  it('runs exactly one turn for a direct mention and comes back to rest', async () => {
+    script([
+      {
+        when: { runtime: 'echo2', role: 'reviewer', round: 1 },
+        text: `Nothing to review yet.\n\n${verdict('question')}`,
+      },
+    ]);
+
+    const engine = await openMixed();
+    engine.postUserMessage('What do you make of this?', { mention: 'echo2' });
+    engine.resume();
+
+    const outcome = await engine.run({ directTurn: 'echo2' });
+
+    // One turn, by the participant that was named, and nobody else spoke.
+    const turns = store.listTurns(engine.room.id);
+    expect(turns).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.prompt).toContain('You are echo2 acting as REVIEWER');
+    // A read-only turn never takes the write lock and never captures a diff.
+    expect(requests[0]!.permission).toBe('read-only');
+
+    const spoken = store.listMessages(engine.room.id).filter((m) => m.kind === 'agent');
+    expect(spoken.map((m) => m.author)).toEqual(['echo2']);
+    expect(spoken[0]!.verdict?.decision).toBe('question');
+    expect(spoken[0]!.diff).toBeNull();
+
+    // A side conversation does not consume a round, and the room is left resumable.
+    expect(outcome.state).toBe('idle');
+    expect(outcome.round).toBe(1);
+    expect(engine.room.nextSpeaker).toBeNull();
+  });
+
+  it('captures a diff when the direct turn is the worker, and refuses an unknown name', async () => {
+    script([
+      {
+        when: { runtime: 'echo', role: 'worker' },
+        text: 'Fixed it.',
+        writeFiles: { 'math.js': FIXED },
+      },
+    ]);
+
+    const engine = await openMixed();
+    const outcome = await engine.run({ directTurn: 'echo' });
+
+    expect(outcome.state).toBe('idle');
+    expect(outcome.changedFiles).toEqual(['math.js']);
+    const message = store.listMessages(engine.room.id).find((m) => m.author === 'echo')!;
+    expect(message.diff).toContain('math.js');
+    expect(readFileSync(join(engine.room.worktreePath!, 'math.js'), 'utf8')).toBe(FIXED);
+
+    await expect(engine.run({ directTurn: 'gemini' })).rejects.toThrow(/nobody called "gemini"/);
   });
 });

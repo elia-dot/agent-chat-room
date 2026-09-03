@@ -5,10 +5,16 @@ import type { RoomState } from '../store/types.js';
  *
  *   idle -> running(worker) -> waiting-reviews -> approved | needs-you | running(round+1)
  *                                              -> stopped (from anywhere)
+ *                                              -> idle (paused, or one direct turn done)
  *
  * Every transition is persisted, which is what makes a room resumable after the process
  * dies. Keeping the legal edges in one table means an illegal transition is a loud error
  * during development instead of a room stuck in a state nothing knows how to render.
+ *
+ * Pausing deliberately adds no state. "The loop stopped but the room is resumable" is
+ * exactly what `idle` already means, and it is where restart recovery lands a room too, so
+ * everything that renders a `RoomState` keeps working. The `paused` column on the room is
+ * what distinguishes a room you held from one a crash rolled back.
  */
 export const ROOM_STATES = [
   'idle',
@@ -22,10 +28,10 @@ export const ROOM_STATES = [
 const TRANSITIONS: Record<RoomState, readonly RoomState[]> = {
   // A fresh room, or one rolled back by restart recovery.
   idle: ['running', 'needs-you', 'stopped'],
-  // The worker is holding the write lock.
-  running: ['waiting-reviews', 'needs-you', 'stopped'],
+  // The worker is holding the write lock. `idle` is the pause / single-turn exit.
+  running: ['waiting-reviews', 'needs-you', 'stopped', 'idle'],
   // Reviewers are running in parallel; the tally decides where this goes.
-  'waiting-reviews': ['approved', 'needs-you', 'running', 'stopped'],
+  'waiting-reviews': ['approved', 'needs-you', 'running', 'stopped', 'idle'],
   // Terminal, except that closing a room stops it.
   approved: ['stopped'],
   // The human is the next actor. Answering resumes the loop.

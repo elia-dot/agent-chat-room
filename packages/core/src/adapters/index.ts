@@ -41,3 +41,27 @@ export async function detectAll(list: AgentAdapter[] = adapterList): Promise<Det
 export function isUsable(detection: Detection): boolean {
   return detection.installed && detection.minVersionOk && detection.loggedIn !== false;
 }
+
+/** One row of `runtimeReport()`: a detection plus the identity it belongs to. */
+export interface RuntimeReportEntry extends Detection {
+  id: string;
+  displayName: string;
+  usable: boolean;
+}
+
+/**
+ * The detection payload `acr doctor --json`, `GET /api/runtimes` and the web app's doctor
+ * page all render. One shape, so the browser and the terminal can never disagree about
+ * which runtimes you have.
+ */
+export async function runtimeReport(
+  list: AgentAdapter[] = adapterList,
+): Promise<RuntimeReportEntry[]> {
+  const results = await detectAll(list);
+  return results.map(({ adapter, detection }) => ({
+    id: adapter.id,
+    displayName: adapter.displayName,
+    ...detection,
+    usable: isUsable(detection),
+  }));
+}

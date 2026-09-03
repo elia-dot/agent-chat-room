@@ -30,6 +30,14 @@ export interface Room {
   baseSha: string | null;
   worktreePath: string | null;
   state: RoomState;
+  /**
+   * The human asked the loop to hold. Orthogonal to `state`: a paused room sits in `idle`,
+   * which is also where restart recovery leaves a room, and this column is what tells the
+   * two apart.
+   */
+  paused: boolean;
+  /** Runtime id the next turn is routed to, set by an `@mention`. Null means "the worker". */
+  nextSpeaker: string | null;
   round: number;
   maxRounds: number;
   createdAt: string;

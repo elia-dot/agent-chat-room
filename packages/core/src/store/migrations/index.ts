@@ -91,8 +91,19 @@ CREATE INDEX idx_participants_room ON participants(room_id, order_index);
 CREATE INDEX idx_rooms_updated ON rooms(updated_at DESC);
 `;
 
+/**
+ * M2 makes the human a participant rather than a spectator, and that needs two facts the
+ * round loop never had to persist: whether the human asked the loop to hold, and who is
+ * meant to speak next. Both are additive and defaulted, so an M1 database opens fine.
+ */
+const INTERACTIVITY = `
+ALTER TABLE rooms ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE rooms ADD COLUMN next_speaker TEXT;
+`;
+
 export const migrations: readonly Migration[] = [
   { version: 1, name: '001_init', sql: INIT },
+  { version: 2, name: '002_interactivity', sql: INTERACTIVITY },
 ] as const;
 
 export const LATEST_VERSION: number = migrations.reduce((max, m) => Math.max(max, m.version), 0);

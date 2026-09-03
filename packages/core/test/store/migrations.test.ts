@@ -53,3 +53,30 @@ describe('schema migrations', () => {
     expect(new Set(versions).size).toBe(versions.length);
   });
 });
+
+describe('002_interactivity', () => {
+  it('adds the pause columns to a v1 database without losing what is in it', () => {
+    // A database exactly as an M1 `acr` left it: schema v1, with a room in it.
+    const db = new Database(':memory:');
+    const init = migrations.find((m) => m.version === 1)!;
+    db.exec(init.sql);
+    db.pragma('user_version = 1');
+    db.prepare(
+      `INSERT INTO rooms (id, slug, title, task, mode, repo_root, base_branch, room_branch,
+         state, round, max_rounds, created_at, updated_at)
+       VALUES ('r1', 'fix-add', 'Fix add()', 'add subtracts', 'build-review', '/repo', 'main',
+         'acr/fix-add', 'needs-you', 2, 4, 'then', 'then')`,
+    ).run();
+
+    expect(migrate(db)).toBe(LATEST_VERSION);
+    expect(LATEST_VERSION).toBeGreaterThanOrEqual(2);
+
+    const row = db.prepare('SELECT * FROM rooms WHERE id = ?').get('r1') as Record<string, unknown>;
+    expect(row.state).toBe('needs-you');
+    expect(row.round).toBe(2);
+    // The new columns default rather than nulling: an M1 room was never paused.
+    expect(row.paused).toBe(0);
+    expect(row.next_speaker).toBeNull();
+    db.close();
+  });
+});
