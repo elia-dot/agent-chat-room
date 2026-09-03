@@ -93,6 +93,13 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
       };
     }
 
+    case 'room.roster': {
+      if (!belongs(state, frame.roomId)) return state;
+      // The whole list, not a patch: a role swap demotes the incumbent worker in the same
+      // step, so replacing wholesale is the only way a client cannot end up with two.
+      return { ...state, participants: frame.participants };
+    }
+
     case 'message.start': {
       if (!belongs(state, frame.roomId)) return state;
       if (state.pending.some((p) => p.messageId === frame.messageId)) return state;

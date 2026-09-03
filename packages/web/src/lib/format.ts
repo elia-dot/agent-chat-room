@@ -1,4 +1,4 @@
-import type { RoomState } from '@agent-chat-room/core';
+import type { RoomMode, RoomState } from '@agent-chat-room/core';
 
 /** The runtime palette from PLAN.md section 5.2. Anything unknown gets the neutral chip. */
 export function runtimeClasses(author: string): string {
@@ -20,9 +20,22 @@ export function initials(author: string): string {
   return author.slice(0, 2).toUpperCase();
 }
 
-/** What the sidebar and the room header call each state. */
-export function stateLabel(state: RoomState, paused: boolean): string {
+/**
+ * What the sidebar and the room header call each state.
+ *
+ * A brainstorm never approves – it ends in `needs-you` holding a proposal – so calling that
+ * "needs you" reads like a stall when it is the finish line.
+ */
+export function stateLabel(
+  state: RoomState,
+  paused: boolean,
+  mode: RoomMode = 'build-review',
+): string {
   if (paused && state !== 'approved') return 'paused';
+  if (mode === 'brainstorm') {
+    if (state === 'needs-you') return 'proposed';
+    if (state === 'waiting-reviews') return 'thinking';
+  }
   switch (state) {
     case 'waiting-reviews':
       return 'reviewing';

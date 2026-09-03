@@ -1,4 +1,4 @@
-import type { Room } from '@agent-chat-room/core';
+import type { Detection, Room } from '@agent-chat-room/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { ChangedFiles, CreateRoomRequest } from './api/client.js';
@@ -31,6 +31,7 @@ export function App(): React.ReactElement {
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [files, setFiles] = useState<ChangedFiles | null>(null);
+  const [gh, setGh] = useState<Detection | null>(null);
   const [diff, setDiff] = useState<DiffState | null>(null);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [showDoctor, setShowDoctor] = useState(false);
@@ -88,6 +89,12 @@ export function App(): React.ReactElement {
       .rooms({ limit: 100 })
       .then(setRooms)
       .catch((err: unknown) => setError(describe(err)));
+    // Detection is cheap and never changes mid-session, so "Open PR" asks once rather than
+    // on every render of the panel.
+    void api
+      .runtimes()
+      .then((r) => setGh(r.gh))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -172,7 +179,8 @@ export function App(): React.ReactElement {
               <StatusDot state={room.state} paused={room.paused} />
               <h2 className="min-w-0 flex-1 truncate font-medium"># {room.title}</h2>
               <span className="text-xs text-zinc-500">
-                {stateLabel(room.state, room.paused)} · round {room.round}/{room.maxRounds}
+                {stateLabel(room.state, room.paused, room.mode)} · round {room.round}/
+                {room.maxRounds}
               </span>
             </>
           ) : (
@@ -229,6 +237,7 @@ export function App(): React.ReactElement {
           files={files}
           diff={diff}
           busy={busy}
+          gh={gh}
           onCloseDiff={() => setDiff(null)}
           onPause={() => void act(() => api.pause(room.id))}
           onContinue={() => void act(() => api.start(room.id))}
@@ -238,6 +247,35 @@ export function App(): React.ReactElement {
             void act(async () => {
               await api.patchRoom(room.id, { maxRounds: rounds });
               await api.start(room.id);
+            })
+          }
+          onSetParticipant={(runtime, patch) =>
+            void act(async () => {
+              const { participants } = await api.setParticipant(room.id, runtime, patch);
+              // The engine also broadcasts `room.roster`, but only to a subscribed socket;
+              // merging here keeps the panel honest if the socket is reconnecting.
+              store.merge({ participants });
+            })
+          }
+          onCommit={() => void act(() => api.commit(room.id))}
+          onOpenPr={(remote) =>
+            void act(async () => {
+              if (
+                !window.confirm(
+                  `Push ${room.roomBranch} to ${remote} and open a pull request into ${room.baseBranch}?\n\nThis is the only thing acr does that leaves your machine.`,
+                )
+              ) {
+                return;
+              }
+              const { room: updated } = await api.openPr(room.id, { remote });
+              store.merge({ room: updated });
+            })
+          }
+          onPromote={() =>
+            void act(async () => {
+              const created = await api.promote(room.id);
+              await refreshRooms();
+              selectRoom(created.room.id);
             })
           }
         />

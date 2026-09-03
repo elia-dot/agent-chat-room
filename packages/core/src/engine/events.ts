@@ -1,4 +1,4 @@
-import type { Message, RoomState } from '../store/types.js';
+import type { Message, Participant, RoomState } from '../store/types.js';
 import type { TurnEvent } from '../types.js';
 
 /**
@@ -14,6 +14,12 @@ export type EngineEvent =
    * reads the flag rather than the state.
    */
   | { type: 'room.paused'; roomId: string; paused: boolean }
+  /**
+   * The roster changed: a role swap or a model change. Also not in PLAN.md section 4.4, and
+   * there for the same reason `room.paused` is – a second tab has to learn that the worker
+   * is now somebody else without polling.
+   */
+  | { type: 'room.roster'; roomId: string; participants: Participant[] }
   | {
       type: 'message.start';
       roomId: string;

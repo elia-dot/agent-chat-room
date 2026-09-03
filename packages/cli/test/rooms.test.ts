@@ -1,4 +1,6 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -204,6 +206,43 @@ describe('acr rooms', () => {
     expect(existsSync(summary.worktree!)).toBe(false);
     expect(gitIn(dir, 'branch', '--list', summary.branch)).toContain(summary.branch);
     expect(store.getRoom(summary.roomId)?.closedAt).not.toBeNull();
+  });
+
+  it('exports a room as markdown, to stdout and to --out', async () => {
+    const dir = repo();
+    const summary = await seed(dir, [
+      workerTurn(1, 'Swapped the operator in math.js.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+
+    const toStdout = await rooms({
+      subcommand: 'export',
+      id: summary.roomId,
+      cwd: dir,
+      store,
+      renderer: new Renderer({ color: false, write: () => undefined }),
+    });
+    expect(toStdout).toBe(EXIT.ok);
+    const markdown = stdout.join('');
+    expect(markdown).toContain('# fix add()');
+    expect(markdown).toContain('## Participants');
+    expect(markdown).toContain('Swapped the operator in math.js.');
+    expect(markdown).toContain('**APPROVE**');
+
+    const out = join(mkdtempSync(join(tmpdir(), 'acr-export-')), 'room.md');
+    const capture = new Capture();
+    const toFile = await rooms({
+      subcommand: 'export',
+      id: summary.roomId,
+      out,
+      cwd: dir,
+      store,
+      renderer: new Renderer({ color: false, write: capture.write }),
+    });
+    expect(toFile).toBe(EXIT.ok);
+    expect(readFileSync(out, 'utf8')).toBe(markdown);
+    expect(capture.text).toContain(`wrote ${out}`);
+    rmSync(out, { force: true });
   });
 
   it('rejects an unknown subcommand and a missing id', async () => {

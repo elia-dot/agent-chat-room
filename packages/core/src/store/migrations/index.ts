@@ -101,9 +101,19 @@ ALTER TABLE rooms ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE rooms ADD COLUMN next_speaker TEXT;
 `;
 
+/**
+ * M3 gives a room somewhere to remember the pull request "Open PR" opened, so the button
+ * turns into a link that survives a reload. Additive and defaulted, so an M2 database opens
+ * without touching it – the same rule `002_interactivity` follows.
+ */
+const M3 = `
+ALTER TABLE rooms ADD COLUMN pr_url TEXT;
+`;
+
 export const migrations: readonly Migration[] = [
   { version: 1, name: '001_init', sql: INIT },
   { version: 2, name: '002_interactivity', sql: INTERACTIVITY },
+  { version: 3, name: '003_m3', sql: M3 },
 ] as const;
 
 export const LATEST_VERSION: number = migrations.reduce((max, m) => Math.max(max, m.version), 0);

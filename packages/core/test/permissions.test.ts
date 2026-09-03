@@ -5,6 +5,7 @@ import {
   canWrite,
   claudePermissionArgs,
   codexPermissionArgs,
+  cursorPermissionArgs,
   isPermission,
 } from '../src/permissions.js';
 
@@ -13,6 +14,7 @@ describe('the permission table', () => {
     for (const level of PERMISSION_LEVELS) {
       expect(claudePermissionArgs(level).length).toBeGreaterThan(0);
       expect(codexPermissionArgs(level).length).toBeGreaterThan(0);
+      expect(cursorPermissionArgs(level).length).toBeGreaterThan(0);
     }
   });
 
@@ -20,6 +22,18 @@ describe('the permission table', () => {
     expect(claudePermissionArgs('read-only')).not.toContain('acceptEdits');
     expect(claudePermissionArgs('read-only')).not.toContain('bypassPermissions');
     expect(codexPermissionArgs('read-only')).toEqual(['-s', 'read-only']);
+    // PLAN.md section 4.1, confirmed by a live probe against cursor-agent 2026.07.23: a
+    // turn in `ask` mode refuses to create a file and its shell calls come back denied.
+    expect(cursorPermissionArgs('read-only')).toEqual([
+      '--mode',
+      'ask',
+      '--sandbox',
+      'enabled',
+      '--trust',
+    ]);
+    expect(cursorPermissionArgs('read-only')).not.toContain('--force');
+    expect(cursorPermissionArgs('edits')).not.toContain('--force');
+    expect(cursorPermissionArgs('full')).toContain('--force');
     expect(canWrite('read-only')).toBe(false);
     expect(canWrite('edits')).toBe(true);
     expect(canWrite('full')).toBe(true);

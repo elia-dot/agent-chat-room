@@ -44,6 +44,15 @@ export function locksDir(): string {
   return join(configDir(), 'locks');
 }
 
+/**
+ * The per-room lock (see `engine/lock.ts`). Separate from the per-repo write lock: that one
+ * protects a working tree from two writers, this one protects a room *row* from two engines
+ * interleaving state writes – which is what the README used to warn about.
+ */
+export function roomLockPath(roomId: string): string {
+  return join(locksDir(), `room-${roomId}.lock`);
+}
+
 /** Overflow storage for diffs too large to keep in a SQLite row. */
 export function diffsDir(): string {
   return join(configDir(), 'diffs');

@@ -18,6 +18,9 @@ export {
   credentialPresent,
 } from './detect.js';
 export * as git from './git.js';
+export * as gh from './gh.js';
+export { roomToMarkdown } from './export.js';
+export type { RoomExportInput } from './export.js';
 export * from './config.js';
 export * from './worktree.js';
 export * from './store/types.js';
@@ -31,7 +34,13 @@ export type {
 } from './store/rooms.js';
 export { openDb, migrate, schemaVersion, LATEST_VERSION, migrations } from './store/db.js';
 export type { Db, Migration, OpenDbOptions } from './store/db.js';
-export { RoomEngine, EngineError, deriveTitle } from './engine/room.js';
+export {
+  RoomEngine,
+  EngineError,
+  deriveTitle,
+  assertRoster,
+  BRAINSTORM_ROUNDS,
+} from './engine/room.js';
 export type {
   CreateRoomInput,
   PostUserMessageOptions,
@@ -50,6 +59,8 @@ export { TurnStream } from './engine/events.js';
 export type { EngineEvent, EngineEventSink } from './engine/events.js';
 export {
   acquireRepoLock,
+  acquireRoomLock,
+  acquireFileLock,
   withRepoLock,
   lockPathFor,
   readLockFile,

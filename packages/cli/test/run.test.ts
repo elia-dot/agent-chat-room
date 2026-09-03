@@ -365,4 +365,51 @@ describe('acr run, driving the room engine', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('runs a brainstorm room and exits 0, because a proposal is success', async () => {
+    const dir = repo();
+    process.env.ACR_ECHO_SCRIPT = writeEchoScript({
+      turns: [
+        { when: { round: 1 }, text: 'split by period' },
+        { when: { round: 1 }, text: 'split by tier' },
+        { when: { round: 2 }, text: 'tiers, on reflection' },
+        { when: { round: 2 }, text: 'agreed' },
+        { when: { round: 3 }, text: 'Proposed task: split by tier.' },
+      ],
+    });
+    const capture = new Capture();
+    const summary = await run({
+      task: 'How should we restructure pricing?',
+      cwd: dir,
+      agents: ['echo', 'echo'],
+      mode: 'brainstorm',
+      timeoutMs: 5000,
+      store,
+      renderer: new Renderer({ color: false, write: capture.write }),
+    });
+
+    expect(summary.mode).toBe('brainstorm');
+    expect(summary.state).toBe('needs-you');
+    // Exit 3 would tell a script the reviewers refused; a brainstorm has no reviewers.
+    expect(summary.exitCode).toBe(EXIT.ok);
+    expect(summary.rounds).toBe(3);
+
+    const transcript = capture.text;
+    expect(transcript).toContain('---- round 1: everyone answers ----');
+    expect(transcript).toContain('---- round 3: the moderator merges ----');
+    expect(transcript).toContain('PROPOSED');
+    // No reviewers, so no complaint about a missing verdict block.
+    expect(transcript).not.toContain('no verdict');
+  });
+
+  it('applies a per-runtime model map to the roster', async () => {
+    const dir = repo();
+    const { promise } = scriptedRun(
+      dir,
+      [workerTurn(1, 'done', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))],
+      { models: { echo: 'opus' } },
+    );
+    const summary = await promise;
+    expect(store.listParticipants(summary.roomId).map((p) => p.model)).toEqual(['opus', 'opus']);
+  });
 });

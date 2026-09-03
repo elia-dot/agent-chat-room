@@ -4,11 +4,14 @@ import { basename, dirname } from 'node:path';
 
 import { adapters as defaultAdapters } from '../adapters/index.js';
 import { loadRepoConfig, resolveRoomDefaults } from '../config.js';
+import type { CreatePrResult, GhRunner } from '../gh.js';
+import { createPr, detectGh } from '../gh.js';
 import * as git from '../git.js';
 import { diffPath as diffSpillPath, turnLogPath } from '../paths.js';
 import { canWrite } from '../permissions.js';
 import type { PromptMessage } from '../prompt.js';
 import { DEFAULT_MAX_INLINE_DIFF_BYTES, buildTurnPrompt } from '../prompt.js';
+import type { BrainstormPhase, Role } from '../roles.js';
 import { roleInstructions } from '../roles.js';
 import type { RoomStore } from '../store/rooms.js';
 import type { Message, Participant, Room, RoomMode, RoomState } from '../store/types.js';
@@ -25,7 +28,7 @@ import {
 import type { EngineEvent, EngineEventSink } from './events.js';
 import { TurnStream } from './events.js';
 import type { AcquireLockOptions, LockHandle } from './lock.js';
-import { acquireRepoLock } from './lock.js';
+import { acquireRepoLock, acquireRoomLock } from './lock.js';
 import { assertTransition, isTerminal } from './state.js';
 
 /** Something the human did wrong, or something about the repo the engine will not guess at. */
@@ -65,6 +68,7 @@ export interface CreateRoomInput {
 export interface RoomOutcome {
   roomId: string;
   state: RoomState;
+  mode: RoomMode;
   round: number;
   approved: boolean;
   /** The loop stopped because the human held it, not because the room is finished. */
@@ -98,6 +102,83 @@ interface ReviewOutcome {
 }
 
 const DEFAULT_TIMEOUT_MS = 1800_000;
+
+/**
+ * Brainstorm mode is exactly three rounds (PLAN.md section 3): answer, react, merge. It is
+ * a fixed shape rather than a limit, so `maxRounds` on a brainstorm room is this and the
+ * new-room dialog hides the field.
+ */
+export const BRAINSTORM_ROUNDS = 3;
+
+const BRAINSTORM_PHASES: Record<number, BrainstormPhase> = {
+  1: 'answer',
+  2: 'react',
+  3: 'merge',
+};
+
+/** How long to wait for another process's room lock before giving up. */
+const ROOM_LOCK_TIMEOUT_MS = 2000;
+
+/**
+ * The roster rules, in one place, checked on creation *and* on every edit.
+ *
+ * The single-writer rule (PLAN.md section 3) is the one invariant that protects the
+ * human's repo, so it is checked against the roster rather than trusted from the flag
+ * mapping – and a role swap has to go through the same gate a fresh room does.
+ */
+export function assertRoster(
+  participants: { runtime: string; role: Role; permission: Permission }[],
+  mode: RoomMode,
+): void {
+  if (mode === 'brainstorm') {
+    const moderators = participants.filter((p) => p.role === 'moderator');
+    if (moderators.length !== 1) {
+      throw new EngineError(
+        `a brainstorm room needs exactly one moderator, got ${moderators.length}`,
+      );
+    }
+    const writer = participants.find((p) => canWrite(p.permission));
+    if (writer) {
+      throw new EngineError(
+        `nobody edits in a brainstorm room – ${writer.runtime} has "${writer.permission}"`,
+      );
+    }
+    const stray = participants.find((p) => p.role !== 'moderator' && p.role !== 'reviewer');
+    if (stray) {
+      throw new EngineError(
+        `a brainstorm room has no "${stray.role}" – only reviewers and one moderator`,
+      );
+    }
+    return;
+  }
+
+  const workers = participants.filter((p) => p.role === 'worker');
+  if (workers.length !== 1) {
+    throw new EngineError(`a build-review room needs exactly one worker, got ${workers.length}`);
+  }
+  const worker = workers[0]!;
+  if (!canWrite(worker.permission)) {
+    throw new EngineError(`the worker needs a writing permission, got "${worker.permission}"`);
+  }
+  const reviewers = participants.filter((p) => p.role !== 'worker');
+  if (reviewers.length === 0) {
+    throw new EngineError(
+      `a build-review room needs a worker and at least one reviewer, e.g. --agents claude,codex`,
+    );
+  }
+  for (const reviewer of reviewers) {
+    if (reviewer.role !== 'reviewer') {
+      throw new EngineError(
+        `a build-review room has no "${reviewer.role}" – only worker and reviewers`,
+      );
+    }
+    if (canWrite(reviewer.permission)) {
+      throw new EngineError(
+        `reviewers must be read-only – only the worker may edit (${reviewer.runtime} has "${reviewer.permission}")`,
+      );
+    }
+  }
+}
 
 /**
  * The room engine: the round loop from PLAN.md section 3, persisted after every transition.
@@ -187,13 +268,7 @@ export class RoomEngine {
       ...(input.models ? { models: input.models } : {}),
     });
 
-    const workerId = settings.agents[0];
-    const reviewerIds = settings.agents.slice(1);
-    if (!workerId || reviewerIds.length === 0) {
-      throw new EngineError(
-        `a build-review room needs a worker and at least one reviewer, e.g. --agents claude,codex`,
-      );
-    }
+    const mode: RoomMode = input.mode ?? 'build-review';
     const registry = opts.adapters ?? defaultAdapters;
     for (const id of settings.agents) {
       if (!registry[id]) {
@@ -205,16 +280,37 @@ export class RoomEngine {
 
     const workerPermission = input.workerPermission ?? settings.workerPermission;
     const reviewerPermission = input.reviewerPermission ?? settings.reviewerPermission;
-    // The single-writer rule (PLAN.md section 3) is checked against the roster rather than
-    // trusted from the flag mapping, because it is the one invariant that protects the repo.
-    if (!canWrite(workerPermission)) {
-      throw new EngineError(`the worker needs a writing permission, got "${workerPermission}"`);
-    }
-    if (canWrite(reviewerPermission)) {
+
+    // The roster, as rows, before anything is written: `assertRoster` is the gate both
+    // creation and `setParticipant` go through, so the rules cannot be true of one and not
+    // the other. In a brainstorm the *last* runtime moderates (the first builds in a
+    // build-review room, and the moderator is the one who speaks last).
+    const roster = settings.agents.map((runtime, index) => {
+      const brainstormModerator = mode === 'brainstorm' && index === settings.agents.length - 1;
+      const role: Role = brainstormModerator
+        ? 'moderator'
+        : mode === 'brainstorm' || index > 0
+          ? 'reviewer'
+          : 'worker';
+      return {
+        runtime,
+        role,
+        permission:
+          mode === 'brainstorm' || role !== 'worker' ? reviewerPermission : workerPermission,
+        model:
+          (role === 'worker' ? input.modelWorker : input.modelReviewer) ??
+          settings.models[runtime] ??
+          null,
+      };
+    });
+    if (settings.agents.length < 2) {
       throw new EngineError(
-        `reviewers must be read-only – only the worker may edit (got "${reviewerPermission}")`,
+        mode === 'brainstorm'
+          ? 'a brainstorm room needs at least two participants, e.g. --agents claude,codex'
+          : 'a build-review room needs a worker and at least one reviewer, e.g. --agents claude,codex',
       );
     }
+    assertRoster(roster, mode);
 
     const baseBranch = await git.currentBranch(repoRoot);
     const title = input.title?.trim() || deriveTitle(task, repoRoot);
@@ -246,32 +342,18 @@ export class RoomEngine {
       slug,
       title,
       task,
-      mode: input.mode ?? 'build-review',
+      mode,
       repoRoot,
       baseBranch,
       roomBranch,
       baseSha,
       worktreePath,
-      maxRounds: settings.rounds,
+      // A brainstorm is three fixed phases, not a loop with a budget.
+      maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : settings.rounds,
     });
 
-    opts.store.addParticipant({
-      roomId: room.id,
-      runtime: workerId,
-      role: 'worker',
-      permission: workerPermission,
-      model: input.modelWorker ?? settings.models[workerId] ?? null,
-      orderIndex: 0,
-    });
-    reviewerIds.forEach((runtime, index) => {
-      opts.store.addParticipant({
-        roomId: room.id,
-        runtime,
-        role: 'reviewer',
-        permission: reviewerPermission,
-        model: input.modelReviewer ?? settings.models[runtime] ?? null,
-        orderIndex: index + 1,
-      });
+    roster.forEach((participant, index) => {
+      opts.store.addParticipant({ roomId: room.id, ...participant, orderIndex: index });
     });
 
     opts.store.touchRepo(repoRoot, repoConfig.config);
@@ -349,13 +431,38 @@ export class RoomEngine {
 
   // --- the loop ------------------------------------------------------------
 
-  /** Run rounds until the room approves, needs the human, is paused, or is stopped. */
+  /**
+   * Run rounds until the room approves, needs the human, is paused, or is stopped.
+   *
+   * The whole loop runs under the room lock. The per-repo write lock stops two engines
+   * corrupting one working tree; it does nothing about two engines writing state for the
+   * same room, which is what happens when a terminal `acr run --room X` is pointed at a
+   * room the server is already driving. That fails fast here instead of interleaving.
+   */
   async run(opts: RunOptions = {}): Promise<RoomOutcome> {
     if (this.roomRow.state === 'approved') return this.outcome();
 
+    const roomLock = await acquireRoomLock(this.roomRow.id, {
+      timeoutMs: ROOM_LOCK_TIMEOUT_MS,
+      pollMs: 100,
+    }).catch((err: unknown) => {
+      throw new EngineError(
+        `${err instanceof Error ? err.message : String(err)}. Another acr process is driving this room; stop it, or use that one.`,
+      );
+    });
+
+    try {
+      return await this.runLocked(opts);
+    } finally {
+      roomLock.release();
+    }
+  }
+
+  private async runLocked(opts: RunOptions): Promise<RoomOutcome> {
     this.stopping = false;
     this.stopReason = undefined;
     if (opts.directTurn) return await this.runDirectTurn(opts.directTurn);
+    if (this.roomRow.mode === 'brainstorm') return await this.runBrainstormRounds();
 
     let lastError: string | undefined;
     let commit: string | undefined;
@@ -562,6 +669,302 @@ export class RoomEngine {
     });
   }
 
+  // --- brainstorm ----------------------------------------------------------
+
+  /**
+   * The three phases from PLAN.md section 3, mapped onto the round counter so the store,
+   * the state machine, the WebSocket and the transcript all keep working unchanged:
+   *
+   *   round 1  everyone answers, in parallel, read-only
+   *   round 2  everyone reacts to the others' answers
+   *   round 3  the moderator writes the merged proposal
+   *
+   * Nobody edits, so there is no write lock to take, no diff to capture, no round to commit
+   * and no verdict to parse. The room ends in `needs-you` with a proposal – for a
+   * brainstorm that is success, not a stall.
+   */
+  private async runBrainstormRounds(): Promise<RoomOutcome> {
+    let lastError: string | undefined;
+
+    for (;;) {
+      if (this.stopping) {
+        this.setState('stopped');
+        break;
+      }
+      if (this.roomRow.paused) {
+        this.settle();
+        break;
+      }
+      const round = this.roomRow.round + 1;
+      if (round > BRAINSTORM_ROUNDS) {
+        this.system('this brainstorm has already finished all three phases.');
+        this.setState('needs-you');
+        break;
+      }
+
+      const result = await this.runBrainstormRound(round);
+      if (result.error) lastError = result.error;
+      if (result.done) break;
+    }
+
+    return this.outcome(lastError ? { error: lastError } : {});
+  }
+
+  private async runBrainstormRound(round: number): Promise<{ done: boolean; error?: string }> {
+    const phase = BRAINSTORM_PHASES[round] ?? 'merge';
+    this.roomRow = this.store.updateRoom(this.roomRow.id, { round });
+    // A brainstorm stays in `running` for all three rounds, so `setState` – which is a
+    // no-op on an unchanged state – would only announce the first one. Everything that
+    // renders round boundaries reads `room.state`, so each round says so itself.
+    const stateChanges = this.roomRow.state !== 'running';
+    this.setState('running');
+    if (!stateChanges) {
+      this.emit({ type: 'room.state', roomId: this.roomRow.id, state: 'running', round });
+    }
+
+    const roster = this.participants;
+    const speakers = phase === 'merge' ? roster.filter((p) => p.role === 'moderator') : roster;
+    if (speakers.length === 0) {
+      const error = 'this brainstorm room has no moderator to write the proposal';
+      this.system(error, round);
+      this.setState('needs-you');
+      return { done: true, error };
+    }
+
+    this.system(
+      phase === 'answer'
+        ? `round 1: everyone answers, in parallel and read-only.`
+        : phase === 'react'
+          ? `round 2: everyone reacts to the other answers.`
+          : `round 3: ${speakers[0]!.runtime} writes the merged proposal.`,
+      round,
+    );
+
+    const cwd = this.workdir();
+    // Every speaker's unseen list is computed before any turn runs, so a round-1 answer
+    // cannot leak into another round-1 prompt just because it finished first.
+    const requests = speakers.map((participant) => ({
+      participant,
+      newMessages: this.unseenFor(participant),
+      watermark: this.store.latestMessageId(this.roomRow.id),
+    }));
+
+    const results = await Promise.all(
+      requests.map(async ({ participant, newMessages, watermark }) => {
+        const turn = await this.runParticipantTurn(participant, {
+          round,
+          cwd,
+          phase,
+          newMessages,
+          watermark,
+        });
+        if (turn.result.ok) this.postTurnMessage(participant, turn, round, null);
+        return { participant, result: turn.result };
+      }),
+    );
+
+    const failed = results.filter((r) => !r.result.ok);
+    for (const { participant, result } of failed) {
+      this.system(
+        `${participant.runtime}'s turn failed: ${result.error ?? 'unknown error'}`,
+        round,
+      );
+    }
+
+    if (this.stopping) {
+      this.setState('stopped');
+      return { done: true };
+    }
+    if (failed.length === results.length) {
+      const error = failed[0]?.result.error ?? 'every turn in this round failed';
+      this.setState('needs-you');
+      return { done: true, error };
+    }
+
+    if (phase === 'merge') {
+      this.system('the moderator has proposed. Accept it, or promote it into a build room.', round);
+      this.setState('needs-you');
+      return { done: true };
+    }
+    return { done: false };
+  }
+
+  /** The moderator's merged proposal, or undefined while the room has not produced one. */
+  proposal(): Message | undefined {
+    const moderators = new Set(
+      this.participants.filter((p) => p.role === 'moderator').map((p) => p.id),
+    );
+    const written = this.messages.filter(
+      (m) => m.kind === 'agent' && m.participantId !== null && moderators.has(m.participantId),
+    );
+    return written[written.length - 1];
+  }
+
+  // --- roster, commit and PR ------------------------------------------------
+
+  /**
+   * Change one participant's role or model mid-room (PLAN.md section 3: "swap roles between
+   * rounds without losing sessions").
+   *
+   * Refused while a turn is in flight: the permission a child was spawned with is baked into
+   * that process, so a swap mid-turn would be a lie. Promoting a reviewer *swaps* – the old
+   * worker drops to reviewer in the same call – so the single-writer rule is never briefly
+   * violated. Sessions are kept, which is the whole point; `runParticipantTurn` re-announces
+   * the new role in the next prompt, because Codex and Cursor only see role instructions on
+   * a session's first turn.
+   */
+  setParticipant(runtime: string, patch: { role?: Role; model?: string | null }): Participant[] {
+    const room = this.reload();
+    if (room.state === 'running' || room.state === 'waiting-reviews') {
+      throw new EngineError(
+        `${runtime} is mid-round. Pause or stop the room before changing the roster.`,
+      );
+    }
+
+    const roster = this.participants;
+    const target = roster.find((p) => p.runtime === runtime);
+    if (!target) {
+      throw new EngineError(
+        `nobody called "${runtime}" is in this room. Try: ${roster.map((p) => p.runtime).join(', ')}`,
+      );
+    }
+    if (patch.role === undefined && patch.model === undefined) {
+      throw new EngineError('nothing to change: pass a role, a model, or both');
+    }
+
+    const workerPermission = roster.find((p) => p.role === 'worker')?.permission ?? 'edits';
+    const next: Participant[] = roster.map((p) => {
+      if (p.id === target.id) {
+        const role = patch.role ?? p.role;
+        return {
+          ...p,
+          role,
+          permission: role === 'worker' ? workerPermission : 'read-only',
+          model: patch.model === undefined ? p.model : patch.model || null,
+        };
+      }
+      // Promoting somebody else to worker demotes the incumbent in the same step.
+      if (patch.role === 'worker' && p.role === 'worker') {
+        return { ...p, role: 'reviewer', permission: 'read-only' };
+      }
+      return p;
+    });
+    assertRoster(next, room.mode);
+
+    for (const participant of next) {
+      const before = roster.find((p) => p.id === participant.id)!;
+      if (
+        before.role === participant.role &&
+        before.permission === participant.permission &&
+        before.model === participant.model
+      ) {
+        continue;
+      }
+      this.store.updateParticipant(participant.id, {
+        role: participant.role,
+        permission: participant.permission,
+        model: participant.model,
+      });
+      this.system(
+        `${participant.runtime} is now ${participant.role} (${participant.permission})` +
+          `${participant.model ? ` on ${participant.model}` : ''}.`,
+      );
+    }
+
+    const updated = this.participants;
+    this.emit({ type: 'room.roster', roomId: room.id, participants: updated });
+    return updated;
+  }
+
+  /**
+   * Commit whatever is in the room's working tree, on demand.
+   *
+   * The loop already commits an approved round; this is for the common case of a
+   * `needs-you` room whose last round is real work sitting uncommitted.
+   */
+  async commit(message?: string): Promise<{ ok: boolean; sha?: string; error?: string }> {
+    const room = this.reload();
+    if (room.state === 'running' || room.state === 'waiting-reviews') {
+      throw new EngineError('a turn is in flight. Pause or stop the room before committing.');
+    }
+    const subject = message?.trim() || commitSubject(room.title);
+    const result = await git.commitAll(this.workdir(), subject, `Room: ${room.id}`);
+
+    if (result.ok) {
+      this.system(`committed ${result.shortSha} on ${room.roomBranch}: ${subject}`);
+      return { ok: true, ...(result.shortSha ? { sha: result.shortSha } : {}) };
+    }
+    if (result.empty) {
+      this.system('nothing to commit: git reported no staged changes.');
+      return { ok: false, error: 'nothing to commit' };
+    }
+    this.system(`could not commit: ${result.error ?? 'unknown error'}`);
+    return { ok: false, ...(result.error ? { error: result.error } : {}) };
+  }
+
+  /**
+   * Push the room branch and open a pull request.
+   *
+   * This is the only thing in the project that leaves the machine, so it happens exactly
+   * once per explicit request and never implicitly: the push and the resulting url both go
+   * into the transcript, and a repo with no remote is refused rather than half-done.
+   */
+  async openPr(
+    opts: { title?: string; body?: string; remote?: string; draft?: boolean; gh?: GhRunner } = {},
+  ): Promise<CreatePrResult> {
+    const room = this.reload();
+    if (room.state === 'running' || room.state === 'waiting-reviews') {
+      throw new EngineError('a turn is in flight. Pause or stop the room before opening a PR.');
+    }
+    if (room.roomBranch === room.baseBranch) {
+      throw new EngineError(
+        'this room ran in your checkout rather than on a room branch, so there is nothing to open a PR from.',
+      );
+    }
+
+    const remotes = await git.remotes(room.repoRoot);
+    const remote = opts.remote ?? (remotes.includes('origin') ? 'origin' : remotes[0]);
+    if (!remote) {
+      throw new EngineError(`${room.repoRoot} has no git remote, so there is nowhere to push.`);
+    }
+    const gh = await detectGh();
+    if (!gh.installed) {
+      throw new EngineError(gh.note ?? '`gh` is not installed');
+    }
+
+    const cwd = this.workdir();
+    this.system(`pushing ${room.roomBranch} to ${remote}…`);
+    const pushed = await git.push(cwd, remote, room.roomBranch);
+    if (!pushed.ok) {
+      this.system(`push failed: ${pushed.error ?? 'unknown error'}`);
+      return { ok: false, ...(pushed.error ? { error: pushed.error } : {}) };
+    }
+
+    const title = opts.title?.trim() || commitSubject(room.title);
+    const result = await createPr(
+      {
+        cwd,
+        base: room.baseBranch,
+        head: room.roomBranch,
+        title,
+        body: opts.body ?? prBody(room),
+        ...(opts.draft ? { draft: true } : {}),
+      },
+      // `undefined` falls through to the real `gh`; tests always inject a fake.
+      opts.gh,
+    );
+
+    if (result.ok && result.url) {
+      this.roomRow = this.store.updateRoom(room.id, { prUrl: result.url });
+      this.system(`opened ${result.url}`);
+    } else if (result.ok) {
+      this.system(`gh reported success but printed no url.`);
+    } else {
+      this.system(`could not open a pull request: ${result.error ?? 'unknown error'}`);
+    }
+    return result;
+  }
+
   private async runRound(
     round: number,
   ): Promise<{ done: boolean; error?: string; commit?: string }> {
@@ -751,17 +1154,19 @@ export class RoomEngine {
       diffFile?: string;
       newMessages?: PromptMessage[];
       watermark?: string | null;
+      phase?: BrainstormPhase;
     },
   ): Promise<{ result: TurnResult; stream: TurnStream; messageId: string }> {
     const adapter = this.registry[participant.runtime];
     if (!adapter) throw new EngineError(`unknown runtime "${participant.runtime}"`);
 
     const room = this.roomRow;
-    const role = participant.role === 'worker' ? 'worker' : 'reviewer';
+    const role: Role = participant.role === 'owner' ? 'reviewer' : participant.role;
     const newMessages = ctx.newMessages ?? this.unseenFor(participant);
     const watermark = ctx.watermark ?? this.store.latestMessageId(room.id);
     const messageId = randomUUID();
     const turnId = randomUUID();
+    const roleChanged = this.roleChangeNotice(participant, role, ctx.round, ctx.phase);
 
     const prompt = buildTurnPrompt({
       runtime: participant.runtime,
@@ -775,6 +1180,8 @@ export class RoomEngine {
       ...(ctx.diffStat ? { diffStat: ctx.diffStat } : {}),
       ...(ctx.diff ? { diff: ctx.diff } : {}),
       ...(ctx.diffFile ? { diffFile: ctx.diffFile } : {}),
+      ...(ctx.phase ? { phase: ctx.phase } : {}),
+      ...(roleChanged ? { roleChanged } : {}),
       ...(room.baseSha ? { diffCommand: `git diff ${room.baseSha}` } : {}),
     });
 
@@ -807,7 +1214,10 @@ export class RoomEngine {
         permission: participant.permission,
         timeoutMs: this.timeoutMs,
         turnId,
-        systemAppend: roleInstructions(role, { round: ctx.round }),
+        systemAppend: roleInstructions(role, {
+          round: ctx.round,
+          ...(ctx.phase ? { phase: ctx.phase } : {}),
+        }),
         ...(participant.sessionId ? { sessionId: participant.sessionId } : {}),
         ...(participant.model ? { model: participant.model } : {}),
       },
@@ -868,6 +1278,34 @@ export class RoomEngine {
   }
 
   // --- helpers -------------------------------------------------------------
+
+  /**
+   * The "## Your role has changed" block, when this participant's last turn was taken as
+   * something else.
+   *
+   * Claude gets its role through `--append-system-prompt` on every turn, so it would notice
+   * on its own. Codex and Cursor have no system-prompt flag: `buildCodexPrompt` and
+   * `buildCursorPrompt` prepend the instructions to the *first* prompt of a session and a
+   * resumed turn gets nothing, so a swapped participant would otherwise carry on with the
+   * rules it was given as its old self. The round is stated explicitly because the round
+   * counter does not reset on a swap – a reviewer promoted at round 3 inherits the
+   * no-moving-goalposts world as the worker.
+   */
+  private roleChangeNotice(
+    participant: Participant,
+    role: Role,
+    round: number,
+    phase?: BrainstormPhase,
+  ): string | undefined {
+    const previous = this.store.lastTurnFor(participant.id);
+    if (!previous || previous.role === role) return undefined;
+    return (
+      `You were the ${previous.role.toUpperCase()} in this room until now. You are the ` +
+      `${role.toUpperCase()} from this turn on, and this is round ${round}. Ignore the ` +
+      `instructions you were given as the ${previous.role}; these replace them:\n\n` +
+      roleInstructions(role, { round, ...(phase ? { phase } : {}) }).trim()
+    );
+  }
 
   private unseenFor(participant: Participant): PromptMessage[] {
     return this.store
@@ -958,6 +1396,7 @@ export class RoomEngine {
     return {
       roomId: this.roomRow.id,
       state: this.roomRow.state,
+      mode: this.roomRow.mode,
       round: this.roomRow.round,
       approved: this.roomRow.state === 'approved',
       paused: this.roomRow.paused,
@@ -987,4 +1426,16 @@ export function deriveTitle(task: string, root: string): string {
 function commitSubject(title: string): string {
   const subject = `acr: ${title.replace(/\s+/g, ' ').trim()}`;
   return subject.length > 72 ? `${subject.slice(0, 69)}...` : subject;
+}
+
+/** The PR body: the task, plus where it came from, so a reviewer knows what they are reading. */
+function prBody(room: Room): string {
+  return [
+    room.task.trim(),
+    '',
+    '---',
+    '',
+    `Opened by [agent-chat-room](https://github.com/elia-dot/agent-chat-room) from room \`${room.id}\``,
+    `(${room.round} round${room.round === 1 ? '' : 's'}, mode ${room.mode}).`,
+  ].join('\n');
 }

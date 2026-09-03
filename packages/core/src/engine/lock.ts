@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { locksDir } from '../paths.js';
+import { locksDir, roomLockPath } from '../paths.js';
 
 /**
  * The per-repo write lock from PLAN.md section 3 ("two agents editing at once").
@@ -35,7 +35,8 @@ export interface AcquireLockOptions {
 
 export interface LockFileContents {
   pid: number;
-  repoRoot: string;
+  /** What is held: a repo root for the write lock, `room:<id>` for the room lock. */
+  subject: string;
   acquiredAt: string;
 }
 
@@ -78,9 +79,12 @@ export async function acquireRepoLock(
     if (entry.waiters === 0 && queues.get(repoRoot) === entry) queues.delete(repoRoot);
   };
 
-  let file: LockFileRelease | undefined;
+  let file: LockHandle | undefined;
   try {
-    file = await acquireLockFile(repoRoot, opts);
+    file = await acquireFileLock(lockPathFor(repoRoot), repoRoot, {
+      ...opts,
+      label: `the write lock on ${repoRoot}`,
+    });
   } catch (err) {
     releaseInProcess();
     throw err;
@@ -108,15 +112,23 @@ export async function withRepoLock<T>(
   }
 }
 
-interface LockFileRelease {
-  release(): void;
+interface FileLockOptions extends AcquireLockOptions {
+  /** How the timeout message names what is held. */
+  label?: string;
 }
 
-async function acquireLockFile(
-  repoRoot: string,
-  opts: AcquireLockOptions,
-): Promise<LockFileRelease> {
-  const path = lockPathFor(repoRoot);
+/**
+ * The advisory lockfile on its own, without the in-process queue.
+ *
+ * Two callers need exactly this and nothing more: the per-repo write lock (which wraps it
+ * in a queue) and the per-room lock, where the in-process case is already impossible –
+ * the supervisor keeps one engine per room, so a second holder is always another process.
+ */
+export async function acquireFileLock(
+  path: string,
+  subject: string,
+  opts: FileLockOptions = {},
+): Promise<LockHandle> {
   const pollMs = opts.pollMs ?? 250;
   const deadline = opts.timeoutMs === undefined ? undefined : Date.now() + opts.timeoutMs;
   let announced = false;
@@ -128,7 +140,7 @@ async function acquireLockFile(
       const fd = openSync(path, 'wx');
       const contents: LockFileContents = {
         pid: process.pid,
-        repoRoot,
+        subject,
         acquiredAt: new Date().toISOString(),
       };
       writeSync(fd, JSON.stringify(contents));
@@ -143,8 +155,8 @@ async function acquireLockFile(
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-        // Cannot create the lockfile at all (read-only home, no permissions). The
-        // in-process queue still holds; refusing to run would be worse than proceeding.
+        // Cannot create the lockfile at all (a read-only home, no permissions). Refusing
+        // to run over that would be worse than proceeding without the advisory layer.
         return { release: () => undefined };
       }
     }
@@ -162,7 +174,7 @@ async function acquireLockFile(
     }
     if (deadline !== undefined && Date.now() >= deadline) {
       throw new Error(
-        `timed out waiting for the write lock on ${repoRoot} (held by pid ${holder.pid} since ${holder.acquiredAt})`,
+        `timed out waiting for ${opts.label ?? subject} (held by pid ${holder.pid} since ${holder.acquiredAt})`,
       );
     }
     await sleep(pollMs);
@@ -175,12 +187,17 @@ export function readLockFile(path: string): LockFileContents | undefined {
     if (typeof parsed.pid !== 'number') return undefined;
     return {
       pid: parsed.pid,
-      repoRoot: String(parsed.repoRoot ?? ''),
+      // `repoRoot` is what a pre-M3 acr wrote here; a lockfile it left behind still reads.
+      subject: text(parsed.subject) ?? text((parsed as { repoRoot?: unknown }).repoRoot) ?? '',
       acquiredAt: String(parsed.acquiredAt ?? ''),
     };
   } catch {
     return undefined;
   }
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 /** `kill(pid, 0)` is the portable "does this process exist" probe; it sends no signal. */
@@ -199,5 +216,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
     timer.unref?.();
+  });
+}
+
+/**
+ * The cross-process room lock.
+ *
+ * The write lock stops two engines corrupting one working tree, but two engines driving one
+ * *room* would still interleave state writes – a browser and a terminal `acr run` pointed at
+ * the same room id. So `RoomEngine.run()` holds this for the whole loop, and the second
+ * driver fails fast with a message naming the pid that has it instead of quietly racing.
+ */
+export function acquireRoomLock(
+  roomId: string,
+  opts: AcquireLockOptions = {},
+): Promise<LockHandle> {
+  return acquireFileLock(roomLockPath(roomId), `room:${roomId}`, {
+    ...opts,
+    label: `room ${roomId.slice(0, 8)}`,
   });
 }

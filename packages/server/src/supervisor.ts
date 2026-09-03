@@ -2,11 +2,14 @@ import type {
   CreateRoomInput,
   EngineEvent,
   Message,
+  Participant,
+  Role,
   Room,
   RoomEngineOptions,
   RoomOutcome,
   RoomStore,
   TurnEvent,
+  gh,
 } from '@agent-chat-room/core';
 import { EngineError, RoomEngine } from '@agent-chat-room/core';
 
@@ -36,6 +39,8 @@ export interface SupervisorOptions {
   /** Milliseconds to accumulate deltas before flushing one frame. 0 disables coalescing. */
   coalesceMs?: number;
   notify?: NotifyOptions | false;
+  /** Injected `gh` runner, so the PR route can be tested without a network or an account. */
+  gh?: gh.GhRunner;
 }
 
 interface Entry {
@@ -179,6 +184,7 @@ export class RoomSupervisor {
         return {
           roomId,
           state: entry.engine.room.state,
+          mode: entry.engine.room.mode,
           round: entry.engine.room.round,
           approved: false,
           paused: entry.engine.room.paused,
@@ -201,6 +207,77 @@ export class RoomSupervisor {
     const updated = this.opts.store.updateRoom(roomId, patch);
     const entry = this.rooms.get(roomId);
     return entry ? entry.engine.reload() : updated;
+  }
+
+  /**
+   * Swap a participant's role or change its model.
+   *
+   * Through the supervisor for the same reason `patch` is: a request about room X has to
+   * reach the *live* engine, which is the object that will build the next prompt.
+   */
+  async setParticipant(
+    roomId: string,
+    runtime: string,
+    patch: { role?: Role; model?: string | null },
+  ): Promise<Participant[]> {
+    const entry = await this.entry(roomId);
+    if (entry.running) {
+      throw new ConflictError(
+        `room ${roomId.slice(0, 8)} is running. Pause it before changing the roster.`,
+      );
+    }
+    return entry.engine.setParticipant(runtime, patch);
+  }
+
+  async commit(roomId: string, message?: string): Promise<{ room: Room; sha?: string }> {
+    const entry = await this.entry(roomId);
+    if (entry.running) throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
+    const result = await entry.engine.commit(message);
+    if (!result.ok) throw new EngineError(result.error ?? 'could not commit');
+    return { room: entry.engine.room, ...(result.sha ? { sha: result.sha } : {}) };
+  }
+
+  async openPr(
+    roomId: string,
+    opts: { title?: string; body?: string; remote?: string; draft?: boolean } = {},
+  ): Promise<{ room: Room; url?: string }> {
+    const entry = await this.entry(roomId);
+    if (entry.running) throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
+    const result = await entry.engine.openPr({
+      ...opts,
+      ...(this.opts.gh ? { gh: this.opts.gh } : {}),
+    });
+    if (!result.ok) throw new EngineError(result.error ?? 'could not open a pull request');
+    return { room: entry.engine.room, ...(result.url ? { url: result.url } : {}) };
+  }
+
+  /**
+   * Turn a finished brainstorm into a build room: the moderator's proposal becomes the task
+   * of a fresh `build-review` room on the same repo (PLAN.md section 3, "with one click").
+   */
+  async promote(
+    roomId: string,
+    opts: { agents?: string[]; title?: string } = {},
+  ): Promise<RoomEngine> {
+    const entry = await this.entry(roomId);
+    const source = entry.engine.room;
+    if (source.mode !== 'brainstorm') {
+      throw new EngineError('only a brainstorm room has a proposal to promote');
+    }
+    const proposal = entry.engine.proposal();
+    if (!proposal?.text.trim()) {
+      throw new ConflictError('this brainstorm has not produced a proposal yet');
+    }
+    // Default roster: the same runtimes, in the same order, but as a build room – so the
+    // moderator, who wrote the proposal, is the one that builds it.
+    const roster = entry.engine.participants.map((p) => p.runtime);
+    const agents = opts.agents ?? [...roster].reverse();
+    return await this.create({
+      task: proposal.text.trim(),
+      cwd: source.repoRoot,
+      agents,
+      title: opts.title ?? `build: ${source.title}`,
+    });
   }
 
   async pause(roomId: string): Promise<Room> {

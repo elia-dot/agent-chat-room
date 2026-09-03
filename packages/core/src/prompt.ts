@@ -1,4 +1,4 @@
-import type { Role } from './roles.js';
+import type { BrainstormPhase, Role } from './roles.js';
 import { roleInstructions } from './roles.js';
 
 /** One entry in the "new messages since your last turn" section. */
@@ -31,6 +31,15 @@ export interface BuildTurnPromptInput {
   diffFile?: string;
   /** Inline the diff below this size; above it, tell the agent to run git itself. */
   maxInlineDiffBytes?: number;
+  /**
+   * Rendered just before "## Your job now" when this participant's role changed since its
+   * last turn. Codex and Cursor only see role instructions on the first prompt of a session
+   * (their resume path has no system-prompt flag), so a swapped participant would otherwise
+   * carry on with the instructions it was given as something else.
+   */
+  roleChanged?: string;
+  /** Brainstorm phase, passed through to `roleInstructions`. */
+  phase?: BrainstormPhase;
 }
 
 export const DEFAULT_MAX_INLINE_DIFF_BYTES = 60 * 1024;
@@ -98,9 +107,15 @@ export function buildTurnPrompt(input: BuildTurnPromptInput): string {
     }
   }
 
+  if (input.roleChanged?.trim()) {
+    parts.push('');
+    parts.push('## Your role has changed');
+    parts.push(input.roleChanged.trim());
+  }
+
   parts.push('');
   parts.push('## Your job now');
-  parts.push(roleInstructions(input.role).trim());
+  parts.push(roleInstructions(input.role, input.phase ? { phase: input.phase } : {}).trim());
 
   return `${parts.join('\n').replace(/\n{3,}/g, '\n\n')}\n`;
 }

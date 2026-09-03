@@ -39,6 +39,7 @@ const room = (over: Partial<Room> = {}): Room => ({
   state: 'approved',
   round: 2,
   maxRounds: 4,
+  prUrl: null,
   createdAt: '2026-09-03T00:00:00.000Z',
   updatedAt: '2026-09-03T00:00:00.000Z',
   closedAt: null,
@@ -149,6 +150,7 @@ describe('Renderer', () => {
     r.outcome({
       roomId: 'r1',
       state: 'approved',
+      mode: 'build-review',
       round: 2,
       approved: true,
       paused: false,

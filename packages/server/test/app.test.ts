@@ -60,14 +60,44 @@ describe('the REST surface', () => {
 
     const runtimes = await h.app.inject({ url: '/api/runtimes' });
     expect(runtimes.statusCode).toBe(200);
-    const payload = runtimes.json<{ node: string; runtimes: { id: string }[] }>();
+    const payload = runtimes.json<{
+      node: string;
+      runtimes: { id: string }[];
+      gh: { installed: boolean };
+    }>();
     expect(payload.node).toBe(process.version);
     expect(payload.runtimes.map((r) => r.id)).toContain('claude');
+    expect(payload.runtimes.map((r) => r.id)).toContain('cursor');
+    // `gh` rides along so the browser can disable "Open PR" with a reason.
+    expect(typeof payload.gh.installed).toBe('boolean');
     for (const entry of payload.runtimes) {
       expect(entry).toHaveProperty('displayName');
       expect(entry).toHaveProperty('usable');
       expect(entry).toHaveProperty('installed');
     }
+  });
+
+  it('opens a brainstorm room, with a moderator last and nobody able to write', async () => {
+    const created = await createRoom({ mode: 'brainstorm', agents: ['echo', 'echo2', 'echo3'] });
+    expect(created.status).toBe(201);
+    expect(created.body.room.mode).toBe('brainstorm');
+    expect(created.body.participants.map((p) => p.role)).toEqual([
+      'reviewer',
+      'reviewer',
+      'moderator',
+    ]);
+  });
+
+  it('accepts a per-runtime model map on the create body', async () => {
+    const created = await createRoom({ models: { echo: 'opus', echo2: 'gpt-5.3-codex' } });
+    expect(created.status).toBe(201);
+    const models = await h.app.inject({ url: `/api/rooms/${created.body.room.id}` });
+    expect(
+      models.json<{ participants: { runtime: string; model: string | null }[] }>().participants,
+    ).toEqual([
+      expect.objectContaining({ runtime: 'echo', model: 'opus' }),
+      expect.objectContaining({ runtime: 'echo2', model: 'gpt-5.3-codex' }),
+    ]);
   });
 
   it('creates a room, lists it, and reads it back with its roster and transcript', async () => {
@@ -90,6 +120,9 @@ describe('the REST surface', () => {
     expect(detail.messages.map((m) => m.kind)).toEqual(['user']);
     expect(detail.live).toEqual([]);
     expect(detail.running).toBe(false);
+
+    // The default mode is unchanged, so an M2 client that never sends one still works.
+    expect(created.body.room.mode).toBe('build-review');
 
     // An id prefix resolves the same way `acr rooms show 3f2a` does.
     const byPrefix = await h.app.inject({

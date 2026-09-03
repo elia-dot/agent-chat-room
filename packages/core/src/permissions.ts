@@ -38,6 +38,24 @@ export function codexPermissionArgs(permission: Permission): string[] {
   }
 }
 
+/**
+ * Cursor Agent. Probed against cursor-agent 2026.07.23: `--mode ask` genuinely refuses to
+ * write – a turn asked to create a file answers "Ask mode is active … writing would be an
+ * edit" and no file appears – and it blocks shell commands outright, which is stronger than
+ * the sandbox flag alone. `--trust` is on every level because a headless turn has nobody to
+ * answer the "do you trust this workspace?" prompt.
+ */
+export function cursorPermissionArgs(permission: Permission): string[] {
+  switch (permission) {
+    case 'read-only':
+      return ['--mode', 'ask', '--sandbox', 'enabled', '--trust'];
+    case 'edits':
+      return ['--trust'];
+    case 'full':
+      return ['--force', '--trust'];
+  }
+}
+
 /** True when a permission level lets the runtime modify the working tree. */
 export function canWrite(permission: Permission): boolean {
   return permission !== 'read-only';

@@ -2,8 +2,14 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { acquireRepoLock, lockPathFor, processAlive, withRepoLock } from '../../src/engine/lock.js';
-import { locksDir } from '../../src/paths.js';
+import {
+  acquireRepoLock,
+  acquireRoomLock,
+  lockPathFor,
+  processAlive,
+  withRepoLock,
+} from '../../src/engine/lock.js';
+import { locksDir, roomLockPath } from '../../src/paths.js';
 import { useTempConfigDir } from '../helpers.js';
 
 let config: ReturnType<typeof useTempConfigDir>;
@@ -105,5 +111,52 @@ describe('the per-repo write lock', () => {
     expect(processAlive(2147483646)).toBe(false);
     expect(processAlive(0)).toBe(false);
     expect(processAlive(-1)).toBe(false);
+  });
+});
+
+describe('the cross-process room lock', () => {
+  it('refuses a second engine on the same room while the first holds it', async () => {
+    mkdirSync(locksDir(), { recursive: true });
+    // Our own pid is alive, so this looks exactly like another acr driving the room.
+    writeFileSync(
+      roomLockPath('room-busy'),
+      JSON.stringify({ pid: process.pid, subject: 'room:room-busy', acquiredAt: 'now' }),
+    );
+
+    await expect(acquireRoomLock('room-busy', { timeoutMs: 100, pollMs: 20 })).rejects.toThrow(
+      /timed out waiting for room room-bus/,
+    );
+  });
+
+  it('does not make two different rooms wait for each other', async () => {
+    const a = await acquireRoomLock('room-a', { timeoutMs: 500 });
+    const b = await acquireRoomLock('room-b', { timeoutMs: 500 });
+    expect(existsSync(roomLockPath('room-a'))).toBe(true);
+    a.release();
+    b.release();
+    expect(existsSync(roomLockPath('room-a'))).toBe(false);
+  });
+
+  it('reclaims a room lock whose holder is gone', async () => {
+    mkdirSync(locksDir(), { recursive: true });
+    writeFileSync(
+      roomLockPath('room-dead'),
+      JSON.stringify({ pid: 2147483646, subject: 'room:room-dead', acquiredAt: 'then' }),
+    );
+    const lock = await acquireRoomLock('room-dead', { timeoutMs: 2000 });
+    lock.release();
+    expect(existsSync(roomLockPath('room-dead'))).toBe(false);
+  });
+
+  it('still reads a lockfile written before the field was renamed', async () => {
+    mkdirSync(locksDir(), { recursive: true });
+    // Pre-M3 acr wrote `repoRoot`; a stale one of those must not become unreclaimable.
+    writeFileSync(
+      lockPathFor('/tmp/repo-old'),
+      JSON.stringify({ pid: 2147483646, repoRoot: '/tmp/repo-old', acquiredAt: 'then' }),
+    );
+    const lock = await acquireRepoLock('/tmp/repo-old', { timeoutMs: 2000 });
+    lock.release();
+    expect(existsSync(lockPathFor('/tmp/repo-old'))).toBe(false);
   });
 });

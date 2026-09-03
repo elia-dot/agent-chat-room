@@ -5,6 +5,7 @@ import type {
   Message,
   ParsedVerdict,
   Room,
+  RoomMode,
   RoomOutcome,
   RoomState,
   TurnEvent,
@@ -21,6 +22,13 @@ const RUNTIME_COLOR: Record<string, number> = {
 };
 
 const CSI = '\u001b[';
+
+/** What each brainstorm round is for, so the separator says more than a number. */
+const BRAINSTORM_ROUND_LABEL: Record<number, string> = {
+  1: 'everyone answers',
+  2: 'everyone reacts',
+  3: 'the moderator merges',
+};
 
 /** The status dots from PLAN.md section 5, in their terminal form. */
 const STATE_DOT: Record<RoomState, string> = {
@@ -50,11 +58,21 @@ export class Renderer {
   private atLineStart = true;
   /** The round whose separator has already been printed, so it is printed once. */
   private lastRound = 0;
+  /**
+   * The room's mode. A brainstorm has no reviewers and no verdicts, so "no verdict block"
+   * would be a complaint about a rule that does not apply to it.
+   */
+  private mode: RoomMode = 'build-review';
 
   constructor(opts: RendererOptions = {}) {
     this.color =
       opts.color ?? (process.stdout.isTTY === true && !process.env.NO_COLOR && !process.env.CI);
     this.write = opts.write ?? ((chunk) => void process.stdout.write(chunk));
+  }
+
+  /** Tell the renderer which room it is rendering. Affects round headers and verdicts. */
+  setMode(mode: RoomMode): void {
+    this.mode = mode;
   }
 
   /** 256-colour paint, which picocolors does not offer and the runtime palette needs. */
@@ -182,6 +200,8 @@ export class Renderer {
       return;
     }
     if (message.kind === 'user') return;
+    // Nobody reviews in a brainstorm, so there is no verdict to be missing.
+    if (this.mode === 'brainstorm') return;
     if (message.role === 'reviewer') {
       this.verdict(
         message.verdict
@@ -192,8 +212,12 @@ export class Renderer {
   }
 
   private roundSeparator(round: number): void {
+    const label =
+      this.mode === 'brainstorm' && BRAINSTORM_ROUND_LABEL[round]
+        ? `: ${BRAINSTORM_ROUND_LABEL[round]}`
+        : '';
     this.line();
-    this.line(this.dim(`---- round ${round} ----`));
+    this.line(this.dim(`---- round ${round}${label} ----`));
   }
 
   /** The closing line of a run: where the room ended up and what it produced. */
@@ -202,7 +226,11 @@ export class Renderer {
     const label =
       outcome.state === 'approved'
         ? this.paint(' APPROVED ', 42)
-        : this.paint(` ${outcome.state.toUpperCase()} `, 214);
+        : // A brainstorm that reached `needs-you` produced its proposal: that is the
+          // finish line, not a stall, so it should not read like one.
+          outcome.mode === 'brainstorm' && outcome.state === 'needs-you'
+          ? this.paint(' PROPOSED ', 42)
+          : this.paint(` ${outcome.state.toUpperCase()} `, 214);
     this.line(`${this.bold(label)} after ${outcome.round} round${outcome.round === 1 ? '' : 's'}`);
     if (outcome.commit) this.info(`  commit ${outcome.commit}`);
     if (outcome.changedFiles.length > 0) {

@@ -1,10 +1,12 @@
 import type { AgentAdapter, Detection } from '../types.js';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
+import { cursorAdapter } from './cursor.js';
 import { echoAdapter } from './echo.js';
 
 export { claudeAdapter, ClaudeParser, buildClaudeArgs } from './claude.js';
 export { codexAdapter, CodexParser, buildCodexArgs, buildCodexPrompt } from './codex.js';
+export { cursorAdapter, CursorParser, buildCursorArgs, buildCursorPrompt } from './cursor.js';
 export { echoAdapter, resetEchoAdapter, describeRequest } from './echo.js';
 export type { EchoScript, EchoTurn, EchoTurnSelector } from './echo.js';
 
@@ -18,11 +20,17 @@ export type { EchoScript, EchoTurn, EchoTurnSelector } from './echo.js';
 export const adapters: Record<string, AgentAdapter> = {
   [claudeAdapter.id]: claudeAdapter,
   [codexAdapter.id]: codexAdapter,
+  [cursorAdapter.id]: cursorAdapter,
   [echoAdapter.id]: echoAdapter,
 };
 
 /** Runtimes listed by `acr doctor`, in display order. */
-export const adapterList: AgentAdapter[] = [claudeAdapter, codexAdapter, echoAdapter];
+export const adapterList: AgentAdapter[] = [
+  claudeAdapter,
+  codexAdapter,
+  cursorAdapter,
+  echoAdapter,
+];
 
 export function getAdapter(id: string): AgentAdapter | undefined {
   return adapters[id];

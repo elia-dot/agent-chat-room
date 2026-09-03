@@ -1,4 +1,4 @@
-import { runtimeReport } from '@agent-chat-room/core';
+import { gh, runtimeReport } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -6,8 +6,12 @@ import type { FastifyInstance } from 'fastify';
  * --json` uses. Detection spawns nothing beyond `--version` and never reads a credential.
  */
 export function runtimeRoutes(app: FastifyInstance): void {
-  app.get('/api/runtimes', async () => ({
-    node: process.version,
-    runtimes: await runtimeReport(),
-  }));
+  app.get('/api/runtimes', async () => {
+    // `gh` rides along because "Open PR" is the one action that needs a tool the room
+    // engine does not: the browser disables the button with a reason instead of failing
+    // on click. Detected the same presence-only way, so it costs one `which` and a
+    // `--version`.
+    const [runtimes, ghDetection] = await Promise.all([runtimeReport(), gh.detectGh()]);
+    return { node: process.version, runtimes, gh: ghDetection };
+  });
 }

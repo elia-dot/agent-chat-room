@@ -1,5 +1,7 @@
+import { writeFileSync } from 'node:fs';
+
 import type { Message, Room, RoomStore as RoomStoreType } from '@agent-chat-room/core';
-import { RoomEngine, RoomStore, decisionLabel } from '@agent-chat-room/core';
+import { RoomEngine, RoomStore, decisionLabel, roomToMarkdown } from '@agent-chat-room/core';
 
 import { EXIT, type ExitCode } from '../exit.js';
 import { Renderer } from '../render.js';
@@ -14,6 +16,8 @@ export interface RoomsOptions {
   store?: RoomStoreType;
   /** Passed through to `run` when resuming. */
   timeoutMs?: number;
+  /** `export`: write the markdown here instead of to stdout. */
+  out?: string;
 }
 
 /**
@@ -37,9 +41,11 @@ export async function rooms(opts: RoomsOptions): Promise<ExitCode> {
         return await closeRoom(store, r, opts);
       case 'resume':
         return await resumeRoom(store, r, opts);
+      case 'export':
+        return exportRoom(store, r, opts);
       default:
         throw new UsageError(
-          `unknown rooms subcommand "${opts.subcommand}". Try: ls, show, resume, close.`,
+          `unknown rooms subcommand "${opts.subcommand}". Try: ls, show, export, resume, close.`,
         );
     }
   } finally {
@@ -117,6 +123,27 @@ async function resumeRoom(
   });
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   return summary.exitCode;
+}
+
+/**
+ * `acr rooms export <id>` – the room as markdown (PLAN.md section 4.3), from the same pure
+ * function the browser's Export button calls, so the two cannot disagree.
+ */
+function exportRoom(store: RoomStoreType, r: Renderer, opts: RoomsOptions): ExitCode {
+  const room = requireRoom(store, opts.id);
+  const markdown = roomToMarkdown({
+    room,
+    participants: store.listParticipants(room.id),
+    messages: store.listMessages(room.id),
+    turns: store.listTurns(room.id),
+  });
+  if (opts.out) {
+    writeFileSync(opts.out, markdown);
+    r.info(`wrote ${opts.out}`);
+    return EXIT.ok;
+  }
+  process.stdout.write(markdown);
+  return EXIT.ok;
 }
 
 function requireRoom(store: RoomStoreType, id: string | undefined): Room {
