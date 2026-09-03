@@ -47,7 +47,7 @@ describe('the echo adapter', () => {
     ).done;
     expect(first.text).toBe('first');
     expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('hello');
-    expect(one.events.map((e) => e.type)).toEqual(['started', 'file', 'done']);
+    expect(one.events.map((e) => e.type)).toEqual(['started', 'file', 'text', 'done']);
 
     const two = collect();
     const second = await echoAdapter.run(

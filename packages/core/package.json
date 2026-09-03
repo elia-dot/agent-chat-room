@@ -17,6 +17,7 @@
     "dist"
   ],
   "dependencies": {
+    "better-sqlite3": "^11.10.0",
     "zod": "^3.24.1"
   }
 }

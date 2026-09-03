@@ -5,8 +5,8 @@ import { echoAdapter } from './echo.js';
 
 export { claudeAdapter, ClaudeParser, buildClaudeArgs } from './claude.js';
 export { codexAdapter, CodexParser, buildCodexArgs, buildCodexPrompt } from './codex.js';
-export { echoAdapter, resetEchoAdapter } from './echo.js';
-export type { EchoScript, EchoTurn } from './echo.js';
+export { echoAdapter, resetEchoAdapter, describeRequest } from './echo.js';
+export type { EchoScript, EchoTurn, EchoTurnSelector } from './echo.js';
 
 /**
  * Every runtime `acr` knows about. Adding one is meant to be a single line here plus a file

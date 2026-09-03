@@ -21,3 +21,34 @@ export function turnsDir(): string {
 export function turnLogPath(turnId: string): string {
   return join(turnsDir(), `${turnId}.jsonl`);
 }
+
+/** The single SQLite file that holds every room. Migrated forward only. */
+export function dbPath(): string {
+  return join(configDir(), 'acr.db');
+}
+
+/**
+ * Room worktrees. Deliberately outside any repo: a worktree nested inside its own
+ * checkout shows up in `git status` and in every glob the agents run.
+ */
+export function worktreesDir(): string {
+  return join(configDir(), 'worktrees');
+}
+
+export function roomWorktreePath(roomId: string): string {
+  return join(worktreesDir(), roomId);
+}
+
+/** Advisory cross-process write locks, one file per repo. See `engine/lock.ts`. */
+export function locksDir(): string {
+  return join(configDir(), 'locks');
+}
+
+/** Overflow storage for diffs too large to keep in a SQLite row. */
+export function diffsDir(): string {
+  return join(configDir(), 'diffs');
+}
+
+export function diffPath(messageId: string): string {
+  return join(diffsDir(), `${messageId}.diff`);
+}

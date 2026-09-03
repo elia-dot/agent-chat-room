@@ -33,8 +33,8 @@ describe('acr argument handling', () => {
   it('documents the exit codes in --help', async () => {
     await main(['--help']);
     const help = out.join('');
-    expect(help).toContain('0  the reviewer approved');
-    expect(help).toContain('3  the reviewer did not approve');
+    expect(help).toContain('0  the reviewers approved');
+    expect(help).toContain('3  the reviewers did not approve');
   });
 
   it('prints a version', async () => {
@@ -62,12 +62,31 @@ describe('acr argument handling', () => {
     expect(err.join('')).toContain('--timeout');
   });
 
-  it('requires exactly two agents in M0', async () => {
+  it('needs a worker and at least one reviewer', async () => {
     expect(await main(['run', '--task', 'a', '--agents', 'claude'])).toBe(EXIT.usage);
-    expect(err.join('')).toContain('exactly two runtimes');
+    expect(err.join('')).toContain('at least one reviewer');
+  });
+
+  it('rejects a non-integer round count', async () => {
+    expect(await main(['run', '--task', 'a', '--rounds', 'lots'])).toBe(EXIT.usage);
+    expect(err.join('')).toContain('--rounds');
   });
 
   it('rejects an unknown flag rather than ignoring it', async () => {
-    expect(await main(['run', '--task', 'a', '--rounds', '4'])).toBe(EXIT.usage);
+    expect(await main(['run', '--task', 'a', '--frobnicate'])).toBe(EXIT.usage);
+  });
+
+  it('documents the M1 surface: rounds, worktrees, .acr.json and rooms', async () => {
+    await main(['--help']);
+    const help = out.join('');
+    expect(help).toContain('acr rooms ls | show <id> | resume <id> | close <id>');
+    expect(help).toContain('--rounds <n>');
+    expect(help).toContain('--no-worktree');
+    expect(help).toContain('.acr.json');
+  });
+
+  it('rejects an unknown rooms subcommand with the usage code', async () => {
+    expect(await main(['rooms', 'frobnicate'])).toBe(EXIT.usage);
+    expect(err.join('')).toContain('unknown rooms subcommand');
   });
 });

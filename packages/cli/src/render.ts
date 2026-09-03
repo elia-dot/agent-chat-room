@@ -1,6 +1,15 @@
 import pc from 'picocolors';
 
-import type { ParsedVerdict, TurnEvent, Usage } from '@agent-chat-room/core';
+import type {
+  EngineEvent,
+  Message,
+  ParsedVerdict,
+  Room,
+  RoomOutcome,
+  RoomState,
+  TurnEvent,
+  Usage,
+} from '@agent-chat-room/core';
 import { decisionLabel } from '@agent-chat-room/core';
 
 /** Runtime brand colours from PLAN.md section 5: Claude orange, Codex green, Cursor blue. */
@@ -12,6 +21,16 @@ const RUNTIME_COLOR: Record<string, number> = {
 };
 
 const CSI = '\u001b[';
+
+/** The status dots from PLAN.md section 5, in their terminal form. */
+const STATE_DOT: Record<RoomState, string> = {
+  idle: 'o',
+  running: '*',
+  'waiting-reviews': '*',
+  approved: '+',
+  'needs-you': '!',
+  stopped: 'x',
+};
 
 export interface RendererOptions {
   color?: boolean;
@@ -29,6 +48,8 @@ export class Renderer {
   private readonly color: boolean;
   private readonly write: (chunk: string) => void;
   private atLineStart = true;
+  /** The round whose separator has already been printed, so it is printed once. */
+  private lastRound = 0;
 
   constructor(opts: RendererOptions = {}) {
     this.color =
@@ -114,6 +135,107 @@ export class Renderer {
     this.line(this.bold(painted));
     for (const item of parsed.verdict.blocking) this.line(`  blocking: ${item}`);
     for (const item of parsed.verdict.nits) this.line(this.dim(`  nit: ${item}`));
+  }
+
+  // --- engine events -------------------------------------------------------
+
+  /**
+   * Render one `EngineEvent`. This is the same stream M2's WebSocket forwards to the web
+   * client, so the terminal and the browser are two views of one thing rather than two
+   * implementations of the same loop.
+   */
+  engineEvent(ev: EngineEvent): void {
+    switch (ev.type) {
+      case 'room.state':
+        if (ev.state === 'running' && ev.round > this.lastRound) {
+          this.lastRound = ev.round;
+          this.roundSeparator(ev.round);
+        }
+        if (ev.state === 'approved' || ev.state === 'needs-you' || ev.state === 'stopped') {
+          this.info(`  state: ${ev.state}`);
+        }
+        return;
+      case 'message.start':
+        this.header(ev.author, ev.role, ev.round);
+        return;
+      case 'message.delta':
+        if (ev.text.length === 0) return;
+        this.write(ev.text);
+        this.atLineStart = ev.text.endsWith('\n');
+        return;
+      case 'turn.activity':
+        this.event(ev.event);
+        return;
+      case 'message.done':
+        this.messageDone(ev.message);
+        return;
+    }
+  }
+
+  private messageDone(message: Message): void {
+    if (message.kind === 'system') {
+      this.ensureLineStart();
+      this.line(this.dim(`  -- ${message.text.split('\n')[0] ?? ''}`));
+      for (const extra of message.text.split('\n').slice(1)) {
+        if (extra.trim()) this.line(this.dim(`     ${extra}`));
+      }
+      return;
+    }
+    if (message.kind === 'user') return;
+    if (message.role === 'reviewer') {
+      this.verdict(
+        message.verdict
+          ? { ok: true, verdict: message.verdict, raw: '' }
+          : { ok: false, reason: 'no verdict block in the review' },
+      );
+    }
+  }
+
+  private roundSeparator(round: number): void {
+    this.line();
+    this.line(this.dim(`---- round ${round} ----`));
+  }
+
+  /** The closing line of a run: where the room ended up and what it produced. */
+  outcome(outcome: RoomOutcome): void {
+    this.line();
+    const label =
+      outcome.state === 'approved'
+        ? this.paint(' APPROVED ', 42)
+        : this.paint(` ${outcome.state.toUpperCase()} `, 214);
+    this.line(`${this.bold(label)} after ${outcome.round} round${outcome.round === 1 ? '' : 's'}`);
+    if (outcome.commit) this.info(`  commit ${outcome.commit}`);
+    if (outcome.changedFiles.length > 0) {
+      this.info(`  changed: ${outcome.changedFiles.join(', ')}`);
+    }
+    if (outcome.error) this.error(`  ${outcome.error}`);
+  }
+
+  /** One line per room in `acr rooms ls`. */
+  roomLine(room: Room): void {
+    const dot = STATE_DOT[room.state] ?? '?';
+    const id = room.id.slice(0, 8);
+    this.line(
+      `${dot} ${this.bold(id)}  ${room.title}  ${this.dim(
+        `${room.state} · round ${room.round}/${room.maxRounds} · ${room.roomBranch}`,
+      )}`,
+    );
+  }
+
+  /** One message in `acr rooms show`. */
+  transcriptMessage(message: Message): void {
+    if (message.kind === 'system') {
+      this.line(this.dim(`  -- ${message.text}`));
+      return;
+    }
+    this.header(message.author, message.role ?? message.kind, message.round);
+    this.line(message.text.trim());
+    if (message.activity.length > 0) {
+      this.info(`  activity: ${message.activity.length} events`);
+    }
+    if (message.verdict) {
+      this.verdict({ ok: true, verdict: message.verdict, raw: '' });
+    }
   }
 
   info(text: string): void {
