@@ -1,5 +1,5 @@
 import type { Message, Room } from '@agent-chat-room/core';
-import { EngineError, git } from '@agent-chat-room/core';
+import { EngineError, git, roomToMarkdown } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -11,14 +11,50 @@ const CreateRoomBody = z.object({
   cwd: z.string().min(1),
   agents: z.array(z.string().min(1)).min(2, 'a room needs a worker and at least one reviewer'),
   title: z.string().optional(),
+  mode: z.enum(['build-review', 'brainstorm']).optional(),
   maxRounds: z.number().int().positive().max(50).optional(),
   worktree: z.boolean().optional(),
   modelWorker: z.string().optional(),
   modelReviewer: z.string().optional(),
+  /** Per-runtime model override, the shape `.acr.json` and `--model claude=opus` produce. */
+  models: z.record(z.string()).optional(),
   allowDirty: z.boolean().optional(),
   /** Kick the loop off as part of creating the room, which is what the dialog does. */
   start: z.boolean().optional(),
 });
+
+const ParticipantBody = z
+  .object({
+    role: z.enum(['worker', 'reviewer', 'moderator']).optional(),
+    /** Empty string clears the override and falls back to the runtime's own default. */
+    model: z.string().optional(),
+  })
+  .refine((v) => v.role !== undefined || v.model !== undefined, {
+    message: 'nothing to change: pass a role, a model, or both',
+  });
+
+const CommitBody = z
+  .object({ message: z.string().min(1).optional() })
+  .optional()
+  .default({});
+
+const PrBody = z
+  .object({
+    title: z.string().min(1).optional(),
+    body: z.string().optional(),
+    remote: z.string().min(1).optional(),
+    draft: z.boolean().optional(),
+  })
+  .optional()
+  .default({});
+
+const PromoteBody = z
+  .object({
+    agents: z.array(z.string().min(1)).min(2).optional(),
+    title: z.string().min(1).optional(),
+  })
+  .optional()
+  .default({});
 
 const MessageBody = z.object({
   text: z.string().min(1, 'a message needs some text'),
@@ -74,6 +110,8 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       cwd: body.cwd,
       agents: body.agents,
       ...(body.title ? { title: body.title } : {}),
+      ...(body.mode ? { mode: body.mode } : {}),
+      ...(body.models ? { models: body.models } : {}),
       ...(body.maxRounds ? { maxRounds: body.maxRounds } : {}),
       ...(body.worktree === undefined ? {} : { worktree: body.worktree }),
       ...(body.modelWorker ? { modelWorker: body.modelWorker } : {}),
@@ -171,6 +209,63 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
   app.post('/api/rooms/:id/close', async (request) => {
     const room = requireRoom(supervisor, request.params);
     return { room: await supervisor.close(room.id) };
+  });
+
+  /**
+   * The roster editor: role swap and model picker, which are the same operation – "change
+   * a participant of a live room" – so they are one route.
+   */
+  app.patch('/api/rooms/:id/participants/:participantId', async (request) => {
+    const room = requireRoom(supervisor, request.params);
+    const { participantId } = z.object({ participantId: z.string().min(1) }).parse(request.params);
+    const body = ParticipantBody.parse(request.body);
+
+    // Addressed by runtime id, because that is what the browser, the transcript and the
+    // `@mention` all use; the row id is accepted too, so a caller holding one can use it.
+    const target = store
+      .listParticipants(room.id)
+      .find((p) => p.runtime === participantId || p.id === participantId);
+    if (!target) throw new NotFoundError(`nobody called "${participantId}" is in this room`);
+
+    return {
+      participants: await supervisor.setParticipant(room.id, target.runtime, {
+        ...(body.role ? { role: body.role } : {}),
+        ...(body.model === undefined ? {} : { model: body.model.trim() || null }),
+      }),
+    };
+  });
+
+  app.post('/api/rooms/:id/commit', async (request) => {
+    const room = requireRoom(supervisor, request.params);
+    const body = CommitBody.parse(request.body ?? {});
+    return await supervisor.commit(room.id, body.message);
+  });
+
+  app.post('/api/rooms/:id/pr', async (request) => {
+    const room = requireRoom(supervisor, request.params);
+    const body = PrBody.parse(request.body ?? {});
+    return await supervisor.openPr(room.id, body);
+  });
+
+  app.post('/api/rooms/:id/promote', async (request, reply) => {
+    const room = requireRoom(supervisor, request.params);
+    const body = PromoteBody.parse(request.body ?? {});
+    const engine = await supervisor.promote(room.id, body);
+    await reply.status(201).send({ room: engine.room, participants: engine.participants });
+  });
+
+  app.get('/api/rooms/:id/export.md', async (request, reply) => {
+    const room = requireRoom(supervisor, request.params);
+    const markdown = roomToMarkdown({
+      room,
+      participants: store.listParticipants(room.id),
+      messages: store.listMessages(room.id),
+      turns: store.listTurns(room.id),
+    });
+    await reply
+      .type('text/markdown; charset=utf-8')
+      .header('content-disposition', `attachment; filename="${room.slug || 'room'}.md"`)
+      .send(markdown);
   });
 
   app.patch('/api/rooms/:id', (request) => {

@@ -210,6 +210,7 @@ export class RoomStore {
         | 'worktreePath'
         | 'closedAt'
         | 'title'
+        | 'prUrl'
       >
     >,
   ): Room {
@@ -225,6 +226,7 @@ export class RoomStore {
       worktreePath: 'worktree_path',
       closedAt: 'closed_at',
       title: 'title',
+      prUrl: 'pr_url',
     };
     for (const [key, column] of Object.entries(map)) {
       if (!(key in patch)) continue;
@@ -490,6 +492,23 @@ export class RoomStore {
     ).map(toTurn);
   }
 
+  /**
+   * The most recent turn a participant took, whether it finished or not.
+   *
+   * The engine compares its `role` against the participant's current one: a participant
+   * whose role was swapped between rounds is resuming a session that was told it was
+   * something else, and Codex and Cursor only see role instructions on a session's first
+   * prompt. This is how the engine knows to re-announce.
+   */
+  lastTurnFor(participantId: string): TurnRecord | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT * FROM turns WHERE participant_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1',
+      )
+      .get(participantId) as Row | undefined;
+    return row ? toTurn(row) : undefined;
+  }
+
   // --- repos ---------------------------------------------------------------
 
   touchRepo(path: string, defaults?: Record<string, unknown> | null): void {
@@ -568,6 +587,7 @@ function toRoom(row: Row): Room {
     nextSpeaker: str(row.next_speaker),
     round: Number(row.round),
     maxRounds: Number(row.max_rounds),
+    prUrl: str(row.pr_url),
     createdAt: asText(row.created_at),
     updatedAt: asText(row.updated_at),
     closedAt: str(row.closed_at),

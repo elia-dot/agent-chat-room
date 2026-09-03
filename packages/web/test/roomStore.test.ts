@@ -1,4 +1,4 @@
-import type { Message, Room } from '@agent-chat-room/core';
+import type { Message, Participant, Room } from '@agent-chat-room/core';
 import { describe, expect, it } from 'vitest';
 
 import type { IncomingFrame, RoomView, Snapshot } from '../src/state/roomStore.js';
@@ -22,6 +22,7 @@ const room = (over: Partial<Room> = {}): Room => ({
   nextSpeaker: null,
   round: 0,
   maxRounds: 4,
+  prUrl: null,
   createdAt: 'then',
   updatedAt: 'then',
   closedAt: null,
@@ -289,5 +290,36 @@ describe('RoomStoreClient', () => {
     unsubscribe();
     client.apply(snapshot());
     expect(notifications).toBe(3);
+  });
+
+  it('replaces the roster on room.roster, and ignores one for another room', () => {
+    const roster = (role: string): Participant => ({
+      id: 'p2',
+      roomId: ROOM_ID,
+      runtime: 'codex',
+      role: role as Participant['role'],
+      permission: 'edits',
+      model: null,
+      sessionId: null,
+      orderIndex: 1,
+      lastSeenMessageId: null,
+    });
+
+    const start = applyEvent(emptyRoom, snapshot());
+    const swapped = applyEvent(start, {
+      type: 'room.roster',
+      roomId: ROOM_ID,
+      participants: [roster('worker')],
+    });
+    // Wholesale, not a patch: a swap demotes the incumbent in the same step.
+    expect(swapped.participants).toHaveLength(1);
+    expect(swapped.participants[0]?.role).toBe('worker');
+
+    const other = applyEvent(swapped, {
+      type: 'room.roster',
+      roomId: 'another-room',
+      participants: [],
+    });
+    expect(other).toBe(swapped);
   });
 });

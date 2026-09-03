@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { AgentAdapter } from '@agent-chat-room/core';
+import type { AgentAdapter, gh } from '@agent-chat-room/core';
 import { RoomStore, echoAdapter, resetEchoAdapter } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 
@@ -57,7 +57,14 @@ export const echo2: AgentAdapter = {
   run: (req, sink) => echoAdapter.run(req, sink),
 };
 
-export const testAdapters: Record<string, AgentAdapter> = { echo: echoAdapter, echo2 };
+/** A third, so a brainstorm room has two participants plus a moderator. */
+export const echo3: AgentAdapter = {
+  ...echoAdapter,
+  id: 'echo3',
+  run: (req, sink) => echoAdapter.run(req, sink),
+};
+
+export const testAdapters: Record<string, AgentAdapter> = { echo: echoAdapter, echo2, echo3 };
 
 export interface Harness {
   app: FastifyInstance;
@@ -68,7 +75,7 @@ export interface Harness {
 
 /** An app over an in-memory database and the echo adapter. No port, no network. */
 export async function harness(
-  opts: { coalesceMs?: number; webRoot?: string } = {},
+  opts: { coalesceMs?: number; webRoot?: string; gh?: gh.GhRunner } = {},
 ): Promise<Harness> {
   const store = RoomStore.open(':memory:');
   const supervisor = new RoomSupervisor({
@@ -76,6 +83,8 @@ export async function harness(
     engine: { adapters: testAdapters, timeoutMs: 5000 },
     coalesceMs: opts.coalesceMs ?? 0,
     notify: false,
+    // No test may push anything or reach the network, so `gh` is always injected.
+    ...(opts.gh ? { gh: opts.gh } : {}),
   });
   const app = await createApp({
     supervisor,

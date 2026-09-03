@@ -16,7 +16,7 @@ install with `npx agent-chat-room` and use with whatever agents they have.
 |---|---|---|---|---|
 | Claude Code 2.1.x | `claude` | `claude -p --output-format stream-json --verbose` | `--resume <session_id>` | `--permission-mode plan` |
 | Codex CLI 0.152 | `codex exec` | `codex exec --json` | `codex exec resume <thread_id>` | `-s read-only` |
-| Cursor Agent 2026.07 | `cursor-agent` | `cursor-agent -p --output-format stream-json` | `--resume <chatId>` | `--mode plan` |
+| Cursor Agent 2026.07 | `cursor-agent` | `cursor-agent -p --output-format stream-json` | `--resume <chatId>` | `--mode ask` |
 
 Verified event shapes (live probe, 2026-09-03):
 
@@ -27,7 +27,13 @@ Verified event shapes (live probe, 2026-09-03):
 - Codex: `thread.started` (`thread_id`), `turn.started`, `item.completed` with
   `item.type` in `agent_message | command_execution | file_change | reasoning`,
   `turn.completed` (usage).
-- Cursor: `system`, `assistant`, `tool_call`, `result` (documented, not probed yet).
+- Cursor: `system/init` (carries `session_id`), `user` (our own prompt echoed back),
+  `thinking` (`delta` / `completed`), `assistant` (Anthropic-style content blocks – one
+  event per *text delta* with `--stream-partial-output`, not one per block), `tool_call`
+  (`started` / `completed`, payload keyed by tool: `readToolCall`, `shellToolCall`,
+  `globToolCall`, …, with a one-key result envelope `{ success | permissionDenied | … }`),
+  `result` (final text, `is_error`, camelCase `usage`). Probed live 2026-09-03 and recorded
+  in `packages/core/test/fixtures/cursor_run.jsonl`.
 
 Toolchain: Node 22.14, npm 11. No bun/pnpm. Denly (`~/Desktop/coding-control-plane`) is the
 reference for "spawn the user's CLI with their subscription login"; see section 9.
@@ -162,8 +168,9 @@ codex exec resume <thread_id> --json ...          # later turns
 # prompt on stdin
 
 # cursor
-cursor-agent -p --output-format stream-json --workspace <cwd> \
-  [--mode plan] [--force] [--resume <chatId>] [--model <m>] "<prompt>"
+cursor-agent -p --output-format stream-json --stream-partial-output --workspace <cwd> \
+  [--mode ask --sandbox enabled] [--force] [--trust] [--resume <chatId>] [--model <m>]
+# prompt on stdin (probed: `-p` with no positional argument reads stdin)
 ```
 
 Permission mapping (the only place vendor flags leak in):
@@ -171,8 +178,13 @@ Permission mapping (the only place vendor flags leak in):
 | acr permission | claude | codex | cursor |
 |---|---|---|---|
 | read-only | `--permission-mode plan --tools Read,Glob,Grep` | `-s read-only` | `--mode ask --sandbox enabled --trust` |
-| edits (default worker) | `--permission-mode acceptEdits` | `-s workspace-write` | (default) |
-| full (explicit opt-in) | `--permission-mode bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` | `--force` |
+| edits (default worker) | `--permission-mode acceptEdits` | `-s workspace-write` | `--trust` |
+| full (explicit opt-in) | `--permission-mode bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` | `--force --trust` |
+
+Cursor's read-only row was verified rather than assumed (2026-09-03): a turn in `--mode ask`
+asked to create a file answers "Ask mode is active … writing would be an edit" and creates
+nothing, and even a read-only shell call comes back `permissionDenied`. `--trust` is on every
+row because a headless turn has nobody to answer the "trust this workspace?" prompt.
 
 ### 4.2 Room engine
 
@@ -390,4 +402,27 @@ so the public MIT repo has no ancestry question. The second option is simpler.
 
 All three open questions were answered on 2026-09-03 and folded into section 7:
 name stays `agent-chat-room`, rooms always run in a git worktree, and the engine commits
-after each approved round. Next step: milestone M0.
+after each approved round.
+
+M3 decisions, 2026-09-03:
+
+- **Cursor takes its prompt on stdin**, not as the trailing positional argument its `--help`
+  documents. Probed: `cursor-agent -p` with no positional reads stdin and answers normally.
+  That matters because section 9's reason for stdin – room transcripts can exceed a
+  comfortable argv size – applies to Cursor exactly as it does to Claude and Codex.
+- **A brainstorm room is three fixed rounds**, mapped onto the existing round counter:
+  answer, react, merge. Nothing about the store, the state machine or the WebSocket had to
+  change, and the room ends in `needs-you` holding a proposal. For that mode `needs-you` is
+  success, so the sidebar says "proposed" and `acr run` exits 0.
+- **A role swap keeps sessions**, which is what section 3 asks for. The cost is that the
+  swapped agent's session still remembers being the other role; the engine re-announces the
+  new role in the next prompt, because Codex and Cursor only see role instructions on a
+  session's first turn.
+- **Merge is not in M3.** Section 4.2 sketches "Merge into `<current branch>`" beside "Open
+  PR"; section 6 lists only commit and open-PR, and merging writes to the branch the human
+  is standing on, which the worktree design has carefully avoided. Deferred to M4.
+- **`gh` is an optional dependency.** "Open PR" shells out to the GitHub CLI rather than
+  asking for a token, which keeps section 7's promise. Present and the button works, absent
+  and it explains itself. Nothing pushes without an explicit press.
+- **A room now takes a cross-process lock** for the whole loop, so `acr run --room X` against
+  a room the server is driving fails fast instead of interleaving state writes.

@@ -25,6 +25,7 @@ describe('acr doctor', () => {
     const table = capture.text;
     expect(table).toContain('Claude Code');
     expect(table).toContain('Codex CLI');
+    expect(table).toContain('Cursor Agent');
     expect(table).toContain('runtime');
     expect(table).toContain('installed');
     expect(table).toContain('acr needs at least 2');
@@ -42,7 +43,7 @@ describe('acr doctor', () => {
       runtimes: { id: string; installed: boolean; usable: boolean }[];
     };
     expect(payload.node).toBe(process.version);
-    expect(payload.runtimes.map((r) => r.id)).toEqual(['claude', 'codex', 'echo']);
+    expect(payload.runtimes.map((r) => r.id)).toEqual(['claude', 'codex', 'cursor', 'echo']);
     expect(payload.runtimes.every((r) => r.installed === false)).toBe(true);
   });
 });

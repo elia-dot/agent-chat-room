@@ -1,4 +1,10 @@
-import type { Message, ParsedVerdict, RoomOutcome, RoomState } from '@agent-chat-room/core';
+import type {
+  Message,
+  ParsedVerdict,
+  RoomMode,
+  RoomOutcome,
+  RoomState,
+} from '@agent-chat-room/core';
 import {
   EngineError,
   RoomEngine,
@@ -16,6 +22,10 @@ export interface RunOptions {
   /** Runtime ids. The first is the worker; every other one reviews. */
   agents?: string[];
   title?: string;
+  /** `brainstorm` runs the three-phase discussion instead of the build loop. */
+  mode?: RoomMode;
+  /** Per-runtime model override, from repeated `--model <runtime>=<model>`. */
+  models?: Record<string, string>;
   /** Model override for the worker turn. */
   modelWorker?: string;
   /** Model override applied to every reviewer. */
@@ -37,6 +47,7 @@ export interface RunSummary {
   exitCode: ExitCode;
   roomId: string;
   state: RoomState;
+  mode: RoomMode;
   rounds: number;
   branch: string;
   base?: string;
@@ -72,6 +83,7 @@ export async function run(opts: RunOptions): Promise<RunSummary> {
 
     for (const warning of engine.configWarnings) r.error(`  ! ${warning}`);
 
+    r.setMode(room.mode);
     r.info(`room "${room.title}" (${room.id.slice(0, 8)})`);
     r.info(
       `repo ${room.repoRoot} on ${room.roomBranch}${room.baseSha ? ` at ${room.baseSha.slice(0, 8)}` : ''}`,
@@ -82,7 +94,11 @@ export async function run(opts: RunOptions): Promise<RunSummary> {
         .map((p) => `${p.role} ${p.runtime}${p.model ? ` (${p.model})` : ''}`)
         .join(' · '),
     );
-    r.info(`max ${room.maxRounds} rounds`);
+    r.info(
+      room.mode === 'brainstorm'
+        ? 'brainstorm: everyone answers, everyone reacts, the moderator merges'
+        : `max ${room.maxRounds} rounds`,
+    );
 
     const unsubscribe = engine.subscribe((event) => r.engineEvent(event));
     const onSignal = (): void => engine.stop('interrupted');
@@ -92,6 +108,10 @@ export async function run(opts: RunOptions): Promise<RunSummary> {
     let outcome: RoomOutcome;
     try {
       outcome = await engine.run();
+    } catch (err) {
+      // The room lock refusing is the common case here: another acr is driving this room.
+      if (err instanceof EngineError) throw new UsageError(err.message);
+      throw err;
     } finally {
       unsubscribe();
       process.removeListener('SIGINT', onSignal);
@@ -128,6 +148,8 @@ async function open(opts: RunOptions, store: RoomStore): Promise<RoomEngine> {
         // Empty means "not specified": the engine falls back to `.acr.json` and then to
         // the built-in roster, which is what keeps the precedence order in one place.
         agents: opts.agents ?? [],
+        ...(opts.mode ? { mode: opts.mode } : {}),
+        ...(opts.models ? { models: opts.models } : {}),
         ...(opts.modelWorker ? { modelWorker: opts.modelWorker } : {}),
         ...(opts.modelReviewer ? { modelReviewer: opts.modelReviewer } : {}),
         ...(opts.title ? { title: opts.title } : {}),
@@ -171,6 +193,7 @@ function summarise(engine: RoomEngine, outcome: RoomOutcome, r: Renderer): RunSu
     exitCode,
     roomId: room.id,
     state: outcome.state,
+    mode: room.mode,
     rounds: finalRound,
     branch: room.roomBranch,
     ...(room.baseSha ? { base: room.baseSha } : {}),
@@ -196,6 +219,11 @@ function summarise(engine: RoomEngine, outcome: RoomOutcome, r: Renderer): RunSu
 export function exitCodeFor(outcome: RoomOutcome): ExitCode {
   if (outcome.error) return EXIT.internalError;
   if (outcome.approved) return EXIT.ok;
+  // A brainstorm has no reviewers and therefore no approval: it ends in `needs-you` with a
+  // proposal, and that is success. Exit 3 would tell a script the opposite.
+  if (outcome.mode === 'brainstorm') {
+    return outcome.state === 'needs-you' ? EXIT.ok : EXIT.notApproved;
+  }
   if (isTerminal(outcome.state)) return EXIT.notApproved;
   return EXIT.internalError;
 }

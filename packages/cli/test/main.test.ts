@@ -107,19 +107,33 @@ describe('acr argument handling', () => {
     expect(err.join('')).toContain('--rounds');
   });
 
+  it('rejects a mode that is not one of the two, before opening anything', async () => {
+    expect(await main(['run', '--task', 'a', '--mode', 'freeform'])).toBe(EXIT.usage);
+    expect(err.join('')).toContain('--mode must be build-review or brainstorm');
+  });
+
+  it('rejects a --model that is not <runtime>=<model>', async () => {
+    expect(await main(['run', '--task', 'a', '--model', 'opus'])).toBe(EXIT.usage);
+    expect(err.join('')).toContain('--model takes <runtime>=<model>');
+    expect(await main(['run', '--task', 'a', '--model', 'claude='])).toBe(EXIT.usage);
+  });
+
   it('rejects an unknown flag rather than ignoring it', async () => {
     expect(await main(['run', '--task', 'a', '--frobnicate'])).toBe(EXIT.usage);
   });
 
-  it('documents the M1 and M2 surface: serve, rounds, worktrees, .acr.json and rooms', async () => {
+  it('documents the surface: serve, rounds, worktrees, .acr.json, rooms, mode and models', async () => {
     await main(['--help']);
     const help = out.join('');
     expect(help).toContain('acr serve [--port N] [--no-open]');
     expect(help).toContain('127.0.0.1');
-    expect(help).toContain('acr rooms ls | show <id> | resume <id> | close <id>');
+    expect(help).toContain('acr rooms ls | show <id> | export <id> | resume <id> | close <id>');
     expect(help).toContain('--rounds <n>');
     expect(help).toContain('--no-worktree');
     expect(help).toContain('.acr.json');
+    expect(help).toContain('--mode <mode>');
+    expect(help).toContain('--model <rt>=<model>');
+    expect(help).toContain('--out <path>');
   });
 
   it('understands the documented --no-* flags, which parseArgs alone does not', async () => {

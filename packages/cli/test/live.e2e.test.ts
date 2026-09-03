@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { RoomStore } from '@agent-chat-room/core';
+import { RoomStore, roomToMarkdown } from '@agent-chat-room/core';
 
 import { rooms } from '../src/commands/rooms.js';
 import { run } from '../src/commands/run.js';
@@ -100,6 +100,74 @@ describe.skipIf(!live)('live: claude works, codex reviews, the room commits', ()
         expect(listing.text).toContain(summary.branch);
         expect(store.listTurns(summary.roomId).length).toBeGreaterThanOrEqual(2);
         expect(store.unfinishedTurns(summary.roomId)).toHaveLength(0);
+      } finally {
+        store.close();
+        config.restore();
+      }
+    },
+    40 * 60 * 1000,
+  );
+});
+
+/**
+ * The M3 acceptance criterion: the third runtime works, and a brainstorm room reaches a
+ * proposal. Opt in the same way, and for the same reason – it spends real subscription
+ * turns on three real CLIs.
+ */
+describe.skipIf(!live)('live: claude, codex and cursor brainstorm', () => {
+  it(
+    'runs three phases across three runtimes and ends with a moderator proposal',
+    async () => {
+      const dir = makeRepo({
+        'math.js': BROKEN,
+        'README.md': '# sample\n\nA deliberately broken `add()`.\n',
+      });
+      repos.push(dir);
+
+      const config = useTempConfigDir();
+      const store = RoomStore.open();
+      const capture = new Capture();
+      try {
+        const summary = await run({
+          task:
+            'math.js has a broken add() and no tests at all. In two or three sentences each: ' +
+            'what is the smallest change that would stop this class of bug coming back?',
+          cwd: dir,
+          agents: ['claude', 'codex', 'cursor'],
+          mode: 'brainstorm',
+          timeoutMs: 20 * 60 * 1000,
+          store,
+          renderer: new Renderer({ color: false, write: capture.write }),
+        });
+
+        expect(summary.mode).toBe('brainstorm');
+        expect(summary.state).toBe('needs-you');
+        expect(summary.rounds).toBe(3);
+        // A proposal is the finish line for this mode, so the exit code has to say success.
+        expect(summary.exitCode).toBe(EXIT.ok);
+
+        const messages = store.listMessages(summary.roomId).filter((m) => m.kind === 'agent');
+        expect(messages.filter((m) => m.round === 1)).toHaveLength(3);
+        expect(messages.filter((m) => m.round === 2)).toHaveLength(3);
+        const proposal = messages.filter((m) => m.round === 3);
+        expect(proposal).toHaveLength(1);
+        expect(proposal[0]?.author).toBe('cursor');
+        expect(proposal[0]?.text.length).toBeGreaterThan(80);
+
+        // Nobody edits in a brainstorm, so the worktree is exactly as it was cut.
+        expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(BROKEN);
+        if (summary.worktree) {
+          expect(readFileSync(join(summary.worktree, 'math.js'), 'utf8')).toBe(BROKEN);
+        }
+
+        const markdown = roomToMarkdown({
+          room: store.getRoom(summary.roomId)!,
+          participants: store.listParticipants(summary.roomId),
+          messages: store.listMessages(summary.roomId),
+          turns: store.listTurns(summary.roomId),
+        });
+        expect(markdown).toContain('**Mode** brainstorm');
+        expect(markdown).toContain('### cursor · moderator · round 3');
       } finally {
         store.close();
         config.restore();

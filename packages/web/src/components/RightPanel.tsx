@@ -1,7 +1,8 @@
-import type { Participant, Room, TurnRecord } from '@agent-chat-room/core';
+import type { Detection, Participant, Role, Room, TurnRecord } from '@agent-chat-room/core';
 import { useState } from 'react';
 
 import type { ChangedFiles } from '../api/client.js';
+import { api } from '../api/client.js';
 import { basename, duration, initials, runtimeClasses, stateLabel } from '../lib/format.js';
 import { DiffViewer } from './DiffViewer.js';
 
@@ -12,22 +13,21 @@ export interface RightPanelProps {
   files: ChangedFiles | null;
   diff: { messageId: string; text: string; loading: boolean } | null;
   busy: boolean;
+  /** `gh` detection from `GET /api/runtimes`; null until it has been fetched. */
+  gh: Detection | null;
   onCloseDiff: () => void;
   onPause: () => void;
   onContinue: () => void;
   onStop: () => void;
   onCloseRoom: () => void;
   onRaiseRounds: (rounds: number) => void;
+  onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
+  onCommit: () => void;
+  onOpenPr: (remote: string) => void;
+  onPromote: () => void;
 }
 
-/**
- * PLAN.md section 5.4, minus the M3 actions.
- *
- * Commit / Open PR / Export markdown, the role dropdown and the model picker are all M3,
- * so the roster here is read-only. "Raise the round limit" is the exception: without it a
- * room that used up its rounds dead-ends in the browser, and the engine's own message says
- * to raise it – so end-to-end-from-the-browser requires it.
- */
+/** PLAN.md section 5.4: participants with a role dropdown, a model picker, and the actions. */
 export function RightPanel(props: RightPanelProps): React.ReactElement {
   const { room, participants, turns, files, diff } = props;
 
@@ -61,22 +61,32 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
           <Row label="base" value={room.baseSha?.slice(0, 8) ?? '–'} mono />
           <Row label="mode" value={room.mode} />
           <Row label="round" value={`${room.round}/${room.maxRounds}`} />
-          <Row label="state" value={stateLabel(room.state, room.paused)} />
+          <Row label="state" value={stateLabel(room.state, room.paused, room.mode)} />
+          {room.prUrl && (
+            <div className="flex gap-2 text-xs">
+              <span className="w-16 shrink-0 text-zinc-500">pr</span>
+              <a
+                href={room.prUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 flex-1 truncate text-sky-600 hover:underline dark:text-sky-400"
+              >
+                {room.prUrl}
+              </a>
+            </div>
+          )}
         </Section>
 
         <Section title="Participants">
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {participants.map((p) => (
-              <li key={p.id} className="flex items-center gap-2 text-xs">
-                <span
-                  className={`flex size-5 items-center justify-center rounded text-[9px] font-semibold ring-1 ring-inset ${runtimeClasses(p.runtime)}`}
-                >
-                  {initials(p.runtime)}
-                </span>
-                <span className="flex-1 truncate">{p.runtime}</span>
-                <Tag>{p.role}</Tag>
-                <Tag>{p.permission}</Tag>
-              </li>
+              <ParticipantRow
+                key={p.id}
+                participant={p}
+                room={room}
+                busy={props.busy}
+                onSet={props.onSetParticipant}
+              />
             ))}
             <li className="flex items-center gap-2 text-xs">
               <span
@@ -117,6 +127,97 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
   );
 }
 
+/** Known model names per runtime, as a `<datalist>`. Free text, because Cursor takes
+ * parameterised strings like `claude-opus-4-8[context=1m]` that no fixed list can cover. */
+const MODEL_HINTS: Record<string, string[]> = {
+  claude: ['opus', 'sonnet', 'haiku'],
+  codex: ['gpt-5.3-codex', 'gpt-5.3-codex-high'],
+  cursor: ['auto', 'composer-2.5', 'claude-sonnet-5-thinking-high'],
+};
+
+const ROLES_FOR: Record<Room['mode'], Role[]> = {
+  'build-review': ['worker', 'reviewer'],
+  brainstorm: ['reviewer', 'moderator'],
+};
+
+/**
+ * One roster row, editable.
+ *
+ * Both controls are disabled while a turn is in flight: the permission a child was spawned
+ * with is baked into that process, so the engine refuses a swap mid-round and the UI should
+ * say so before the request rather than after.
+ */
+function ParticipantRow({
+  participant,
+  room,
+  busy,
+  onSet,
+}: {
+  participant: Participant;
+  room: Room;
+  busy: boolean;
+  onSet: (runtime: string, patch: { role?: Role; model?: string }) => void;
+}): React.ReactElement {
+  const [model, setModel] = useState(participant.model ?? '');
+  const running = room.state === 'running' || room.state === 'waiting-reviews';
+  const locked = busy || running || room.closedAt !== null;
+  const listId = `models-${participant.runtime}`;
+
+  return (
+    <li className="space-y-1">
+      <div className="flex items-center gap-2 text-xs">
+        <span
+          className={`flex size-5 items-center justify-center rounded text-[9px] font-semibold ring-1 ring-inset ${runtimeClasses(participant.runtime)}`}
+        >
+          {initials(participant.runtime)}
+        </span>
+        <span className="flex-1 truncate">{participant.runtime}</span>
+        <select
+          value={participant.role}
+          disabled={locked}
+          aria-label={`${participant.runtime} role`}
+          onChange={(e) => onSet(participant.runtime, { role: e.target.value as Role })}
+          className="rounded border border-zinc-300 bg-white px-1 py-px text-[10px] disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+        >
+          {roleOptions(room.mode, participant.role).map((role) => (
+            <option key={role} value={role}>
+              {role}
+            </option>
+          ))}
+        </select>
+        <Tag>{participant.permission}</Tag>
+      </div>
+      <div className="flex items-center gap-1 pl-7">
+        <input
+          value={model}
+          disabled={locked}
+          placeholder="default model"
+          aria-label={`${participant.runtime} model`}
+          list={listId}
+          onChange={(e) => setModel(e.target.value)}
+          onBlur={() => {
+            if (model.trim() !== (participant.model ?? '')) {
+              onSet(participant.runtime, { model: model.trim() });
+            }
+          }}
+          className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-1.5 py-px font-mono text-[10px] disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+        />
+        <datalist id={listId}>
+          {(MODEL_HINTS[participant.runtime] ?? []).map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+      </div>
+    </li>
+  );
+}
+
+/** The current role is always offered, even when the mode would not normally allow it. */
+function roleOptions(mode: Room['mode'], current: Role): Role[] {
+  const allowed = ROLES_FOR[mode] ?? ['worker', 'reviewer'];
+  return allowed.includes(current) ? allowed : [current, ...allowed];
+}
+
 function Usage({ turns }: { turns: TurnRecord[] }): React.ReactElement {
   const finished = turns.filter((t) => t.endedAt);
   const wall = finished.reduce(
@@ -138,7 +239,12 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
   const { room, busy } = props;
   const [rounds, setRounds] = useState(room.maxRounds + 2);
   const running = room.state === 'running' || room.state === 'waiting-reviews';
-  const exhausted = room.round >= room.maxRounds && room.state !== 'approved';
+  const exhausted =
+    room.mode !== 'brainstorm' && room.round >= room.maxRounds && room.state !== 'approved';
+  // The room ran in a worktree on `acr/<slug>`; with `--no-worktree` there is no room
+  // branch to push, which is what makes the PR button meaningless there.
+  const remote = room.roomBranch === room.baseBranch ? '' : 'origin';
+  const ghReady = props.gh?.installed === true && props.gh.loggedIn !== false;
 
   return (
     <div className="space-y-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
@@ -176,10 +282,44 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
         </div>
       )}
 
+      {room.mode === 'brainstorm' ? (
+        <Action onClick={props.onPromote} disabled={busy || running || room.closedAt !== null}>
+          Promote the proposal into a build room
+        </Action>
+      ) : (
+        <div className="flex gap-2">
+          <Action onClick={props.onCommit} disabled={busy || running || room.closedAt !== null}>
+            Commit
+          </Action>
+          {/* Absent, not merely disabled, when there is nothing to push to: a button that
+              can never work is worse than no button. */}
+          {remote && (
+            <Action
+              onClick={() => props.onOpenPr(remote)}
+              disabled={busy || running || !ghReady || room.closedAt !== null}
+              title={
+                ghReady
+                  ? `pushes ${room.roomBranch} to ${remote}, then opens a PR into ${room.baseBranch}`
+                  : (props.gh?.note ?? 'checking for gh…')
+              }
+            >
+              {room.prUrl ? 'PR opened' : 'Open PR'}
+            </Action>
+          )}
+        </div>
+      )}
+
+      <a
+        href={api.exportUrl(room.id)}
+        download
+        className="block rounded-md border border-zinc-300 px-2 py-1.5 text-center text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+      >
+        Export markdown
+      </a>
+
       <Action onClick={props.onCloseRoom} disabled={busy || room.closedAt !== null}>
         {room.closedAt ? 'Closed' : 'Close room (removes the worktree)'}
       </Action>
-      {/* Commit, Open PR and Export markdown are M3 (PLAN.md section 6). */}
     </div>
   );
 }
@@ -240,16 +380,19 @@ function Action({
   children,
   onClick,
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
 }): React.ReactElement {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      {...(title ? { title } : {})}
       className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-xs font-medium hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
     >
       {children}

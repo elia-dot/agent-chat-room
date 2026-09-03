@@ -11,8 +11,11 @@ import type { Verdict } from '../verdict.js';
 export type RoomState =
   'idle' | 'running' | 'waiting-reviews' | 'approved' | 'needs-you' | 'stopped';
 
-/** `brainstorm` is v1.1; M1 only implements `build-review`. */
-export type RoomMode = 'build-review';
+/**
+ * `build-review` is the loop from PLAN.md section 3; `brainstorm` is the three-phase
+ * discussion below it – everybody answers, everybody reacts, the moderator merges.
+ */
+export type RoomMode = 'build-review' | 'brainstorm';
 
 export interface Room {
   id: string;
@@ -40,6 +43,8 @@ export interface Room {
   nextSpeaker: string | null;
   round: number;
   maxRounds: number;
+  /** The pull request "Open PR" created, kept so it survives a reload. */
+  prUrl: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;

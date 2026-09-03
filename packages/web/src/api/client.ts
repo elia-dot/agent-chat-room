@@ -1,8 +1,11 @@
 import type {
+  Detection,
   Message,
   Participant,
   RepoRecord,
+  Role,
   Room,
+  RoomMode,
   RuntimeReportEntry,
   TurnRecord,
 } from '@agent-chat-room/core';
@@ -24,11 +27,21 @@ export interface CreateRoomRequest {
   cwd: string;
   agents: string[];
   title?: string;
+  mode?: RoomMode;
   maxRounds?: number;
   worktree?: boolean;
   modelWorker?: string;
   modelReviewer?: string;
+  /** Per-runtime model override, keyed by runtime id. */
+  models?: Record<string, string>;
   start?: boolean;
+}
+
+/** `GET /api/runtimes`. `gh` rides along so "Open PR" can explain itself when it is absent. */
+export interface RuntimesResponse {
+  node: string;
+  runtimes: RuntimeReportEntry[];
+  gh: Detection;
 }
 
 export interface BrowseEntry {
@@ -81,7 +94,7 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   health: () => request<{ ok: boolean; version: string }>('/api/health'),
 
-  runtimes: () => request<{ node: string; runtimes: RuntimeReportEntry[] }>('/api/runtimes'),
+  runtimes: () => request<RuntimesResponse>('/api/runtimes'),
 
   rooms: (opts: { repo?: string; open?: boolean; limit?: number } = {}) => {
     const query = new URLSearchParams();
@@ -116,6 +129,25 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+
+  /** Role swap and model picker: one route, because both change a participant of a live room. */
+  setParticipant: (id: string, runtime: string, body: { role?: Role; model?: string }) =>
+    request<{ participants: Participant[] }>(
+      `/api/rooms/${id}/participants/${encodeURIComponent(runtime)}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+
+  commit: (id: string, message?: string) =>
+    post<{ room: Room; sha?: string }>(`/api/rooms/${id}/commit`, message ? { message } : {}),
+
+  openPr: (id: string, body: { title?: string; remote?: string; draft?: boolean } = {}) =>
+    post<{ room: Room; url?: string }>(`/api/rooms/${id}/pr`, body),
+
+  promote: (id: string, body: { agents?: string[]; title?: string } = {}) =>
+    post<{ room: Room; participants: Participant[] }>(`/api/rooms/${id}/promote`, body),
+
+  /** A plain link, so the browser downloads it rather than the app buffering it. */
+  exportUrl: (id: string) => `/api/rooms/${id}/export.md`,
 
   files: (id: string) => request<ChangedFiles>(`/api/rooms/${id}/files`),
 

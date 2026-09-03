@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
+import type { RoomMode } from '@agent-chat-room/core';
+
 import { doctor } from './commands/doctor.js';
 import { rooms } from './commands/rooms.js';
 import { run, UsageError } from './commands/run.js';
@@ -17,14 +19,17 @@ Usage:
   acr serve [--port N] [--no-open]
   acr doctor [--json]
   acr run --task <text> [options]
-  acr rooms ls | show <id> | resume <id> | close <id>
+  acr rooms ls | show <id> | export <id> | resume <id> | close <id>
   acr --help | --version
 
 Commands:
   serve         Start the local server and open the web UI (the default with no arguments).
   doctor        Show which agent runtimes are installed, new enough and logged in.
   run           Run a room: the worker builds, the reviewers review, repeat until they agree.
-  rooms         List, inspect, resume and close the rooms in the local store.
+  rooms         List, inspect, export, resume and close the rooms in the local store.
+
+Options for \`rooms\`:
+  --out <path>             \`export\`: write the markdown to a file instead of stdout.
 
 Options for \`serve\`:
   --port <n>               Port to bind (default: 4321, walking upward if it is taken).
@@ -37,12 +42,17 @@ Options for \`run\`:
                            (default: claude,codex, or "agents" from .acr.json).
   --cwd <path>             Repo to work in (default: the current directory).
   --rounds <n>             Give up and ask you after this many rounds (default: 4).
+  --mode <mode>            build-review (default) or brainstorm. A brainstorm is three
+                           phases – everyone answers, everyone reacts, the last agent
+                           writes the merged proposal – and nobody edits files.
   --room <id>              Resume an existing room instead of opening a new one.
   --no-worktree            Work in the checkout instead of a dedicated git worktree.
   --allow-dirty            With --no-worktree: run even though the tree has changes.
   --title <text>           Room title (default: the first line of the task).
   --model-worker <model>   Model override for the worker.
   --model-reviewer <model> Model override for every reviewer.
+  --model <rt>=<model>     Model override for one runtime, repeatable
+                           (e.g. --model claude=opus --model codex=gpt-5.3-codex).
   --timeout <seconds>      Per-read stall timeout for a turn (default: 1800, or
                            "timeoutSeconds" from .acr.json).
   --json                   Print a JSON summary instead of a human transcript.
@@ -208,6 +218,8 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
         cwd: { type: 'string' },
         title: { type: 'string' },
         rounds: { type: 'string' },
+        mode: { type: 'string' },
+        model: { type: 'string', multiple: true },
         room: { type: 'string' },
         resume: { type: 'string' },
         'model-worker': { type: 'string' },
@@ -238,6 +250,8 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
     );
   }
 
+  const mode = parseMode(values.mode);
+  const models = parseModels(values.model);
   const worktree = values.worktree ?? flags.negated.worktree;
   const color = values.color ?? flags.negated.color;
   const renderer = new Renderer(color === undefined ? {} : { color });
@@ -245,6 +259,8 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
     ...(task.trim() ? { task } : {}),
     cwd: values.cwd ?? process.cwd(),
     ...(agents ? { agents } : {}),
+    ...(mode ? { mode } : {}),
+    ...(models ? { models } : {}),
     ...(roomId ? { room: roomId } : {}),
     ...(values.title ? { title: values.title } : {}),
     ...(rounds ? { maxRounds: rounds } : {}),
@@ -270,6 +286,7 @@ async function roomsCommand(argv: string[]): Promise<ExitCode> {
       args: flags.argv,
       options: {
         cwd: { type: 'string' },
+        out: { type: 'string' },
         timeout: { type: 'string', default: '1800' },
         json: { type: 'boolean', default: false },
         color: { type: 'boolean' },
@@ -284,11 +301,36 @@ async function roomsCommand(argv: string[]): Promise<ExitCode> {
   return await rooms({
     subcommand,
     ...(id ? { id } : {}),
+    ...(values.out ? { out: values.out } : {}),
     cwd: values.cwd ?? process.cwd(),
     json: values.json === true,
     timeoutMs: Math.round(timeoutSeconds * 1000),
     renderer: new Renderer(color === undefined ? {} : { color }),
   });
+}
+
+function parseMode(value: string | undefined): RoomMode | undefined {
+  if (value === undefined) return undefined;
+  if (value !== 'build-review' && value !== 'brainstorm') {
+    throw new UsageError(`--mode must be build-review or brainstorm, got "${value}"`);
+  }
+  return value;
+}
+
+/** `--model claude=opus --model codex=gpt-5.3-codex` -> `{ claude: 'opus', codex: '...' }`. */
+function parseModels(values: string[] | undefined): Record<string, string> | undefined {
+  if (!values || values.length === 0) return undefined;
+  const models: Record<string, string> = {};
+  for (const value of values) {
+    const eq = value.indexOf('=');
+    const runtime = eq === -1 ? '' : value.slice(0, eq).trim();
+    const model = eq === -1 ? '' : value.slice(eq + 1).trim();
+    if (!runtime || !model) {
+      throw new UsageError(`--model takes <runtime>=<model>, got "${value}"`);
+    }
+    models[runtime] = model;
+  }
+  return models;
 }
 
 function splitAgents(value: string | undefined): string[] | undefined {

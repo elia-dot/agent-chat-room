@@ -1,4 +1,4 @@
-import type { RepoRecord, RuntimeReportEntry } from '@agent-chat-room/core';
+import type { RepoRecord, RoomMode, RuntimeReportEntry } from '@agent-chat-room/core';
 import { useEffect, useState } from 'react';
 
 import type { BrowseResult, CreateRoomRequest } from '../api/client.js';
@@ -11,11 +11,12 @@ export interface NewRoomDialogProps {
 }
 
 /**
- * PLAN.md section 5.5: repo picker (recent + browse), task, roster as toggle cards in
- * worker-first order, max rounds, worktree.
+ * PLAN.md section 5.5: repo picker (recent + browse), task, mode, roster as toggle cards in
+ * worker-first order with a model each, max rounds, worktree.
  *
- * Role and permission per card are M3; here the first selected runtime is the worker and
- * every other one reviews, which is the same rule `--agents` follows.
+ * Order is the role: in a build-review room the first selected runtime is the worker and
+ * every other one reviews; in a brainstorm the last one moderates. That is the same rule
+ * `--agents` follows, so the dialog and the flag cannot disagree.
  */
 export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.ReactElement {
   const [repos, setRepos] = useState<RepoRecord[]>([]);
@@ -27,6 +28,8 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [task, setTask] = useState('');
   const [title, setTitle] = useState('');
   const [agents, setAgents] = useState<string[]>([]);
+  const [mode, setMode] = useState<RoomMode>('build-review');
+  const [models, setModels] = useState<Record<string, string>>({});
   const [maxRounds, setMaxRounds] = useState(4);
   const [worktree, setWorktree] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,13 +84,21 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
     setError(null);
     setBusy(true);
     try {
+      const chosen: Record<string, string> = {};
+      for (const id of agents) {
+        const model = models[id]?.trim();
+        if (model) chosen[id] = model;
+      }
       await onCreate({
         task,
         cwd,
         agents,
-        maxRounds,
+        mode,
         worktree,
         start: true,
+        // A brainstorm is three fixed phases, so a round budget would be meaningless.
+        ...(mode === 'brainstorm' ? {} : { maxRounds }),
+        ...(Object.keys(chosen).length > 0 ? { models: chosen } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       });
     } catch (err) {
@@ -202,7 +213,37 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             />
           </Field>
 
-          <Field label="Roster – the first one builds, the rest review">
+          <Field label="Mode">
+            <div className="flex gap-2">
+              {(['build-review', 'brainstorm'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setMode(option)}
+                  className={`flex-1 rounded-md border px-3 py-2 text-left text-sm ${
+                    mode === option
+                      ? 'border-sky-500 bg-sky-500/5'
+                      : 'border-zinc-200 dark:border-zinc-800'
+                  }`}
+                >
+                  <span className="block font-medium">{option}</span>
+                  <span className="block text-[11px] text-zinc-500">
+                    {option === 'build-review'
+                      ? 'one builds, the others review, repeat'
+                      : 'everyone answers, everyone reacts, the last one merges'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field
+            label={
+              mode === 'brainstorm'
+                ? 'Roster – the last one moderates, nobody edits files'
+                : 'Roster – the first one builds, the rest review'
+            }
+          >
             <ul className="space-y-1.5">
               {runtimes.map((runtime) => {
                 const index = agents.indexOf(runtime.id);
@@ -232,8 +273,17 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                     </span>
                     {on && (
                       <>
+                        <input
+                          value={models[runtime.id] ?? ''}
+                          onChange={(e) =>
+                            setModels((m) => ({ ...m, [runtime.id]: e.target.value }))
+                          }
+                          placeholder="model"
+                          aria-label={`${runtime.id} model`}
+                          className="w-32 rounded border border-zinc-300 bg-white px-1.5 py-px font-mono text-[11px] dark:border-zinc-700 dark:bg-zinc-950"
+                        />
                         <span className="rounded bg-zinc-200 px-1.5 py-px text-[10px] dark:bg-zinc-800">
-                          {index === 0 ? 'worker' : 'reviewer'}
+                          {roleFor(mode, index, agents.length)}
                         </span>
                         <button
                           type="button"
@@ -261,7 +311,9 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             </ul>
             {agents.length < 2 && (
               <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                A room needs a worker and at least one reviewer.
+                {mode === 'brainstorm'
+                  ? 'A brainstorm needs at least two participants.'
+                  : 'A room needs a worker and at least one reviewer.'}
               </p>
             )}
           </Field>
@@ -275,16 +327,18 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 className="w-56 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </Field>
-            <Field label="Max rounds">
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={maxRounds}
-                onChange={(e) => setMaxRounds(Number(e.target.value))}
-                className="w-20 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              />
-            </Field>
+            {mode === 'build-review' && (
+              <Field label="Max rounds">
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={maxRounds}
+                  onChange={(e) => setMaxRounds(Number(e.target.value))}
+                  className="w-20 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </Field>
+            )}
             <label className="flex items-center gap-2 pb-1.5 text-sm">
               <input
                 type="checkbox"
@@ -318,6 +372,12 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
       </div>
     </div>
   );
+}
+
+/** The role a card gets from its position, which is the only thing that decides it. */
+function roleFor(mode: RoomMode, index: number, total: number): string {
+  if (mode === 'brainstorm') return index === total - 1 ? 'moderator' : 'participant';
+  return index === 0 ? 'worker' : 'reviewer';
 }
 
 function Field({

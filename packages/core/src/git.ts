@@ -191,6 +191,43 @@ export async function commitAll(
   return { ok: true, sha, shortSha: await shortSha(cwd) };
 }
 
+/** The remotes this repo has, in `git remote` order. Empty when it has none. */
+export async function remotes(cwd: string): Promise<string[]> {
+  const out = await gitOrUndefined(cwd, ['remote']);
+  return (out ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+export async function remoteExists(cwd: string, name: string): Promise<boolean> {
+  return (await remotes(cwd)).includes(name);
+}
+
+export interface PushResult {
+  ok: boolean;
+  remote: string;
+  branch: string;
+  error?: string;
+}
+
+/**
+ * Push the room branch. This is the first thing in the project that leaves the machine, so
+ * it never happens on its own: only `RoomEngine.openPr` calls it, only when the human
+ * pressed the button, and the remote and branch it used land in the transcript.
+ *
+ * Returns a result rather than throwing – "the remote rejected it" is something the room
+ * has to render, the same convention `commitAll` follows.
+ */
+export async function push(cwd: string, remote: string, branch: string): Promise<PushResult> {
+  try {
+    await git(cwd, ['push', '--set-upstream', remote, `${branch}:${branch}`]);
+    return { ok: true, remote, branch };
+  } catch (err) {
+    return { ok: false, remote, branch, error: errText(err) };
+  }
+}
+
 function errText(err: unknown): string {
   const stderr = (err as { stderr?: unknown }).stderr;
   if (typeof stderr === 'string' && stderr.trim()) return stderr.trim();
