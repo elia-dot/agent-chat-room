@@ -10,10 +10,19 @@ a credentials file exists, and lets each CLI find its own login the way it norma
 
 The full design lives in [`docs/PLAN.md`](docs/PLAN.md).
 
-## Status: milestone M1
+## Status: milestone M2
 
-M1 is "the room engine". What works today:
+M2 is "the web UI": a local server, a WebSocket, and a React app over the M1 room engine.
+What works today:
 
+- **`acr`** – with no arguments, starts the server on `http://127.0.0.1:4321` and opens the browser.
+  Rooms list, live transcript, composer with `@mentions` and pause/continue, right panel with
+  participants, changed files and a diff viewer, a new-room dialog and a doctor page.
+- **Nothing listens on the network.** The server binds `127.0.0.1` only, _and_ refuses any request
+  whose `Origin` is not a localhost one – otherwise any page open in your browser could drive it.
+- **Interrupt any time.** Posting a message holds the loop and points the next turn at whoever you
+  `@mention`; Continue picks the round loop back up.
+- **macOS notifications** when a room reaches `approved` or `needs-you` (`ACR_NO_NOTIFY=1` to skip).
 - **Adapters** for Claude Code and Codex CLI: `detect()`, argv building, streaming `run()`, session
   resume, and a permission model with exactly three levels (`read-only`, `edits`, `full`).
 - **`acr doctor`** – which runtimes are installed, new enough and logged in.
@@ -30,16 +39,28 @@ M1 is "the room engine". What works today:
   conversation.
 - **`.acr.json`** – optional, committed per-repo defaults.
 
-Not here yet: the server, the WebSocket and the web UI (M2), plus the Cursor adapter, brainstorm
-mode and role swapping (M3).
+Not here yet (all M3): the Cursor adapter, brainstorm mode, swapping a participant's role or model
+mid-room, the Commit / Open PR buttons, and markdown export. The right panel's roster is read-only.
 
 ## Try it
 
 ```sh
 nvm use            # Node 22.14 (>= 20.19 works)
 npm install
-npm run build
+npm run build      # tsc -b for the packages, vite build for the web app
 
+node packages/cli/dist/bin.js            # server + browser on http://127.0.0.1:4321
+```
+
+Port 4321 is the default; if it is taken `acr` walks upward and prints the URL it actually bound.
+`acr serve --port N` pins one instead (and fails rather than moving), and `--no-open` leaves your
+browser alone.
+
+Rooms run inside that process. Closing the tab does not stop a room; Ctrl-C does.
+
+### From the terminal instead
+
+```sh
 node packages/cli/dist/bin.js doctor
 node packages/cli/dist/bin.js run \
   --task "The login test is flaky. Find out why and fix it." \
@@ -52,6 +73,10 @@ node packages/cli/dist/bin.js rooms show <id>
 node packages/cli/dist/bin.js rooms resume <id>
 node packages/cli/dist/bin.js rooms close <id>
 ```
+
+Driving one room from the browser and a terminal `acr run` at the same time is unsupported: the
+per-repo write lock stops them corrupting the repo, but two engines over one room row would still
+interleave state writes. A cross-process room lock is M3.
 
 The first runtime in `--agents` is the worker and edits files; every other one is a reviewer and runs
 read-only. There is no limit of two.
@@ -103,7 +128,7 @@ Unknown keys warn and are ignored, so a file written by a newer `acr` never bric
 
 ```
 ~/.config/agent-chat-room/
-  acr.db                  rooms, participants, messages, turns, recent repos (schema v1)
+  acr.db                  rooms, participants, messages, turns, recent repos (schema v2)
   turns/<turnId>.jsonl    every raw line a runtime emitted, for debugging an adapter
   worktrees/<roomId>/     the room's checkout
   diffs/<messageId>.diff  diffs too large to keep in a row
@@ -138,12 +163,24 @@ The fence is the portable path and works for any runtime. `--json-schema` (Claud
 ## Development
 
 ```sh
-npm run build       # tsc -b across the workspace
+npm run build       # tsc -b across the workspace, then vite build for the web app
 npm test            # vitest, hermetic: no network, no agent CLI required
 npm run lint        # eslint, type-aware
 npm run typecheck
 npm run format
 ```
+
+Two terminals, for working on the UI:
+
+```sh
+npm run build:ts && npm run dev:server   # the API on :4321, no browser
+npm run dev:web                          # Vite on :5173, proxying /api and the WebSocket
+```
+
+The server tests drive every route through `app.inject()` and never open a port, except the
+WebSocket ones, which listen on port 0. The web tests run in `node`, not jsdom: everything worth
+pinning – the event reducer, mention parsing, diff parsing – is a pure module, deliberately, so
+there are no DOM component tests to need a browser environment.
 
 `npm test` never spawns an agent CLI. The adapter tests replay recorded fixtures
 (`packages/core/test/fixtures/`), the process tests drive a tiny `node -e` child, and everything
@@ -171,11 +208,12 @@ adapters stay a pair of pure pieces: an argv builder and a stream parser. Likewi
 `packages/core/src/store/rooms.ts` is the only place that holds SQL, so swapping `better-sqlite3`
 for something else is one file rather than a refactor.
 
-The engine emits the event stream M2's WebSocket will forward, unchanged:
+The engine emits the event stream the WebSocket forwards, unchanged:
 
 ```ts
 type EngineEvent =
   | { type: 'room.state'; roomId: string; state: RoomState; round: number }
+  | { type: 'room.paused'; roomId: string; paused: boolean }
   | {
       type: 'message.start';
       roomId: string;
@@ -189,8 +227,32 @@ type EngineEvent =
   | { type: 'turn.activity'; roomId: string; turnId: string; event: TurnEvent };
 ```
 
-The terminal renderer consumes exactly that, so the CLI and the browser end up being two views of one
-loop rather than two implementations of it.
+The terminal renderer consumes exactly that, and so does the WebSocket – `/api/ws` forwards these
+values verbatim after one `snapshot` frame – so the CLI and the browser end up being two views of
+one loop rather than two implementations of it.
+
+### The HTTP surface
+
+Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
+
+| method + path                                                               | what it does                                                   |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `GET /api/health`                                                           | `{ ok, version }`                                              |
+| `GET /api/runtimes`                                                         | the same payload as `acr doctor --json`                        |
+| `GET /api/rooms`                                                            | `?repo=&open=&limit=`                                          |
+| `POST /api/rooms`                                                           | open a room; `start: true` kicks the loop off                  |
+| `GET /api/rooms/:id`                                                        | room, roster, transcript, turns, and the in-flight turn buffer |
+| `GET /api/rooms/:id/messages`                                               | `?afterSeq=&limit=` – the tail, not the history                |
+| `GET /api/rooms/:id/diff?message=`                                          | `text/plain`, following a diff that spilled to disk            |
+| `GET /api/rooms/:id/files`                                                  | changed files and `git diff --stat` against the room's base    |
+| `POST /api/rooms/:id/messages`                                              | say something; holds the loop, sets the next speaker           |
+| `POST /api/rooms/:id/start` \| `/pause` \| `/resume` \| `/stop` \| `/close` | drive the room                                                 |
+| `PATCH /api/rooms/:id`                                                      | `{ maxRounds?, title? }`                                       |
+| `GET /api/repos` \| `/api/repos/browse?path=`                               | the repo picker                                                |
+
+`GET /api/repos/browse` reads directories and `POST /api/rooms` spawns an agent CLI with `edits`
+permission, so the origin check is load-bearing rather than a nicety: without it, any page you have
+open could POST to `127.0.0.1:4321`.
 
 ## License
 

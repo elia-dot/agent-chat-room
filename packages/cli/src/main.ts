@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { doctor } from './commands/doctor.js';
 import { rooms } from './commands/rooms.js';
 import { run, UsageError } from './commands/run.js';
+import { serve, type ServeOptions } from './commands/serve.js';
 import { EXIT, type ExitCode } from './exit.js';
 import { Renderer } from './render.js';
 
@@ -12,15 +13,22 @@ export const VERSION = '0.0.0';
 const HELP = `acr - agent chat room
 
 Usage:
+  acr                          Start the server and open the web UI.
+  acr serve [--port N] [--no-open]
   acr doctor [--json]
   acr run --task <text> [options]
   acr rooms ls | show <id> | resume <id> | close <id>
   acr --help | --version
 
 Commands:
+  serve         Start the local server and open the web UI (the default with no arguments).
   doctor        Show which agent runtimes are installed, new enough and logged in.
   run           Run a room: the worker builds, the reviewers review, repeat until they agree.
   rooms         List, inspect, resume and close the rooms in the local store.
+
+Options for \`serve\`:
+  --port <n>               Port to bind (default: 4321, walking upward if it is taken).
+  --no-open                Do not open a browser.
 
 Options for \`run\`:
   --task <text>            The task. Required unless --task-file or --room is given.
@@ -50,13 +58,23 @@ Exit codes:
   2  bad usage
   3  the reviewers did not approve (request-changes, question, no verdict block, or max rounds)
 
-\`acr\` with no arguments will start the server and open the web UI. That is milestone M2;
-for now it prints this help.`;
+The server binds 127.0.0.1 only, so nothing about a room ever leaves your machine. Rooms
+run inside the \`acr serve\` process: closing the browser tab does not stop them, Ctrl-C does.`;
 
-export async function main(argv: string[]): Promise<ExitCode> {
+/** Injectable seams, so `main.test.ts` can exercise the argument handling hermetically. */
+export interface MainOptions {
+  serve?: (opts: ServeOptions) => Promise<ExitCode>;
+}
+
+export async function main(argv: string[], opts: MainOptions = {}): Promise<ExitCode> {
   const [command, ...rest] = argv;
 
-  if (command === undefined || command === '--help' || command === '-h' || command === 'help') {
+  // Bare `acr` starts the UI. `--help` is the stable spelling for the help text; it used
+  // to be what no arguments did, and a script relying on that gets a server instead.
+  if (command === undefined) {
+    return await serveCommand([], opts);
+  }
+  if (command === '--help' || command === '-h' || command === 'help') {
     process.stdout.write(`${HELP}\n`);
     return EXIT.ok;
   }
@@ -67,6 +85,8 @@ export async function main(argv: string[]): Promise<ExitCode> {
 
   try {
     switch (command) {
+      case 'serve':
+        return await serveCommand(rest, opts);
       case 'doctor':
         return await doctor(parseDoctorArgs(rest));
       case 'run':
@@ -90,6 +110,38 @@ export async function main(argv: string[]): Promise<ExitCode> {
 }
 
 /**
+ * `node:util`'s `parseArgs` has no `--no-flag` negation – it answers "Unknown option
+ * '--no-open'" – so the documented negative flags are pulled out of argv here and folded
+ * back in as `false`. Anything after a bare `--` is left alone.
+ */
+function withNegations(
+  argv: string[],
+  names: readonly string[],
+): { argv: string[]; negated: Record<string, false> } {
+  const negated: Record<string, false> = {};
+  const rest: string[] = [];
+  let passthrough = false;
+  for (const arg of argv) {
+    if (passthrough) {
+      rest.push(arg);
+      continue;
+    }
+    if (arg === '--') {
+      passthrough = true;
+      rest.push(arg);
+      continue;
+    }
+    const name = /^--no-(.+)$/.exec(arg)?.[1];
+    if (name && names.includes(name)) {
+      negated[name] = false;
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { argv: rest, negated };
+}
+
+/**
  * `parseArgs` throws a plain TypeError on an unknown flag. That is bad usage, not an
  * internal failure, so it has to come back as exit code 2 with a readable message.
  */
@@ -105,6 +157,34 @@ function usageGuard<T>(parse: () => T): T {
   }
 }
 
+async function serveCommand(argv: string[], opts: MainOptions): Promise<ExitCode> {
+  const flags = withNegations(argv, ['open', 'color']);
+  const { values } = usageGuard(() =>
+    parseArgs({
+      args: flags.argv,
+      options: {
+        port: { type: 'string' },
+        open: { type: 'boolean' },
+        color: { type: 'boolean' },
+      },
+      allowPositionals: false,
+    }),
+  );
+
+  const port = values.port === undefined ? undefined : integer(values.port, '--port');
+  if (port !== undefined && port > 65_535) {
+    throw new UsageError(`--port must be a valid port number, got "${values.port}"`);
+  }
+  const open = values.open ?? flags.negated.open;
+  const color = values.color ?? flags.negated.color;
+
+  return await (opts.serve ?? serve)({
+    ...(port === undefined ? {} : { port }),
+    ...(open === undefined ? {} : { open }),
+    renderer: new Renderer(color === undefined ? {} : { color }),
+  });
+}
+
 function parseDoctorArgs(argv: string[]): { json: boolean } {
   const { values } = usageGuard(() =>
     parseArgs({
@@ -117,9 +197,10 @@ function parseDoctorArgs(argv: string[]): { json: boolean } {
 }
 
 async function runCommand(argv: string[]): Promise<ExitCode> {
+  const flags = withNegations(argv, ['worktree', 'color']);
   const { values } = usageGuard(() =>
     parseArgs({
-      args: argv,
+      args: flags.argv,
       options: {
         task: { type: 'string' },
         'task-file': { type: 'string' },
@@ -157,7 +238,9 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
     );
   }
 
-  const renderer = new Renderer(values.color === undefined ? {} : { color: values.color });
+  const worktree = values.worktree ?? flags.negated.worktree;
+  const color = values.color ?? flags.negated.color;
+  const renderer = new Renderer(color === undefined ? {} : { color });
   const summary = await run({
     ...(task.trim() ? { task } : {}),
     cwd: values.cwd ?? process.cwd(),
@@ -168,7 +251,7 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
     ...(values['model-worker'] ? { modelWorker: values['model-worker'] } : {}),
     ...(values['model-reviewer'] ? { modelReviewer: values['model-reviewer'] } : {}),
     // `--no-worktree` arrives as `worktree: false`; leaving it unset keeps the default.
-    ...(values.worktree === undefined ? {} : { worktree: values.worktree }),
+    ...(worktree === undefined ? {} : { worktree }),
     ...(timeoutSeconds ? { timeoutMs: Math.round(timeoutSeconds * 1000) } : {}),
     allowDirty: values['allow-dirty'] === true,
     renderer,
@@ -181,9 +264,10 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
 }
 
 async function roomsCommand(argv: string[]): Promise<ExitCode> {
+  const flags = withNegations(argv, ['color']);
   const { values, positionals } = usageGuard(() =>
     parseArgs({
-      args: argv,
+      args: flags.argv,
       options: {
         cwd: { type: 'string' },
         timeout: { type: 'string', default: '1800' },
@@ -195,6 +279,7 @@ async function roomsCommand(argv: string[]): Promise<ExitCode> {
   );
 
   const [subcommand = 'ls', id] = positionals;
+  const color = values.color ?? flags.negated.color;
   const timeoutSeconds = positive(values.timeout, '--timeout') ?? 1800;
   return await rooms({
     subcommand,
@@ -202,7 +287,7 @@ async function roomsCommand(argv: string[]): Promise<ExitCode> {
     cwd: values.cwd ?? process.cwd(),
     json: values.json === true,
     timeoutMs: Math.round(timeoutSeconds * 1000),
-    renderer: new Renderer(values.color === undefined ? {} : { color: values.color }),
+    renderer: new Renderer(color === undefined ? {} : { color }),
   });
 }
 

@@ -5,7 +5,18 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "types": ["node"]
+    "types": ["node"],
+    // The web app is DOM code and JSX; the lint project is the one tsconfig that has to
+    // typecheck every package at once, so it carries both libs.
+    "lib": ["es2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "paths": { "@agent-chat-room/core": ["./packages/core/src/index.ts"] }
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "*.ts"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.tsx",
+    "packages/*/test/**/*.ts",
+    "packages/*/vite.config.ts",
+    "*.ts"
+  ]
 }

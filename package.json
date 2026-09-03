@@ -12,20 +12,25 @@
     "node": ">=20.19"
   },
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc -p tsconfig.eslint.json",
+    "build": "tsc -b && npm -w @agent-chat-room/web run build",
+    "build:ts": "tsc -b",
+    "typecheck": "tsc -p tsconfig.eslint.json && tsc -p packages/web/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "acr": "node packages/cli/dist/bin.js",
+    "dev:server": "node packages/cli/dist/bin.js serve --no-open",
+    "dev:web": "npm -w @agent-chat-room/web run dev",
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo",
-    "format:check": "prettier --check ."
+    "serve": "node packages/cli/dist/bin.js serve"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^7.1.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.19.0",
