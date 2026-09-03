@@ -28,6 +28,9 @@ describe('buildTurnPrompt', () => {
       - Run the project's own tests or type checks if it has them, and say what you ran.
       - Reply with a short summary: what you changed, why, and anything you deliberately did not do.
       - Do not commit, do not create branches, and do not push. The engine handles version control.
+      - You are working in a fresh git worktree, so build artefacts and installed dependencies may
+        not be there. If a command fails because of a missing install, say so instead of installing
+        the world – the human decides what a room is allowed to download.
       - If the task is ambiguous, pick the most reasonable reading, state the assumption, and continue.
       "
     `);
@@ -78,6 +81,21 @@ describe('buildTurnPrompt', () => {
     expect(prompt).not.toContain('```diff');
     expect(prompt).toContain('too large to inline');
     expect(prompt).toContain('git diff abc123');
+  });
+
+  it('points a read-only reviewer at a file when the diff is too big to inline', () => {
+    // `permissions.ts` gives a reviewer `--tools Read,Glob,Grep`, so telling it to run
+    // `git diff` is advice it cannot act on. Reading a file is something it still can do.
+    const huge = `+${'x'.repeat(DEFAULT_MAX_INLINE_DIFF_BYTES + 1)}`;
+    const prompt = buildTurnPrompt({
+      ...base,
+      role: 'reviewer',
+      diff: huge,
+      diffFile: '/tmp/acr/diffs/msg.diff',
+      diffCommand: 'git diff abc123',
+    });
+    expect(prompt).toContain('/tmp/acr/diffs/msg.diff');
+    expect(prompt).toContain('read that file');
   });
 
   it('ends with the role instructions for the reviewer, including the verdict rule', () => {

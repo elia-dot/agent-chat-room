@@ -3,17 +3,23 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { RoomStore } from '@agent-chat-room/core';
+
+import { rooms } from '../src/commands/rooms.js';
 import { run } from '../src/commands/run.js';
 import { EXIT } from '../src/exit.js';
 import { Renderer } from '../src/render.js';
-import { Capture, makeRepo } from './helpers.js';
+import { Capture, gitIn, makeRepo, useTempConfigDir } from './helpers.js';
 
 /**
- * The M0 acceptance criterion, verbatim from PLAN.md section 6:
+ * The M1 acceptance criterion, verbatim from PLAN.md section 6:
  *
- *   "Done when: it fixes something in a sample repo and Codex's review parses into a verdict."
+ *   "Done when: `acr run` completes a full approve cycle unattended and can be resumed
+ *    after the process restarts."
  *
- * This spends real subscription turns on two real CLIs, so it is opt in. Run it with:
+ * So this is no longer one exchange: it is a whole room, in a worktree, with the engine
+ * committing the round that Codex approved. It spends real subscription turns on two real
+ * CLIs, so it is opt in. Run it with:
  *
  *   ACR_LIVE=1 npm test -- live
  *
@@ -37,9 +43,9 @@ afterAll(() => {
   for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe.skipIf(!live)('live: claude works, codex reviews', () => {
+describe.skipIf(!live)('live: claude works, codex reviews, the room commits', () => {
   it(
-    'fixes the sample repo and produces a parsed verdict',
+    'completes a full approve cycle unattended and can be resumed',
     async () => {
       const dir = makeRepo({
         'math.js': BROKEN,
@@ -47,25 +53,58 @@ describe.skipIf(!live)('live: claude works, codex reviews', () => {
       });
       repos.push(dir);
 
+      const config = useTempConfigDir();
+      const store = RoomStore.open();
       const capture = new Capture();
-      const summary = await run({
-        task:
-          'math.js exports add(a, b) but the body subtracts. Fix it so add returns the sum. ' +
-          'Change nothing else.',
-        cwd: dir,
-        agents: ['claude', 'codex'],
-        timeoutMs: 20 * 60 * 1000,
-        renderer: new Renderer({ color: false, write: capture.write }),
-      });
+      try {
+        const summary = await run({
+          task:
+            'math.js exports add(a, b) but the body subtracts. Fix it so add returns the sum. ' +
+            'Change nothing else.',
+          cwd: dir,
+          agents: ['claude', 'codex'],
+          maxRounds: 3,
+          timeoutMs: 20 * 60 * 1000,
+          store,
+          renderer: new Renderer({ color: false, write: capture.write }),
+        });
 
-      // The worker actually changed the repo.
-      expect(readFileSync(join(dir, 'math.js'), 'utf8')).toContain('a + b');
-      expect(summary.changedFiles).toContain('math.js');
+        // The room worked in its own worktree; the checkout the human owns never moved.
+        expect(summary.worktree).toBeTruthy();
+        expect(readFileSync(join(summary.worktree!, 'math.js'), 'utf8')).toContain('a + b');
+        expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(BROKEN);
+        expect(summary.changedFiles).toContain('math.js');
 
-      // Codex's review parsed into a verdict, which is the milestone.
-      expect(summary.verdict?.ok).toBe(true);
-      expect(summary.exitCode === EXIT.ok || summary.exitCode === EXIT.notApproved).toBe(true);
+        // Codex's review parsed into a verdict, and the loop reached a decision.
+        expect(summary.verdict?.ok).toBe(true);
+        expect(summary.exitCode === EXIT.ok || summary.exitCode === EXIT.notApproved).toBe(true);
+
+        if (summary.exitCode === EXIT.ok) {
+          // An approved round is committed on the room branch, not left in a working tree.
+          expect(summary.commit).toBeTruthy();
+          expect(gitIn(summary.worktree!, 'rev-list', '--count', 'HEAD')).not.toBe('1');
+          expect(gitIn(summary.worktree!, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(
+            summary.branch,
+          );
+        }
+
+        // The room survived into the store and can be read back after the fact.
+        const listing = new Capture();
+        await rooms({
+          subcommand: 'show',
+          id: summary.roomId,
+          cwd: dir,
+          store,
+          renderer: new Renderer({ color: false, write: listing.write }),
+        });
+        expect(listing.text).toContain(summary.branch);
+        expect(store.listTurns(summary.roomId).length).toBeGreaterThanOrEqual(2);
+        expect(store.unfinishedTurns(summary.roomId)).toHaveLength(0);
+      } finally {
+        store.close();
+        config.restore();
+      }
     },
-    25 * 60 * 1000,
+    40 * 60 * 1000,
   );
 });

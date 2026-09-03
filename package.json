@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -p tsconfig.eslint.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -23,6 +23,7 @@
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",

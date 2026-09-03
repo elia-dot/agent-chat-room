@@ -1,95 +1,118 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { resetEchoAdapter } from '@agent-chat-room/core';
+import { RoomStore, resetEchoAdapter } from '@agent-chat-room/core';
 
 import { run } from '../src/commands/run.js';
 import { EXIT } from '../src/exit.js';
 import { Renderer } from '../src/render.js';
-import { Capture, makeRepo, writeEchoScript } from './helpers.js';
+import { Capture, gitIn, makeRepo, useTempConfigDir, writeEchoScript } from './helpers.js';
 
 const BROKEN = 'export function add(a, b) {\n  return a - b;\n}\n';
+const HALF = 'export function add(a, b) {\n  return a + b; // todo\n}\n';
 const FIXED = 'export function add(a, b) {\n  return a + b;\n}\n';
 
-const repos: string[] = [];
+const verdict = (decision: string, blocking: string[] = [], nits: string[] = []): string =>
+  `Review body.\n\n\`\`\`verdict\n${JSON.stringify({ decision, blocking, nits })}\n\`\`\``;
 
-function repo(files: Record<string, string>): string {
+const workerTurn = (round: number, text: string, files?: Record<string, string>) => ({
+  when: { role: 'worker', round },
+  text,
+  ...(files ? { writeFiles: files } : {}),
+});
+const reviewTurn = (round: number, text: string) => ({ when: { role: 'reviewer', round }, text });
+
+const repos: string[] = [];
+let config: ReturnType<typeof useTempConfigDir>;
+let store: RoomStore;
+
+function repo(files: Record<string, string> = { 'math.js': BROKEN }): string {
   const dir = makeRepo(files);
   repos.push(dir);
   return dir;
 }
 
 beforeEach(() => {
+  config = useTempConfigDir();
+  process.env.ACR_NO_TURN_LOG = '1';
+  store = RoomStore.open();
   resetEchoAdapter();
 });
 
 afterEach(() => {
+  store.close();
   delete process.env.ACR_ECHO_SCRIPT;
   delete process.env.ACR_NO_TURN_LOG;
   for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
   resetEchoAdapter();
+  config.restore();
 });
 
-function scriptedRun(dir: string, turns: unknown[], task = 'fix add()') {
+function scriptedRun(
+  dir: string,
+  turns: unknown[],
+  overrides: Partial<Parameters<typeof run>[0]> = {},
+) {
   process.env.ACR_ECHO_SCRIPT = writeEchoScript({ turns });
-  process.env.ACR_NO_TURN_LOG = '1';
   const capture = new Capture();
   return {
     capture,
     promise: run({
-      task,
+      task: 'fix add()',
       cwd: dir,
       agents: ['echo', 'echo'],
       timeoutMs: 5000,
+      store,
       renderer: new Renderer({ color: false, write: capture.write }),
+      ...overrides,
     }),
   };
 }
 
-describe('acr run, one worker turn then one reviewer turn', () => {
-  it('carries the worker diff into the reviewer prompt and parses the verdict', async () => {
-    const dir = repo({ 'math.js': BROKEN });
+describe('acr run, driving the room engine', () => {
+  it('runs a room in its own worktree and leaves the checkout alone', async () => {
+    const dir = repo();
     const { capture, promise } = scriptedRun(dir, [
-      {
-        text: 'Changed the operator in math.js from - to +.',
-        writeFiles: { 'math.js': FIXED },
-      },
-      {
-        text: 'Correct.\n\n```verdict\n{"decision":"approve","blocking":[],"nits":["add a test"]}\n```',
-      },
+      workerTurn(1, 'Changed the operator in math.js from - to +.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve', [], ['add a test'])),
     ]);
     const summary = await promise;
 
-    // The worker really edited the repo.
-    expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(FIXED);
-    expect(summary.changedFiles).toEqual(['math.js']);
-
-    expect(summary.verdict?.ok).toBe(true);
-    expect(summary.verdict?.ok === true && summary.verdict.verdict.decision).toBe('approve');
-    expect(summary.ok).toBe(true);
     expect(summary.exitCode).toBe(EXIT.ok);
+    expect(summary.ok).toBe(true);
+    expect(summary.rounds).toBe(1);
+    expect(summary.state).toBe('approved');
+    expect(summary.changedFiles).toEqual(['math.js']);
+    expect(summary.branch).toMatch(/^acr\//);
+    expect(summary.commit).toBeTruthy();
+
+    // The room edited its worktree, not the repo the human is standing in.
+    expect(readFileSync(join(summary.worktree!, 'math.js'), 'utf8')).toBe(FIXED);
+    expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(BROKEN);
 
     const transcript = capture.text;
+    expect(transcript).toContain('---- round 1 ----');
     expect(transcript).toContain('[echo · worker · r1]');
     expect(transcript).toContain('[echo · reviewer · r1]');
+    expect(transcript).toContain('Changed the operator in math.js');
     expect(transcript).toContain('APPROVE');
     expect(transcript).toContain('nit: add a test');
+    expect(transcript).toContain('1 of 1 approved');
+    expect(transcript).toContain('APPROVED');
   });
 
   it('gives the reviewer the worker message and the actual diff', async () => {
-    const dir = repo({ 'math.js': BROKEN });
+    const dir = repo();
     const prompts: string[] = [];
     process.env.ACR_ECHO_SCRIPT = writeEchoScript({
       turns: [
-        { text: 'swapped the operator', writeFiles: { 'math.js': FIXED } },
-        { text: '```verdict\n{"decision":"approve"}\n```' },
+        workerTurn(1, 'swapped the operator', { 'math.js': FIXED }),
+        reviewTurn(1, verdict('approve')),
       ],
     });
-    process.env.ACR_NO_TURN_LOG = '1';
 
-    // Spy on what each turn was actually asked, by wrapping the adapter registry entry.
     const core = await import('@agent-chat-room/core');
     const echo = core.getAdapter('echo')!;
     const originalRun = echo.run.bind(echo);
@@ -104,6 +127,7 @@ describe('acr run, one worker turn then one reviewer turn', () => {
         cwd: dir,
         agents: ['echo', 'echo'],
         timeoutMs: 5000,
+        store,
         renderer: new Renderer({ color: false, write: () => undefined }),
       });
     } finally {
@@ -122,97 +146,223 @@ describe('acr run, one worker turn then one reviewer turn', () => {
     expect(reviewerPrompt).toContain('+  return a + b;');
   });
 
-  it('exits notApproved on request-changes and lists the blocking items', async () => {
-    const dir = repo({ 'math.js': BROKEN });
+  it('loops until the reviewer approves, and prints each round', async () => {
+    const dir = repo();
     const { capture, promise } = scriptedRun(dir, [
-      { text: 'did something', writeFiles: { 'math.js': FIXED } },
-      {
-        text: 'Nope.\n\n```verdict\n{"decision":"request-changes","blocking":["math.js:2 still wrong"]}\n```',
-      },
+      workerTurn(1, 'First pass.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('request-changes', ['math.js:2 drop the todo'])),
+      workerTurn(2, 'Dropped the todo.', { 'math.js': FIXED }),
+      reviewTurn(2, verdict('approve')),
     ]);
     const summary = await promise;
-    expect(summary.ok).toBe(false);
+
+    expect(summary.exitCode).toBe(EXIT.ok);
+    expect(summary.rounds).toBe(2);
+    expect(capture.text).toContain('---- round 1 ----');
+    expect(capture.text).toContain('---- round 2 ----');
+    expect(capture.text).toContain('blocking: math.js:2 drop the todo');
+    expect(readFileSync(join(summary.worktree!, 'math.js'), 'utf8')).toBe(FIXED);
+  });
+
+  it('takes more than two agents, with everyone after the first reviewing', async () => {
+    const dir = repo();
+    const { promise } = scriptedRun(
+      dir,
+      [
+        workerTurn(1, 'Done.', { 'math.js': FIXED }),
+        reviewTurn(1, verdict('approve')),
+        reviewTurn(1, verdict('approve')),
+      ],
+      { agents: ['echo', 'echo', 'echo'] },
+    );
+    const summary = await promise;
+    expect(summary.exitCode).toBe(EXIT.ok);
+    expect(summary.reviews).toHaveLength(2);
+  });
+
+  it('exits notApproved when the rounds run out, and does not commit', async () => {
+    const dir = repo();
+    const { capture, promise } = scriptedRun(
+      dir,
+      [
+        workerTurn(1, 'Attempt.', { 'math.js': HALF }),
+        reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
+      ],
+      { maxRounds: 1 },
+    );
+    const summary = await promise;
+
     expect(summary.exitCode).toBe(EXIT.notApproved);
+    expect(summary.state).toBe('needs-you');
+    expect(summary.commit).toBeUndefined();
     expect(capture.text).toContain('REQUEST CHANGES');
     expect(capture.text).toContain('blocking: math.js:2 still wrong');
+    expect(gitIn(summary.worktree!, 'rev-list', '--count', 'HEAD')).toBe('1');
   });
 
   it('refuses to approve when the reviewer forgot the verdict block, and shows the tail', async () => {
-    const dir = repo({ 'math.js': BROKEN });
-    const { capture, promise } = scriptedRun(dir, [
-      { text: 'did something', writeFiles: { 'math.js': FIXED } },
-      { text: 'Looks good to me, ship it.' },
-    ]);
+    const dir = repo();
+    const { capture, promise } = scriptedRun(
+      dir,
+      [workerTurn(1, 'did something', { 'math.js': FIXED }), reviewTurn(1, 'Looks good, ship it.')],
+      { maxRounds: 1 },
+    );
     const summary = await promise;
     expect(summary.exitCode).toBe(EXIT.notApproved);
     expect(summary.verdict?.ok).toBe(false);
-    expect(capture.text).toContain('no verdict');
-    expect(capture.text).toContain('Looks good to me, ship it.');
+    expect(capture.text).toContain('did not end with a verdict block');
+    expect(capture.text).toContain('Looks good, ship it.');
   });
 
   it('stops after a failed worker turn instead of reviewing nothing', async () => {
-    const dir = repo({ 'math.js': BROKEN });
+    const dir = repo();
     const { capture, promise } = scriptedRun(dir, [
-      { error: 'the runtime fell over' },
-      { text: '```verdict\n{"decision":"approve"}\n```' },
+      { when: { role: 'worker', round: 1 }, error: 'the runtime fell over' },
+      reviewTurn(1, verdict('approve')),
     ]);
     const summary = await promise;
     expect(summary.exitCode).toBe(EXIT.internalError);
-    expect(summary.reviewer).toBeUndefined();
+    expect(summary.reviews).toEqual([]);
     expect(capture.text).toContain('worker turn failed');
   });
 
-  it('refuses to start on a dirty tree, because M0 has no worktree yet', async () => {
-    const dir = repo({ 'math.js': BROKEN });
-    const { writeFileSync } = await import('node:fs');
-    writeFileSync(join(dir, 'math.js'), '// someone was mid-edit\n');
+  it('with --no-worktree it edits the checkout, and refuses a dirty tree', async () => {
+    const dir = repo();
+    writeFileSync(join(dir, 'notes.txt'), 'scratch\n');
 
     await expect(
       run({
         task: 'fix add()',
         cwd: dir,
         agents: ['echo', 'echo'],
+        worktree: false,
         timeoutMs: 5000,
+        store,
         renderer: new Renderer({ color: false, write: () => undefined }),
       }),
     ).rejects.toThrow(/uncommitted changes/);
-  });
-
-  it('runs on a dirty tree when explicitly allowed', async () => {
-    const dir = repo({ 'math.js': BROKEN });
-    const { writeFileSync } = await import('node:fs');
-    writeFileSync(join(dir, 'notes.txt'), 'scratch\n');
 
     process.env.ACR_ECHO_SCRIPT = writeEchoScript({
-      turns: [
-        { text: 'ok', writeFiles: { 'math.js': FIXED } },
-        { text: '```verdict\n{"decision":"approve"}\n```' },
-      ],
+      turns: [workerTurn(1, 'ok', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))],
     });
-    process.env.ACR_NO_TURN_LOG = '1';
     const summary = await run({
       task: 'fix add()',
       cwd: dir,
       agents: ['echo', 'echo'],
-      timeoutMs: 5000,
+      worktree: false,
       allowDirty: true,
+      timeoutMs: 5000,
+      store,
       renderer: new Renderer({ color: false, write: () => undefined }),
     });
     expect(summary.exitCode).toBe(EXIT.ok);
-    // The untracked file the human left behind is still part of the captured diff.
+    expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(FIXED);
+    // The untracked file the human left behind is part of the captured diff here.
     expect(summary.changedFiles).toContain('notes.txt');
   });
 
+  it('reads its roster and round count from .acr.json', async () => {
+    const dir = repo({
+      'math.js': BROKEN,
+      '.acr.json': JSON.stringify({ agents: ['echo', 'echo'], rounds: 1 }),
+    });
+    process.env.ACR_ECHO_SCRIPT = writeEchoScript({
+      turns: [
+        workerTurn(1, 'ok', { 'math.js': HALF }),
+        reviewTurn(1, verdict('request-changes', ['math.js:2 todo'])),
+      ],
+    });
+    const summary = await run({
+      task: 'fix add()',
+      cwd: dir,
+      timeoutMs: 5000,
+      store,
+      renderer: new Renderer({ color: false, write: () => undefined }),
+    });
+    // `rounds: 1` from the file, so one round and then needs-you.
+    expect(summary.rounds).toBe(1);
+    expect(summary.exitCode).toBe(EXIT.notApproved);
+  });
+
+  it('warns about an unknown .acr.json key instead of refusing to run', async () => {
+    const dir = repo({
+      'math.js': BROKEN,
+      '.acr.json': JSON.stringify({ agents: ['echo', 'echo'], futureThing: 1 }),
+    });
+    const { capture, promise } = scriptedRun(
+      dir,
+      [workerTurn(1, 'ok', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))],
+      { agents: undefined },
+    );
+    const summary = await promise;
+    expect(summary.exitCode).toBe(EXIT.ok);
+    expect(capture.text).toContain('unknown key "futureThing"');
+  });
+
+  it('resumes an existing room by id', async () => {
+    const dir = repo();
+    const { promise } = scriptedRun(
+      dir,
+      [
+        workerTurn(1, 'Attempt.', { 'math.js': HALF }),
+        reviewTurn(1, verdict('request-changes', ['math.js:2 todo'])),
+      ],
+      { maxRounds: 1 },
+    );
+    const first = await promise;
+    expect(first.state).toBe('needs-you');
+
+    // A second invocation picks the room up, keeping its worktree, branch and sessions.
+    store.updateRoom(first.roomId, { maxRounds: 2 });
+    resetEchoAdapter();
+    process.env.ACR_ECHO_SCRIPT = writeEchoScript({
+      turns: [workerTurn(2, 'Fixed.', { 'math.js': FIXED }), reviewTurn(2, verdict('approve'))],
+    });
+
+    const second = await run({
+      cwd: dir,
+      room: first.roomId.slice(0, 8),
+      timeoutMs: 5000,
+      store,
+      renderer: new Renderer({ color: false, write: () => undefined }),
+    });
+    expect(second.roomId).toBe(first.roomId);
+    expect(second.exitCode).toBe(EXIT.ok);
+    expect(second.rounds).toBe(2);
+    expect(second.worktree).toBe(first.worktree);
+  });
+
   it('rejects an unknown runtime by name', async () => {
-    const dir = repo({ 'math.js': BROKEN });
+    const dir = repo();
     await expect(
       run({
         task: 'x',
         cwd: dir,
         agents: ['echo', 'nope'],
         timeoutMs: 1000,
+        store,
         renderer: new Renderer({ color: false, write: () => undefined }),
       }),
     ).rejects.toThrow(/unknown runtime "nope"/);
+  });
+
+  it('refuses to run outside a git repository', async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'acr-notrepo-'));
+    try {
+      await expect(
+        run({
+          task: 'x',
+          cwd: dir,
+          agents: ['echo', 'echo'],
+          timeoutMs: 1000,
+          store,
+          renderer: new Renderer({ color: false, write: () => undefined }),
+        }),
+      ).rejects.toThrow(/not inside a git repository/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

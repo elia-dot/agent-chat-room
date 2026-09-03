@@ -1,7 +1,9 @@
 export { doctor } from './commands/doctor.js';
 export type { DoctorOptions } from './commands/doctor.js';
-export { run, UsageError } from './commands/run.js';
+export { run, UsageError, exitCodeFor } from './commands/run.js';
 export type { RunOptions, RunSummary } from './commands/run.js';
+export { rooms } from './commands/rooms.js';
+export type { RoomsOptions } from './commands/rooms.js';
 export { Renderer, formatUsage } from './render.js';
 export { EXIT } from './exit.js';
 export type { ExitCode } from './exit.js';

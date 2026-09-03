@@ -1,221 +1,212 @@
-import { randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
-
-import type { AgentAdapter, ParsedVerdict, TurnEvent, TurnResult } from '@agent-chat-room/core';
+import type { Message, ParsedVerdict, RoomOutcome, RoomState } from '@agent-chat-room/core';
 import {
-  buildTurnPrompt,
-  getAdapter,
-  git,
+  EngineError,
+  RoomEngine,
+  RoomStore,
+  isTerminal,
   parseVerdict,
-  roleInstructions,
 } from '@agent-chat-room/core';
 
 import { EXIT, type ExitCode } from '../exit.js';
 import { Renderer } from '../render.js';
 
 export interface RunOptions {
-  task: string;
+  task?: string;
   cwd: string;
-  /** Runtime ids. First is the worker, second is the reviewer. */
-  agents: string[];
+  /** Runtime ids. The first is the worker; every other one reviews. */
+  agents?: string[];
   title?: string;
+  /** Model override for the worker turn. */
   modelWorker?: string;
+  /** Model override applied to every reviewer. */
   modelReviewer?: string;
-  timeoutMs: number;
+  timeoutMs?: number;
+  maxRounds?: number;
+  /** `false` runs in the checkout instead of a dedicated worktree. */
+  worktree?: boolean;
   allowDirty?: boolean;
+  /** Resume an existing room instead of opening a new one. */
+  room?: string;
   renderer?: Renderer;
+  /** Injectable so tests can use a disposable database. */
+  store?: RoomStore;
 }
 
 export interface RunSummary {
   ok: boolean;
   exitCode: ExitCode;
-  worker: { runtime: string; text: string; sessionId?: string; error?: string };
-  reviewer?: { runtime: string; text: string; sessionId?: string; error?: string };
-  verdict?: ParsedVerdict;
-  changedFiles: string[];
-  base?: string;
+  roomId: string;
+  state: RoomState;
+  rounds: number;
   branch: string;
+  base?: string;
+  worktree?: string;
+  changedFiles: string[];
+  /** Short sha of the commit an approved room produced. */
+  commit?: string;
+  /** The last worker message. Kept for scripts that grew up on the M0 shape. */
+  worker: { runtime: string; text: string; error?: string };
+  /** The first reviewer of the final round. `reviews` has all of them. */
+  reviewer?: { runtime: string; text: string; error?: string };
+  verdict?: ParsedVerdict;
+  reviews: { runtime: string; text: string; verdict: ParsedVerdict }[];
+  error?: string;
 }
 
 /**
- * The M0 loop: one worker turn, then one reviewer turn, then a parsed verdict.
+ * `acr run` is a renderer over `RoomEngine`.
  *
- * There is deliberately no round loop, no state machine and no store here – those are M1.
- * What this proves is the thing the whole project rests on: that two different vendor CLIs
- * can be driven headlessly against the same repo, that the worker's diff reaches the
- * reviewer, and that the review comes back as structured data rather than vibes.
+ * Everything that used to live here – the turn order, the diff capture, the verdict tally
+ * – moved into the engine in M1, because the web UI in M2 has to run the same loop and a
+ * loop that only exists inside a CLI command cannot be shared. What is left is argument
+ * plumbing, an event subscription, and the exit-code contract.
  */
 export async function run(opts: RunOptions): Promise<RunSummary> {
   const r = opts.renderer ?? new Renderer();
+  const store = opts.store ?? new RoomStore();
+  const ownsStore = opts.store === undefined;
 
-  const workerId = opts.agents[0];
-  const reviewerId = opts.agents[1];
-  if (!workerId || !reviewerId) {
-    throw new UsageError('--agents needs two runtimes, e.g. --agents claude,codex');
-  }
-  const worker = requireAdapter(workerId);
-  const reviewer = requireAdapter(reviewerId);
-
-  const root = (await git.repoRoot(opts.cwd)) ?? opts.cwd;
-  const branch = await git.currentBranch(root);
-  const base = await git.headSha(root);
-  const title = opts.title ?? deriveTitle(opts.task, root);
-
-  // M0 has no worktree (that is M1), so the worker edits the checkout you are standing in.
-  // Refusing to start on a dirty tree is what keeps a room's diff attributable to the room.
-  if (!opts.allowDirty && (await git.isDirty(root))) {
-    throw new UsageError(
-      `${root} has uncommitted changes. Commit or stash them, or pass --allow-dirty to run anyway.`,
-    );
-  }
-
-  r.info(`room "${title}"`);
-  r.info(`repo ${root} on ${branch}${base ? ` at ${base.slice(0, 8)}` : ''}`);
-  r.info(`worker ${worker.id} · reviewer ${reviewer.id}`);
-
-  // --- round 1, worker -----------------------------------------------------
-  r.header(worker.id, 'worker', 1);
-  const workerPrompt = buildTurnPrompt({
-    runtime: worker.id,
-    role: 'worker',
-    title,
-    round: 1,
-    cwd: root,
-    branch,
-    task: opts.task,
-  });
-  const workerResult = await runOneTurn(worker, r, {
-    cwd: root,
-    prompt: workerPrompt,
-    permission: 'edits',
-    model: opts.modelWorker,
-    systemAppend: roleInstructions('worker'),
-    timeoutMs: opts.timeoutMs,
-    turnId: randomUUID(),
-  });
-
-  const changed = await git.changedFiles(root, base);
-  const summary: RunSummary = {
-    ok: false,
-    exitCode: EXIT.internalError,
-    worker: {
-      runtime: worker.id,
-      text: workerResult.text,
-      sessionId: workerResult.sessionId,
-      error: workerResult.error,
-    },
-    changedFiles: changed,
-    base,
-    branch,
-  };
-
-  if (!workerResult.ok) {
-    r.error(`worker turn failed: ${workerResult.error ?? 'unknown error'}`);
-    return summary;
-  }
-
-  if (changed.length === 0) {
-    r.info('  (no files changed)');
-  } else {
-    r.info(`  changed: ${changed.join(', ')}`);
-  }
-
-  // --- round 1, reviewer ---------------------------------------------------
-  const diffStat = await git.diffStat(root, base);
-  const diff = await git.diffSince(root, base);
-
-  r.header(reviewer.id, 'reviewer', 1);
-  const reviewerPrompt = buildTurnPrompt({
-    runtime: reviewer.id,
-    role: 'reviewer',
-    title,
-    round: 1,
-    cwd: root,
-    branch,
-    task: opts.task,
-    newMessages: [
-      { author: worker.id, role: 'worker', round: 1, text: workerResult.text || '(no summary)' },
-    ],
-    diffStat,
-    diff,
-    diffCommand: base ? `git diff ${base}` : 'git diff HEAD',
-  });
-  const reviewerResult = await runOneTurn(reviewer, r, {
-    cwd: root,
-    prompt: reviewerPrompt,
-    permission: 'read-only',
-    model: opts.modelReviewer,
-    systemAppend: roleInstructions('reviewer'),
-    timeoutMs: opts.timeoutMs,
-    turnId: randomUUID(),
-  });
-
-  summary.reviewer = {
-    runtime: reviewer.id,
-    text: reviewerResult.text,
-    sessionId: reviewerResult.sessionId,
-    error: reviewerResult.error,
-  };
-
-  if (!reviewerResult.ok) {
-    r.error(`reviewer turn failed: ${reviewerResult.error ?? 'unknown error'}`);
-    return summary;
-  }
-
-  const verdict = parseVerdict(reviewerResult.text);
-  summary.verdict = verdict;
-  r.verdict(verdict);
-
-  if (!verdict.ok) {
-    // Never guess an approval. Show the tail of what the reviewer actually said so the
-    // human can see whether it was a formatting slip or a real refusal.
-    const tail = reviewerResult.text.trim().split('\n').slice(-8).join('\n');
-    if (tail) {
-      r.line();
-      r.info('  last lines of the review:');
-      for (const line of tail.split('\n')) r.info(`  | ${line}`);
-    }
-    summary.exitCode = EXIT.notApproved;
-    return summary;
-  }
-
-  summary.ok = verdict.verdict.decision === 'approve';
-  summary.exitCode = summary.ok ? EXIT.ok : EXIT.notApproved;
-  return summary;
-}
-
-async function runOneTurn(
-  adapter: AgentAdapter,
-  r: Renderer,
-  req: Parameters<AgentAdapter['run']>[0],
-): Promise<TurnResult> {
-  const sink = (ev: TurnEvent): void => r.event(ev);
-  const handle = adapter.run(req, sink);
-
-  const onSignal = (): void => handle.cancel('interrupted');
-  process.once('SIGINT', onSignal);
-  process.once('SIGTERM', onSignal);
   try {
-    return await handle.done;
+    const engine = await open(opts, store);
+    const room = engine.room;
+
+    for (const warning of engine.configWarnings) r.error(`  ! ${warning}`);
+
+    r.info(`room "${room.title}" (${room.id.slice(0, 8)})`);
+    r.info(
+      `repo ${room.repoRoot} on ${room.roomBranch}${room.baseSha ? ` at ${room.baseSha.slice(0, 8)}` : ''}`,
+    );
+    if (room.worktreePath) r.info(`worktree ${room.worktreePath}`);
+    r.info(
+      engine.participants
+        .map((p) => `${p.role} ${p.runtime}${p.model ? ` (${p.model})` : ''}`)
+        .join(' · '),
+    );
+    r.info(`max ${room.maxRounds} rounds`);
+
+    const unsubscribe = engine.subscribe((event) => r.engineEvent(event));
+    const onSignal = (): void => engine.stop('interrupted');
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+
+    let outcome: RoomOutcome;
+    try {
+      outcome = await engine.run();
+    } finally {
+      unsubscribe();
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+    }
+
+    return summarise(engine, outcome, r);
   } finally {
-    process.removeListener('SIGINT', onSignal);
-    process.removeListener('SIGTERM', onSignal);
+    if (ownsStore) store.close();
   }
 }
 
-function requireAdapter(id: string): AgentAdapter {
-  const adapter = getAdapter(id);
-  if (!adapter)
-    throw new UsageError(
-      `unknown runtime "${id}". Run \`acr doctor\` to see what acr knows about.`,
+async function open(opts: RunOptions, store: RoomStore): Promise<RoomEngine> {
+  const engineOptions = {
+    store,
+    ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+  };
+
+  if (opts.room) {
+    const engine = await RoomEngine.load(opts.room, engineOptions);
+    if (engine.room.state === 'approved') {
+      throw new UsageError(`room ${engine.room.id.slice(0, 8)} is already approved`);
+    }
+    return engine;
+  }
+
+  if (!opts.task?.trim()) throw new UsageError('--task (or --task-file) is required');
+
+  try {
+    return await RoomEngine.create(
+      {
+        task: opts.task,
+        cwd: opts.cwd,
+        // Empty means "not specified": the engine falls back to `.acr.json` and then to
+        // the built-in roster, which is what keeps the precedence order in one place.
+        agents: opts.agents ?? [],
+        ...(opts.modelWorker ? { modelWorker: opts.modelWorker } : {}),
+        ...(opts.modelReviewer ? { modelReviewer: opts.modelReviewer } : {}),
+        ...(opts.title ? { title: opts.title } : {}),
+        ...(opts.maxRounds ? { maxRounds: opts.maxRounds } : {}),
+        ...(opts.worktree === undefined ? {} : { worktree: opts.worktree }),
+        ...(opts.allowDirty ? { allowDirty: true } : {}),
+      },
+      engineOptions,
     );
-  return adapter;
+  } catch (err) {
+    // An `EngineError` is always something the human can fix from the command line.
+    if (err instanceof EngineError) throw new UsageError(err.message);
+    throw err;
+  }
 }
 
-function deriveTitle(task: string, root: string): string {
-  const firstLine = task.trim().split('\n')[0]?.trim() ?? '';
-  const short = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
-  return short || `task in ${basename(root)}`;
+function summarise(engine: RoomEngine, outcome: RoomOutcome, r: Renderer): RunSummary {
+  const room = engine.room;
+  const messages = engine.messages;
+  const finalRound = outcome.round;
+
+  const workerMessage = last(
+    messages.filter((m) => m.role === 'worker' && m.round === finalRound && m.kind === 'agent'),
+  );
+  const reviewMessages = messages.filter(
+    (m) => m.role === 'reviewer' && m.round === finalRound && m.kind === 'agent',
+  );
+
+  const reviews = reviewMessages.map((m) => ({
+    runtime: m.author,
+    text: m.text,
+    verdict: verdictOf(m),
+  }));
+  const first = reviews[0];
+
+  const exitCode = exitCodeFor(outcome);
+  r.outcome(outcome);
+
+  return {
+    ok: outcome.approved,
+    exitCode,
+    roomId: room.id,
+    state: outcome.state,
+    rounds: finalRound,
+    branch: room.roomBranch,
+    ...(room.baseSha ? { base: room.baseSha } : {}),
+    ...(room.worktreePath ? { worktree: room.worktreePath } : {}),
+    changedFiles: outcome.changedFiles,
+    ...(outcome.commit ? { commit: outcome.commit } : {}),
+    worker: {
+      runtime: workerMessage?.author ?? engine.participants[0]?.runtime ?? '',
+      text: workerMessage?.text ?? '',
+      ...(outcome.error && !workerMessage ? { error: outcome.error } : {}),
+    },
+    ...(first ? { reviewer: { runtime: first.runtime, text: first.text } } : {}),
+    ...(first ? { verdict: first.verdict } : {}),
+    reviews,
+    ...(outcome.error ? { error: outcome.error } : {}),
+  };
+}
+
+/**
+ * The documented exit-code contract, unchanged from M0: a script has to be able to tell
+ * "the reviewers did not approve" from "acr itself broke".
+ */
+export function exitCodeFor(outcome: RoomOutcome): ExitCode {
+  if (outcome.error) return EXIT.internalError;
+  if (outcome.approved) return EXIT.ok;
+  if (isTerminal(outcome.state)) return EXIT.notApproved;
+  return EXIT.internalError;
+}
+
+function verdictOf(message: Message): ParsedVerdict {
+  if (message.verdict) return { ok: true, verdict: message.verdict, raw: '' };
+  return parseVerdict(message.text);
+}
+
+function last<T>(items: T[]): T | undefined {
+  return items.length > 0 ? items[items.length - 1] : undefined;
 }
 
 export class UsageError extends Error {}

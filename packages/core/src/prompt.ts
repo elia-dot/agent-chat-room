@@ -23,6 +23,12 @@ export interface BuildTurnPromptInput {
   diff?: string;
   /** Command the agent should run to see the diff itself when it is too big to inline. */
   diffCommand?: string;
+  /**
+   * Absolute path of the diff, written out when it is too big to inline. A read-only
+   * reviewer has no shell, so `git diff` is useless advice to it; reading a file is the
+   * one thing every read-only permission level still allows.
+   */
+  diffFile?: string;
   /** Inline the diff below this size; above it, tell the agent to run git itself. */
   maxInlineDiffBytes?: number;
 }
@@ -80,10 +86,13 @@ export function buildTurnPrompt(input: BuildTurnPromptInput): string {
         parts.push(diff.replace(/\n+$/, ''));
         parts.push('```');
       } else {
+        const kb = Math.round(Buffer.byteLength(diff, 'utf8') / 1024);
         const cmd = input.diffCommand ?? 'git diff';
         parts.push('');
         parts.push(
-          `The full diff is ${Math.round(Buffer.byteLength(diff, 'utf8') / 1024)} KB, too large to inline. Run \`${cmd}\` to read it.`,
+          input.diffFile
+            ? `The full diff is ${kb} KB, too large to inline. It has been written to \`${input.diffFile}\` – read that file. If you have a shell, \`${cmd}\` shows the same thing.`
+            : `The full diff is ${kb} KB, too large to inline. Run \`${cmd}\` to read it.`,
         );
       }
     }
