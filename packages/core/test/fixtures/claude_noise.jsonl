@@ -1,0 +1,7 @@
+{"type":"system","subtype":"hook_started","hook_event_name":"SessionStart","session_id":"noise-session-1"}
+{"type":"system","subtype":"hook_response","hook_event_name":"SessionStart","session_id":"noise-session-1"}
+{"type":"system","subtype":"init","session_id":"noise-session-1","cwd":"/tmp/x","tools":["Read"],"model":"claude-fable-5-1"}
+npm WARN this line is not JSON at all
+{"type":"some_event_from_a_future_release","session_id":"noise-session-1","payload":{"anything":true}}
+{"type":"assistant","session_id":"noise-session-1","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"noise-session-1","result":"done","usage":{"input_tokens":1,"output_tokens":2}}

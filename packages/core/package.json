@@ -1,0 +1,22 @@
+{
+  "name": "@agent-chat-room/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent adapters, process plumbing, prompt builder and verdict parser for agent-chat-room.",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

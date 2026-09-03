@@ -1,0 +1,89 @@
+import { describe, expect, it } from 'vitest';
+
+import { DEFAULT_MAX_INLINE_DIFF_BYTES, buildTurnPrompt } from '../src/prompt.js';
+
+const base = {
+  runtime: 'claude',
+  role: 'worker' as const,
+  title: 'fix the flaky login test',
+  round: 1,
+  cwd: '/repo',
+  branch: 'acr/flaky-login',
+  task: 'The login test fails every fifth run on CI.',
+};
+
+describe('buildTurnPrompt', () => {
+  it('matches the layout in PLAN.md section 4.2', () => {
+    expect(buildTurnPrompt(base)).toMatchInlineSnapshot(`
+      "You are claude acting as WORKER in room "fix the flaky login test" (round 1).
+      Repo: /repo on branch acr/flaky-login.
+
+      ## Task
+      The login test fails every fifth run on CI.
+
+      ## Your job now
+      You are the WORKER. You are the only participant allowed to change files.
+
+      - Make the smallest change that actually solves the task, and make it in the working tree.
+      - Run the project's own tests or type checks if it has them, and say what you ran.
+      - Reply with a short summary: what you changed, why, and anything you deliberately did not do.
+      - Do not commit, do not create branches, and do not push. The engine handles version control.
+      - If the task is ambiguous, pick the most reasonable reading, state the assumption, and continue.
+      "
+    `);
+  });
+
+  it('renders new messages with author, role, round and verdict', () => {
+    const prompt = buildTurnPrompt({
+      ...base,
+      round: 2,
+      newMessages: [
+        { author: 'elia', text: 'also check the redirect' },
+        {
+          author: 'codex',
+          role: 'reviewer',
+          round: 1,
+          verdict: 'request-changes',
+          text: 'tests/login.spec.ts:41 the timeout is too short',
+        },
+      ],
+    });
+    expect(prompt).toContain('## New messages since your last turn');
+    expect(prompt).toContain('[elia]');
+    expect(prompt).toContain('[codex · reviewer · round 1] (verdict: request-changes)');
+    expect(prompt).toContain('tests/login.spec.ts:41');
+  });
+
+  it('inlines a small diff', () => {
+    const prompt = buildTurnPrompt({
+      ...base,
+      role: 'reviewer',
+      diffStat: ' a.ts | 2 +-',
+      diff: '--- a/a.ts\n+++ b/a.ts\n-old\n+new\n',
+    });
+    expect(prompt).toContain('## Changes in this room so far');
+    expect(prompt).toContain('```diff');
+    expect(prompt).toContain('+new');
+  });
+
+  it('tells the agent to run git itself when the diff is too big to inline', () => {
+    const huge = `+${'x'.repeat(DEFAULT_MAX_INLINE_DIFF_BYTES + 1)}`;
+    const prompt = buildTurnPrompt({
+      ...base,
+      role: 'reviewer',
+      diffStat: ' a.ts | 9999 +',
+      diff: huge,
+      diffCommand: 'git diff abc123',
+    });
+    expect(prompt).not.toContain('```diff');
+    expect(prompt).toContain('too large to inline');
+    expect(prompt).toContain('git diff abc123');
+  });
+
+  it('ends with the role instructions for the reviewer, including the verdict rule', () => {
+    const prompt = buildTurnPrompt({ ...base, role: 'reviewer' });
+    expect(prompt).toContain('You must not edit, create or delete any file');
+    expect(prompt).toContain('Cite `file:line`');
+    expect(prompt).toContain('```verdict');
+  });
+});
