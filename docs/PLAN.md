@@ -17,6 +17,7 @@ install with `npx agent-chat-room` and use with whatever agents they have.
 | Claude Code 2.1.x | `claude` | `claude -p --output-format stream-json --verbose` | `--resume <session_id>` | `--permission-mode plan` |
 | Codex CLI 0.152 | `codex exec` | `codex exec --json` | `codex exec resume <thread_id>` | `-s read-only` |
 | Cursor Agent 2026.07 | `cursor-agent` | `cursor-agent -p --output-format stream-json` | `--resume <chatId>` | `--mode ask` |
+| Antigravity 1.1.x | `agy` | `agy --output-format stream-json -p=` | `--conversation <conversation_id>` | `--sandbox` |
 
 Verified event shapes (live probe, 2026-09-03):
 
@@ -34,6 +35,17 @@ Verified event shapes (live probe, 2026-09-03):
   `globToolCall`, …, with a one-key result envelope `{ success | permissionDenied | … }`),
   `result` (final text, `is_error`, camelCase `usage`). Probed live 2026-09-03 and recorded
   in `packages/core/test/fixtures/cursor_run.jsonl`.
+- Antigravity: no top-level `type` – events are keyed by `event`. `init` (carries
+  `conversation_id`, the resume handle), `step_update` (everything else, dispatched on
+  `step_type` in `user_input | agent_response | tool | system_message` and `state` in
+  `ACTIVE | DONE | ERROR`; text arrives as `text_delta` on both the `ACTIVE` and the closing
+  `DONE` of an `agent_response` step, and tool parameters are PascalCase – `TargetFile`,
+  `AbsolutePath`, `CommandLine`), `result` (`status` in `SUCCESS | ERROR | CANCELED`,
+  `response`, an `error` string when it failed, `denied_actions` when headless mode had to
+  auto-deny a tool, and a snake_case `usage` that is cumulative for the whole run rather than
+  for the last step). A `SUCCESS` with an empty `response` is real and means a denied action
+  ended the turn. Probed live 2026-09-04 and recorded in
+  `packages/core/test/fixtures/agy_run.jsonl`.
 
 Toolchain: Node 22.14, npm 11. No bun/pnpm. Denly (`~/Desktop/coding-control-plane`) is the
 reference for "spawn the user's CLI with their subscription login"; see section 9.
@@ -172,20 +184,40 @@ codex exec resume <thread_id> --json ...          # later turns
 cursor-agent -p --output-format stream-json --stream-partial-output --workspace <cwd> \
   [--mode ask --sandbox enabled] [--force] [--trust] [--resume <chatId>] [--model <m>]
 # prompt on stdin (probed: `-p` with no positional argument reads stdin)
+
+# antigravity
+agy --output-format stream-json --input-format stream-json --disable-slash-commands \
+  --add-dir <cwd> --print-timeout <timeoutMs/1000>s \
+  [--sandbox | --mode accept-edits | --dangerously-skip-permissions] \
+  [--model <m>] [--conversation <conversation_id>] -p=
+# prompt on stdin as one NDJSON line: {"event":"user","message":{"role":"user","content":"…"}}
+# `-p` is a *value* flag, so the empty `-p=` is what enables print mode without swallowing
+# the next flag as its prompt. `--print-timeout` overrides agy's own 5m0s default, which is
+# shorter than the stall timeout and would otherwise kill a long turn for us.
 ```
 
 Permission mapping (the only place vendor flags leak in):
 
-| acr permission | claude | codex | cursor |
-|---|---|---|---|
-| read-only | `--permission-mode plan --tools Read,Glob,Grep` | `-s read-only` | `--mode ask --sandbox enabled --trust` |
-| edits (default worker) | `--permission-mode acceptEdits` | `-s workspace-write` | `--trust` |
-| full (explicit opt-in) | `--permission-mode bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` | `--force --trust` |
+| acr permission | claude | codex | cursor | antigravity |
+|---|---|---|---|---|
+| read-only | `--permission-mode plan --tools Read,Glob,Grep` | `-s read-only` | `--mode ask --sandbox enabled --trust` | `--sandbox` |
+| edits (default worker) | `--permission-mode acceptEdits` | `-s workspace-write` | `--trust` | `--mode accept-edits` |
+| full (explicit opt-in) | `--permission-mode bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` | `--force --trust` | `--dangerously-skip-permissions` |
 
 Cursor's read-only row was verified rather than assumed (2026-09-03): a turn in `--mode ask`
 asked to create a file answers "Ask mode is active … writing would be an edit" and creates
 nothing, and even a read-only shell call comes back `permissionDenied`. `--trust` is on every
 row because a headless turn has nobody to answer the "trust this workspace?" prompt.
+
+Antigravity's rows were probed the same way (2026-09-04), by asking one turn to write a file
+*and* run a shell command: `--sandbox` refused both and left the directory empty, while
+`--mode accept-edits` wrote the file and auto-denied `run_command`. That second result is a
+real limit worth knowing before staffing a room – an Antigravity **worker** at `edits` can
+change files but cannot run the tests; `full` is the opt-in escape hatch for one that needs a
+shell. `--mode plan` also blocks writes and is deliberately not used for `read-only`: it
+expands a system `plan` slash command that changes the agent's persona, and a probe under it
+wrote an implementation plan instead of reviewing, which would derail a reviewer that has to
+emit a fenced verdict block.
 
 ### 4.2 Room engine
 
@@ -270,7 +302,7 @@ Screens:
 1. **Rooms sidebar.** Status dot: running (pulsing), needs-you (amber), approved (green),
    stopped (grey). Unread badge. Filter by repo.
 2. **Transcript.** One bubble per message. Author avatar colored per runtime (Claude
-   orange, Codex green, Cursor blue, you neutral), role chip, round chip. Verdict pill on
+   orange, Codex green, Cursor blue, Antigravity violet, you neutral), role chip, round chip. Verdict pill on
    reviewer messages. Two collapsible drawers under agent messages: *activity* (tool calls,
    commands, in order) and *diff* (opens the diff viewer in the right panel or a modal).
    System lines for round boundaries, approvals count ("2 of 2 approved"), pauses, errors.
@@ -370,6 +402,9 @@ surprises are.
 Denly's runner (`~/Desktop/coding-control-plane/pipeline/runtime_cli.py`, Python asyncio)
 already solves the hard half of this project. What to carry over, and what not to:
 
+(Four of Denly's five runtimes have landed here: `claude`, `codex`, `cursor` and, as of
+task #11, `agy` – see `packages/core/src/adapters/antigravity.ts`. Only `grok` is left.)
+
 **Carry over the shape.** Denly's `CliSpec(id, argv, parse_line, parse_text, env, buffered,
 inspect_supported)` is exactly the adapter interface in 4.1, and it has five working entries
 (claude, codex, cursor, grok, agy). Port the argv builders and parsers to TypeScript
@@ -386,8 +421,8 @@ one-to-one; they are the distilled result of a lot of trial and error:
 - Detection = `which(binary)` plus a presence-only auth probe (`~/.codex/auth.json`,
   `~/.gemini/oauth_creds.json`, Cursor keychain) that never reads key material and never
   spawns the CLI. Reuse this for `acr doctor`.
-- Codex and Cursor have no system-prompt flag, so role instructions get prepended to the
-  first turn's prompt; Claude gets `--append-system-prompt`.
+- Codex, Cursor and Antigravity have no system-prompt flag, so role instructions get
+  prepended to the first turn's prompt; Claude gets `--append-system-prompt`.
 - Golden fixtures `tests/fixtures/codex_run.jsonl` and `cursor_run.jsonl` are worth copying
   in as adapter contract tests.
 

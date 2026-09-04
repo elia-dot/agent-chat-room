@@ -1,4 +1,5 @@
 import type { AgentAdapter, Detection } from '../types.js';
+import { antigravityAdapter } from './antigravity.js';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { cursorAdapter } from './cursor.js';
@@ -14,6 +15,15 @@ export {
   buildCursorListModelsArgs,
   parseCursorModels,
 } from './cursor.js';
+export {
+  antigravityAdapter,
+  AntigravityParser,
+  buildAgyArgs,
+  buildAgyPrompt,
+  buildAgyStdin,
+  buildAgyListModelsArgs,
+  parseAgyModels,
+} from './antigravity.js';
 export { echoAdapter, resetEchoAdapter, describeRequest } from './echo.js';
 export type { EchoScript, EchoTurn, EchoTurnSelector } from './echo.js';
 
@@ -28,6 +38,7 @@ export const adapters: Record<string, AgentAdapter> = {
   [claudeAdapter.id]: claudeAdapter,
   [codexAdapter.id]: codexAdapter,
   [cursorAdapter.id]: cursorAdapter,
+  [antigravityAdapter.id]: antigravityAdapter,
   [echoAdapter.id]: echoAdapter,
 };
 
@@ -36,6 +47,7 @@ export const adapterList: AgentAdapter[] = [
   claudeAdapter,
   codexAdapter,
   cursorAdapter,
+  antigravityAdapter,
   echoAdapter,
 ];
 

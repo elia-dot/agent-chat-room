@@ -13,11 +13,15 @@ import type {
 } from '@agent-chat-room/core';
 import { decisionLabel } from '@agent-chat-room/core';
 
-/** Runtime brand colours from PLAN.md section 5: Claude orange, Codex green, Cursor blue. */
+/**
+ * Runtime brand colours from PLAN.md section 5: Claude orange, Codex green, Cursor blue,
+ * Antigravity violet.
+ */
 const RUNTIME_COLOR: Record<string, number> = {
   claude: 208,
   codex: 42,
   cursor: 39,
+  antigravity: 141,
   echo: 245,
 };
 

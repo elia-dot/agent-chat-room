@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PERMISSION_LEVELS,
+  agyPermissionArgs,
   canWrite,
   claudePermissionArgs,
   codexPermissionArgs,
@@ -15,6 +16,7 @@ describe('the permission table', () => {
       expect(claudePermissionArgs(level).length).toBeGreaterThan(0);
       expect(codexPermissionArgs(level).length).toBeGreaterThan(0);
       expect(cursorPermissionArgs(level).length).toBeGreaterThan(0);
+      expect(agyPermissionArgs(level).length).toBeGreaterThan(0);
     }
   });
 
@@ -34,6 +36,12 @@ describe('the permission table', () => {
     expect(cursorPermissionArgs('read-only')).not.toContain('--force');
     expect(cursorPermissionArgs('edits')).not.toContain('--force');
     expect(cursorPermissionArgs('full')).toContain('--force');
+    // Probed against agy 1.1.26: under `--sandbox` a write and a redirecting shell command
+    // were both refused and nothing reached disk.
+    expect(agyPermissionArgs('read-only')).toEqual(['--sandbox']);
+    expect(agyPermissionArgs('read-only')).not.toContain('--dangerously-skip-permissions');
+    expect(agyPermissionArgs('edits')).not.toContain('--dangerously-skip-permissions');
+    expect(agyPermissionArgs('full')).toContain('--dangerously-skip-permissions');
     expect(canWrite('read-only')).toBe(false);
     expect(canWrite('edits')).toBe(true);
     expect(canWrite('full')).toBe(true);
