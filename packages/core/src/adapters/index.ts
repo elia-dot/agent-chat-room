@@ -5,7 +5,13 @@ import { cursorAdapter } from './cursor.js';
 import { echoAdapter } from './echo.js';
 
 export { claudeAdapter, ClaudeParser, buildClaudeArgs } from './claude.js';
-export { codexAdapter, CodexParser, buildCodexArgs, buildCodexPrompt } from './codex.js';
+export {
+  codexAdapter,
+  CodexParser,
+  buildCodexArgs,
+  buildCodexPrompt,
+  parseCodexModelsCache,
+} from './codex.js';
 export {
   cursorAdapter,
   CursorParser,

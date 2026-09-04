@@ -5,6 +5,7 @@ import {
   buildCodexArgs,
   buildCodexPrompt,
   codexAdapter,
+  parseCodexModelsCache,
 } from '../../src/adapters/codex.js';
 import type { TurnRequest } from '../../src/types.js';
 import { eventsOfType, fixtureLines, replay } from '../helpers.js';
@@ -190,8 +191,43 @@ describe('a model codex rejects', () => {
     expect(result.error).toContain('model list');
   });
 
-  it('offers a static list, because codex cannot be asked for one', () => {
-    expect(codexAdapter.capabilities.models).toContain('gpt-5.3-codex');
-    expect(codexAdapter).not.toHaveProperty('listModels');
+  it('has valid fallback slugs and reads Codex account-specific models when available', () => {
+    expect(codexAdapter.capabilities.models).toContain('gpt-5.6-sol');
+    expect(codexAdapter.capabilities.models).not.toContain('gpt-5.3-codex-xhigh');
+    expect(codexAdapter).toHaveProperty('listModels');
+  });
+});
+
+describe('parseCodexModelsCache', () => {
+  it('returns only visible account models with their display names', () => {
+    expect(
+      parseCodexModelsCache(
+        JSON.stringify({
+          models: [
+            { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', visibility: 'list' },
+            { slug: 'codex-auto-review', display_name: 'Auto Review', visibility: 'hide' },
+            { slug: 'gpt-5.6-luna', display_name: 'GPT-5.6-Luna', visibility: 'list' },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+      { id: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+    ]);
+  });
+
+  it('ignores malformed caches and duplicate slugs', () => {
+    expect(parseCodexModelsCache('not json')).toEqual([]);
+    expect(
+      parseCodexModelsCache(
+        JSON.stringify({
+          models: [
+            { slug: 'gpt-5.5', visibility: 'list' },
+            { slug: 'gpt-5.5', display_name: 'duplicate', visibility: 'list' },
+            { slug: '', visibility: 'list' },
+          ],
+        }),
+      ),
+    ).toEqual([{ id: 'gpt-5.5' }]);
   });
 });

@@ -138,10 +138,10 @@ and `acr run --mode brainstorm` exits 0. Promote turns the proposal into the tas
 
 Models are **picked, not typed**. The new-room dialog and the right panel both show a list
 per runtime, served by `GET /api/runtimes/models`: live from the CLI where a runtime can list
-its own models (`cursor-agent --list-models`, which is account-specific), and a written-down
-list where it cannot (`claude` and `codex` have no models subcommand). The list is a picker
-seed, never a validator – it goes stale the week a model ships – so `Custom…` is always there
-for the strings no list can hold, such as `claude-opus-5[1m]` or
+its own models (`cursor-agent --list-models`, which is account-specific), from Codex's
+account-specific local model cache, and a written-down list where neither is available. The
+list is a picker seed, never a validator – it can go stale the week a model ships – so
+`Custom…` is always there for the strings no list can hold, such as `claude-opus-5[1m]` or
 `claude-opus-4-8[context=1m,effort=high]`. Opening a room with a name the runtime has never
 reported warns and continues; it is never refused, and if the vendor does reject it the turn
 error names the model and says where to change it.

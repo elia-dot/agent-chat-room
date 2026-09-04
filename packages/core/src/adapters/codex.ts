@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +12,7 @@ import type {
   AgentAdapter,
   Detection,
   EventSink,
+  ModelOption,
   Permission,
   TurnExitContext,
   TurnHandle,
@@ -23,6 +25,34 @@ import { failureReason } from './claude.js';
 
 export const CODEX_BIN = 'codex';
 export const CODEX_MIN_VERSION = '0.150.0';
+
+/**
+ * Parse the account-specific catalog maintained by Codex itself.
+ *
+ * The cache also contains internal routing models. Only entries whose visibility is `list`
+ * belong in a user-facing picker; hidden entries such as auto-review helpers must stay hidden.
+ */
+export function parseCodexModelsCache(json: string): ModelOption[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!isRecord(value) || !Array.isArray(value.models)) return [];
+
+  const seen = new Set<string>();
+  const models: ModelOption[] = [];
+  for (const item of value.models) {
+    if (!isRecord(item) || item.visibility !== 'list') continue;
+    const id = typeof item.slug === 'string' ? item.slug.trim() : '';
+    if (id === '' || seen.has(id)) continue;
+    seen.add(id);
+    const label = typeof item.display_name === 'string' ? item.display_name.trim() : '';
+    models.push(label !== '' && label !== id ? { id, label } : { id });
+  }
+  return models;
+}
 
 /**
  * Codex reports some non-fatal conditions as `error` items in the middle of a turn –
@@ -207,16 +237,20 @@ export const codexAdapter: AgentAdapter = {
     resume: true,
     readOnly: true,
     structuredOutput: true,
-    // `codex` has no models subcommand either – `-m/--model` takes a free slug – so this
-    // is a written-down seed for the picker, not a validator. It will go stale; the
-    // `Custom…` box in the UI is the answer to that, not a longer array here.
-    models: [
-      'gpt-5.3-codex',
-      'gpt-5.3-codex-low',
-      'gpt-5.3-codex-high',
-      'gpt-5.3-codex-xhigh',
-      'gpt-5.2',
-    ],
+    // Used only before Codex has written its account-specific models cache. Reasoning effort
+    // is deliberately absent: `xhigh` is a setting, not part of a model slug.
+    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
+  },
+
+  async listModels(): Promise<ModelOption[]> {
+    const codexHome = process.env.CODEX_HOME ?? join(home(), '.codex');
+    try {
+      return parseCodexModelsCache(await readFile(join(codexHome, 'models_cache.json'), 'utf8'));
+    } catch {
+      // A fresh install may not have fetched the cache yet. Returning no entries activates
+      // the static fallback in models.ts without making the model-picker endpoint fail.
+      return [];
+    }
   },
 
   async detect(): Promise<Detection> {
