@@ -1,4 +1,4 @@
-import { detectAll, isUsable, runtimeReport } from '@agent-chat-room/core';
+import { detectAll, isUsable, listAllModels, runtimeReport } from '@agent-chat-room/core';
 
 import { EXIT, type ExitCode } from '../exit.js';
 import { Renderer } from '../render.js';
@@ -7,6 +7,8 @@ const NODE_RECOMMENDED_MAJOR = 22;
 
 export interface DoctorOptions {
   json?: boolean;
+  /** Also list the models each installed runtime offers. Off by default: it can spawn. */
+  models?: boolean;
   renderer?: Renderer;
 }
 
@@ -18,13 +20,24 @@ export interface DoctorOptions {
  */
 export async function doctor(opts: DoctorOptions = {}): Promise<ExitCode> {
   const results = await detectAll();
+  // Same function `GET /api/runtimes/models` calls, so the terminal and the browser can
+  // never disagree about which models you may ask for.
+  const catalogs = opts.models ? await listAllModels() : [];
 
   if (opts.json) {
     // Exactly what `GET /api/runtimes` serves, so the doctor page and this command can
     // never drift apart.
     const payload = await runtimeReport();
     process.stdout.write(
-      `${JSON.stringify({ node: process.version, runtimes: payload }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          node: process.version,
+          runtimes: payload,
+          ...(opts.models ? { models: catalogs } : {}),
+        },
+        null,
+        2,
+      )}\n`,
     );
   } else {
     const r = opts.renderer ?? new Renderer();
@@ -61,6 +74,26 @@ export async function doctor(opts: DoctorOptions = {}): Promise<ExitCode> {
     r.line(renderRow(cols.map((c) => c.header)));
     r.line(renderRow(widths.map((w) => '-'.repeat(w))));
     for (const row of rows) r.line(renderRow(cols.map((c) => c.pick(row))));
+
+    if (opts.models) {
+      for (const catalog of catalogs) {
+        r.line();
+        r.line(
+          `${catalog.runtime} models (${catalog.source === 'cli' ? 'from the CLI' : 'built in'})`,
+        );
+        if (catalog.note) r.line(`  ${catalog.note}`);
+        if (catalog.models.length === 0) {
+          r.line('  none reported');
+        } else {
+          for (const model of catalog.models) {
+            r.line(`  ${model.id}${model.label ? `  ${model.label}` : ''}`);
+          }
+        }
+      }
+      r.line();
+      r.line('Any other name still works: a model string the list cannot hold, such as');
+      r.line('`claude-opus-5[1m]`, is passed to the runtime untouched.');
+    }
 
     r.line();
     const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10);

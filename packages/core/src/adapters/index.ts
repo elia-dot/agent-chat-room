@@ -6,7 +6,14 @@ import { echoAdapter } from './echo.js';
 
 export { claudeAdapter, ClaudeParser, buildClaudeArgs } from './claude.js';
 export { codexAdapter, CodexParser, buildCodexArgs, buildCodexPrompt } from './codex.js';
-export { cursorAdapter, CursorParser, buildCursorArgs, buildCursorPrompt } from './cursor.js';
+export {
+  cursorAdapter,
+  CursorParser,
+  buildCursorArgs,
+  buildCursorPrompt,
+  buildCursorListModelsArgs,
+  parseCursorModels,
+} from './cursor.js';
 export { echoAdapter, resetEchoAdapter, describeRequest } from './echo.js';
 export type { EchoScript, EchoTurn, EchoTurnSelector } from './echo.js';
 

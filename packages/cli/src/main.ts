@@ -17,7 +17,7 @@ const HELP = `acr - agent chat room
 Usage:
   acr                          Start the server and open the web UI.
   acr serve [--port N] [--no-open]
-  acr doctor [--json]
+  acr doctor [--json] [--models]
   acr run --task <text> [options]
   acr rooms ls | show <id> | export <id> | resume <id> | close <id>
   acr --help | --version
@@ -27,6 +27,11 @@ Commands:
   doctor        Show which agent runtimes are installed, new enough and logged in.
   run           Run a room: the worker builds, the reviewers review, repeat until they agree.
   rooms         List, inspect, export, resume and close the rooms in the local store.
+
+Options for \`doctor\`:
+  --models                 Also list the models each installed runtime offers. This is the
+                           one detection path that may reach the network (cursor asks its
+                           API), so it is opt-in.
 
 Options for \`rooms\`:
   --out <path>             \`export\`: write the markdown to a file instead of stdout.
@@ -195,15 +200,18 @@ async function serveCommand(argv: string[], opts: MainOptions): Promise<ExitCode
   });
 }
 
-function parseDoctorArgs(argv: string[]): { json: boolean } {
+function parseDoctorArgs(argv: string[]): { json: boolean; models: boolean } {
   const { values } = usageGuard(() =>
     parseArgs({
       args: argv,
-      options: { json: { type: 'boolean', default: false } },
+      options: {
+        json: { type: 'boolean', default: false },
+        models: { type: 'boolean', default: false },
+      },
       allowPositionals: false,
     }),
   );
-  return { json: values.json === true };
+  return { json: values.json === true, models: values.models === true };
 }
 
 async function runCommand(argv: string[]): Promise<ExitCode> {

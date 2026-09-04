@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { CursorParser, buildCursorArgs, buildCursorPrompt } from '../../src/adapters/cursor.js';
+import {
+  CursorParser,
+  buildCursorArgs,
+  buildCursorListModelsArgs,
+  buildCursorPrompt,
+  parseCursorModels,
+} from '../../src/adapters/cursor.js';
 import { cursorAdapter } from '../../src/adapters/index.js';
 import type { TurnRequest } from '../../src/types.js';
 import { eventsOfType, fixtureLines, replay } from '../helpers.js';
@@ -176,5 +182,68 @@ describe('CursorParser tolerance', () => {
     const { result } = replay(new CursorParser(), []);
     expect(result.ok).toBe(false);
     expect(result.error).toBe('cursor-agent produced no message');
+  });
+});
+
+/** Real `cursor-agent --list-models` output (2026.07.23), trimmed, plus junk it must skip. */
+const LIST_MODELS_OUTPUT = `Available models
+
+auto - Auto (current, default)
+gpt-5.3-codex - Codex 5.3
+claude-opus-5-thinking-high - Claude Opus 5 1M Thinking
+composer-2.5 - Composer 2.5
+Run cursor-agent --model <id> to pick one
+
+`;
+
+describe('listing cursor models', () => {
+  it('asks with the flag the CLI documents', () => {
+    expect(buildCursorListModelsArgs()).toEqual(['--list-models']);
+  });
+
+  it('reads the id and the label off each row', () => {
+    expect(parseCursorModels(LIST_MODELS_OUTPUT)).toEqual([
+      { id: 'auto', label: 'Auto (current, default)' },
+      { id: 'gpt-5.3-codex', label: 'Codex 5.3' },
+      { id: 'claude-opus-5-thinking-high', label: 'Claude Opus 5 1M Thinking' },
+      { id: 'composer-2.5', label: 'Composer 2.5' },
+    ]);
+  });
+
+  it('skips the header, blank lines and prose rather than inventing models', () => {
+    const ids = parseCursorModels(LIST_MODELS_OUTPUT).map((m) => m.id);
+    expect(ids).not.toContain('Available models');
+    // The trailing sentence has a ` - `-free shape on the left, so it is not a model.
+    expect(ids.every((id) => !id.includes(' '))).toBe(true);
+  });
+
+  it('survives output with no models in it at all', () => {
+    expect(parseCursorModels('')).toEqual([]);
+    expect(parseCursorModels('Not logged in.\n')).toEqual([]);
+  });
+
+  it('keeps a static fallback for when the CLI cannot be asked', () => {
+    expect(cursorAdapter.capabilities.models).toContain('auto');
+    expect(typeof cursorAdapter.listModels).toBe('function');
+  });
+});
+
+describe('a model cursor rejects', () => {
+  it('names the model and points at the picker', () => {
+    const { result } = replay(new CursorParser('no-such-model-xyz'), [], {
+      exitCode: 1,
+      stderr: 'Cannot use this model: unrecognized_model',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('"no-such-model-xyz"');
+    expect(result.error).toContain('model list');
+  });
+
+  it('leaves an unrelated failure alone', () => {
+    const { result } = replay(new CursorParser('auto'), [], {
+      exitCode: 1,
+      stderr: 'network unreachable',
+    });
+    expect(result.error).not.toContain('model list');
   });
 });

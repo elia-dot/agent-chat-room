@@ -1,6 +1,14 @@
 import { join } from 'node:path';
 
-import { credentialPresent, home, meetsMinVersion, readVersion, which } from '../detect.js';
+import {
+  credentialPresent,
+  home,
+  meetsMinVersion,
+  readStdout,
+  readVersion,
+  which,
+} from '../detect.js';
+import { withModelHint } from '../modelHint.js';
 import { cursorPermissionArgs } from '../permissions.js';
 import { parseJsonLine } from '../process/lines.js';
 import { runTurn } from '../process/runTurn.js';
@@ -8,6 +16,7 @@ import type {
   AgentAdapter,
   Detection,
   EventSink,
+  ModelOption,
   TurnExitContext,
   TurnHandle,
   TurnParser,
@@ -52,6 +61,44 @@ export function buildCursorArgs(req: TurnRequest): string[] {
 }
 
 /**
+ * `cursor-agent --list-models` prints the models this *account* can use, which is why it is
+ * worth asking rather than hard-coding: the list is per-plan and changes without a release.
+ */
+export function buildCursorListModelsArgs(): string[] {
+  return ['--list-models'];
+}
+
+/**
+ * Parse the `--list-models` output, probed against cursor-agent 2026.07.23:
+ *
+ * ```
+ * Available models
+ *
+ * auto - Auto (current, default)
+ * claude-opus-5-thinking-high - Claude Opus 5 1M Thinking
+ * ```
+ *
+ * Anything that is not an `<id> - <Label>` row – the header, blank lines, a banner a future
+ * release adds – is skipped rather than turned into a model nobody can select.
+ */
+export function parseCursorModels(stdout: string): ModelOption[] {
+  const models: ModelOption[] = [];
+  const seen = new Set<string>();
+  for (const raw of stdout.split('\n')) {
+    const line = raw.trim();
+    const at = line.indexOf(' - ');
+    if (at <= 0) continue;
+    const id = line.slice(0, at).trim();
+    const label = line.slice(at + 3).trim();
+    // Ids are command-line tokens: a row with a space on the left is prose, not a model.
+    if (id.length === 0 || /\s/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    models.push(label ? { id, label } : { id });
+  }
+  return models;
+}
+
+/**
  * Cursor has no system-prompt flag, exactly like Codex, so role instructions are prepended
  * to the first turn's prompt. On a resumed turn the session already carries them.
  */
@@ -77,6 +124,9 @@ export class CursorParser implements TurnParser {
   private usage: Usage | undefined;
   private errorMessage: string | undefined;
   private sawResult = false;
+
+  /** The model this turn asked for, so a rejection can name it. */
+  constructor(private readonly model?: string) {}
 
   onLine(line: string, emit: EventSink): void {
     const ev = parseJsonLine(line);
@@ -173,7 +223,7 @@ export class CursorParser implements TurnParser {
     };
 
     const failure = failureReason(ctx, this.errorMessage, CURSOR_BIN);
-    if (failure) return { ...base, ok: false, error: failure };
+    if (failure) return { ...base, ok: false, error: withModelHint(failure, this.model) };
     if (!this.sawResult && base.text.length === 0) {
       return { ...base, ok: false, error: 'cursor-agent produced no message' };
     }
@@ -188,7 +238,28 @@ export const cursorAdapter: AgentAdapter = {
   displayName: 'Cursor Agent',
   // No `--output-schema` equivalent, and none is needed: the fenced verdict block is the
   // portable contract and the schema flags are the optional extra (see `verdict.ts`).
-  capabilities: { resume: true, readOnly: true, structuredOutput: false },
+  capabilities: {
+    resume: true,
+    readOnly: true,
+    structuredOutput: false,
+    // Only a fallback for when `--list-models` cannot be reached (offline, logged out).
+    // The real list is per-account and comes from the CLI; this one goes stale, so it
+    // seeds the picker and validates nothing.
+    models: ['auto', 'composer-2.5', 'gpt-5.3-codex', 'claude-sonnet-5-thinking-high'],
+  },
+
+  /**
+   * Cursor is the one runtime that will tell you what your account can run. It reaches the
+   * network to answer, so the timeout is the same 10 s a `--version` probe gets and the
+   * result is cached by `models.ts`; a failure returns an empty list, which the caller
+   * reads as "fall back to the static names".
+   */
+  async listModels(): Promise<ModelOption[]> {
+    const binPath = which(CURSOR_BIN);
+    if (!binPath) return [];
+    const out = await readStdout(binPath, buildCursorListModelsArgs());
+    return out === undefined ? [] : parseCursorModels(out);
+  },
 
   async detect(): Promise<Detection> {
     const binPath = which(CURSOR_BIN);
@@ -225,7 +296,7 @@ export const cursorAdapter: AgentAdapter = {
       // a comfortable argv size, and macOS `ARG_MAX` is about a megabyte.
       stdin: buildCursorPrompt(req),
       timeoutMs: req.timeoutMs,
-      parser: new CursorParser(),
+      parser: new CursorParser(req.model),
       sink,
       turnId: req.turnId,
     });

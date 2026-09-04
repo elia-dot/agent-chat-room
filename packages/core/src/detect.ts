@@ -59,13 +59,19 @@ export function home(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? homedir();
 }
 
-/** Run `<bin> --version` once, briefly, and pull a version out of whatever it prints. */
-export async function readVersion(
+/**
+ * Run a CLI once, briefly, and hand back whatever it wrote. Never rejects and never runs
+ * longer than `timeoutMs`: a probe that can hang is a probe that can hang the whole UI.
+ *
+ * The one spawn helper for every "ask the CLI a question" path – `readVersion` and the
+ * model listing in `models.ts` both go through it.
+ */
+export async function readStdout(
   binPath: string,
-  args: string[] = ['--version'],
+  args: string[],
   timeoutMs = 10_000,
 ): Promise<string | undefined> {
-  const out = await new Promise<string | undefined>((resolve) => {
+  return new Promise<string | undefined>((resolve) => {
     const child = execFile(
       binPath,
       args,
@@ -77,6 +83,15 @@ export async function readVersion(
     );
     child.on('error', () => resolve(undefined));
   });
+}
+
+/** Run `<bin> --version` once, briefly, and pull a version out of whatever it prints. */
+export async function readVersion(
+  binPath: string,
+  args: string[] = ['--version'],
+  timeoutMs = 10_000,
+): Promise<string | undefined> {
+  const out = await readStdout(binPath, args, timeoutMs);
   if (out === undefined) return undefined;
   return extractVersion(out);
 }

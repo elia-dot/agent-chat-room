@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 
 import { credentialPresent, home, meetsMinVersion, readVersion, which } from '../detect.js';
+import { withModelHint } from '../modelHint.js';
 import { claudePermissionArgs } from '../permissions.js';
 import { parseJsonLine } from '../process/lines.js';
 import { runTurn } from '../process/runTurn.js';
@@ -60,6 +61,9 @@ export class ClaudeParser implements TurnParser {
   private usage: Usage | undefined;
   private errorMessage: string | undefined;
   private readonly toolNames = new Map<string, string>();
+
+  /** The model this turn asked for, so a rejection can name it. */
+  constructor(private readonly model?: string) {}
 
   onLine(line: string, emit: EventSink): void {
     const ev = parseJsonLine(line);
@@ -162,7 +166,7 @@ export class ClaudeParser implements TurnParser {
     };
 
     const failure = failureReason(ctx, this.errorMessage, 'claude');
-    if (failure) return { ...base, ok: false, error: failure };
+    if (failure) return { ...base, ok: false, error: withModelHint(failure, this.model) };
 
     const done: TurnEvent = {
       type: 'done',
@@ -178,7 +182,25 @@ export class ClaudeParser implements TurnParser {
 export const claudeAdapter: AgentAdapter = {
   id: 'claude',
   displayName: 'Claude Code',
-  capabilities: { resume: true, readOnly: true, structuredOutput: true },
+  capabilities: {
+    resume: true,
+    readOnly: true,
+    structuredOutput: true,
+    // `claude` has no `models` subcommand, so this list is written down rather than asked
+    // for. Every entry was confirmed against the installed CLI; it still goes stale the
+    // week a model ships, which is why it seeds the picker and validates nothing. The
+    // aliases are the ones `claude --help` documents for `--model`.
+    models: [
+      'opus',
+      'sonnet',
+      'haiku',
+      'fable',
+      'claude-opus-5',
+      'claude-sonnet-5',
+      'claude-haiku-4-5',
+      'claude-fable-5-1',
+    ],
+  },
 
   async detect(): Promise<Detection> {
     const binPath = which(CLAUDE_BIN);
@@ -213,7 +235,7 @@ export const claudeAdapter: AgentAdapter = {
       cwd: req.cwd,
       stdin: req.prompt,
       timeoutMs: req.timeoutMs,
-      parser: new ClaudeParser(),
+      parser: new ClaudeParser(req.model),
       sink,
       turnId: req.turnId,
     });

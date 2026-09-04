@@ -52,6 +52,58 @@ afterEach(async () => {
   config.restore();
 });
 
+describe('POST /api/rooms with a model the runtime never reported', () => {
+  it('still opens the room, and says the name looks wrong', async () => {
+    // The reported bug: `opus-5` is plausible and does not exist, and the only sign of it
+    // used to be a dead first turn. Warned about, never rejected – the catalog is a picker
+    // seed, not a validator.
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      payload: {
+        task: 'fix add()',
+        cwd: repo(),
+        agents: ['echo', 'echo2'],
+        models: { claude: 'opus-5' },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const { warnings } = response.json<{ warnings: string[] }>();
+    expect(warnings.some((w) => w.includes('opus-5'))).toBe(true);
+  });
+
+  it('says nothing about a model the runtime does report', async () => {
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      payload: {
+        task: 'fix add()',
+        cwd: repo(),
+        agents: ['echo', 'echo2'],
+        models: { claude: 'opus' },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const { warnings } = response.json<{ warnings: string[] }>();
+    expect(warnings.some((w) => w.includes('opus'))).toBe(false);
+  });
+
+  it('stays quiet for a runtime with no catalog to check against', async () => {
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      payload: {
+        task: 'fix add()',
+        cwd: repo(),
+        agents: ['echo', 'echo2'],
+        models: { echo: 'whatever' },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json<{ warnings: string[] }>().warnings).toEqual([]);
+  });
+});
+
 describe('PATCH /api/rooms/:id/participants/:participantId', () => {
   it('swaps the roles and reaches the live engine, not a fresh copy of the row', async () => {
     const room = await createRoom();

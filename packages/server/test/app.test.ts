@@ -91,6 +91,29 @@ describe('the REST surface', () => {
     }
   });
 
+  it('serves a model catalog per runtime, filtered on request', async () => {
+    // `?runtime=` on purpose: unfiltered, this route may spawn `cursor-agent --list-models`,
+    // and no test is allowed to depend on a network round trip.
+    const one = await h.app.inject({ url: '/api/runtimes/models?runtime=claude' });
+    expect(one.statusCode).toBe(200);
+    const { catalogs } = one.json<{
+      catalogs: { runtime: string; models: { id: string }[]; source: string }[];
+    }>();
+    expect(catalogs).toHaveLength(1);
+    expect(catalogs[0]?.runtime).toBe('claude');
+    expect(catalogs[0]?.source).toBe('static');
+    expect(catalogs[0]?.models.map((m) => m.id)).toContain('opus');
+  });
+
+  it('answers with an empty catalog for a runtime it has never heard of', async () => {
+    const response = await h.app.inject({ url: '/api/runtimes/models?runtime=nope' });
+    expect(response.statusCode).toBe(200);
+    const { catalogs } = response.json<{ catalogs: { runtime: string; models: unknown[] }[] }>();
+    expect(catalogs).toEqual([
+      { runtime: 'nope', models: [], source: 'static', note: 'unknown runtime' },
+    ]);
+  });
+
   it('opens a brainstorm room, with a moderator last and nobody able to write', async () => {
     const created = await createRoom({ mode: 'brainstorm', agents: ['echo', 'echo2', 'echo3'] });
     expect(created.status).toBe(201);

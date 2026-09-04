@@ -9,9 +9,12 @@ export { TurnLog } from './turnLog.js';
 export { LineSplitter, parseJsonLine } from './process/lines.js';
 export { runTurn } from './process/runTurn.js';
 export type { RunTurnOptions } from './process/runTurn.js';
+export { listModels, listAllModels, resetModelCache, modelRejectionHint } from './models.js';
+export type { ModelCatalog, ListModelsOptions } from './models.js';
 export {
   which,
   readVersion,
+  readStdout,
   extractVersion,
   compareVersions,
   meetsMinVersion,

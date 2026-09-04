@@ -1,5 +1,8 @@
-import { gh, runtimeReport } from '@agent-chat-room/core';
+import { gh, listAllModels, listModels, runtimeReport } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+
+const ModelsQuery = z.object({ runtime: z.string().min(1).optional() });
 
 /**
  * The doctor page and the new-room dialog's roster, from the same function `acr doctor
@@ -13,5 +16,18 @@ export function runtimeRoutes(app: FastifyInstance): void {
     // `--version`.
     const [runtimes, ghDetection] = await Promise.all([runtimeReport(), gh.detectGh()]);
     return { node: process.version, runtimes, gh: ghDetection };
+  });
+
+  /**
+   * What you are allowed to type in the model box, per runtime – a separate route from
+   * `/api/runtimes` on purpose: detection must stay free (`--version`, no network) and
+   * this one is not. `cursor-agent --list-models` reaches Cursor's API, so folding the two
+   * together would make the doctor page pay for that call. `listAllModels` caches, so the
+   * dialog asking on every open costs one spawn every five minutes.
+   */
+  app.get('/api/runtimes/models', async (request) => {
+    const { runtime } = ModelsQuery.parse(request.query);
+    const catalogs = runtime ? [await listModels(runtime)] : await listAllModels();
+    return { catalogs };
   });
 }
