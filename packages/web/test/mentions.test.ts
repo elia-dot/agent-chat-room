@@ -5,17 +5,17 @@ import { applyCompletion, completions, mentionAtCaret, parseMention } from '../s
 const ROSTER = ['claude', 'codex', 'cursor'];
 
 describe('parseMention', () => {
-  it('routes the next turn to a leading mention and strips it from the text', () => {
+  it('routes the next turn to a leading mention and preserves it in the transcript text', () => {
     expect(parseMention('@codex what do you make of this?', ROSTER)).toEqual({
       mention: 'codex',
-      text: 'what do you make of this?',
+      text: '@codex what do you make of this?',
     });
     expect(parseMention('  @claude  fix it  ', ROSTER)).toEqual({
       mention: 'claude',
-      text: 'fix it',
+      text: '@claude  fix it',
     });
-    // A mention on its own is a "your turn", with nothing else to say.
-    expect(parseMention('@codex', ROSTER)).toEqual({ mention: 'codex', text: '' });
+    // A mention on its own is a visible "your turn" message.
+    expect(parseMention('@codex', ROSTER)).toEqual({ mention: 'codex', text: '@codex' });
   });
 
   it('matches a name case-insensitively but keeps the roster spelling', () => {

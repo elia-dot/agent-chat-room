@@ -36,6 +36,8 @@ export interface Detection {
 
 export interface TurnRequest {
   cwd: string;
+  /** Extra absolute workspace roots explicitly granted by the room owner. */
+  additionalDirs?: string[];
   prompt: string;
   /** Resume the runtime's own session instead of starting a fresh one. */
   sessionId?: string;

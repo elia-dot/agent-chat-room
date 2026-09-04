@@ -56,6 +56,15 @@ describe('buildCursorArgs', () => {
     );
   });
 
+  it('grants access to each additional folder', () => {
+    expect(
+      buildCursorArgs({
+        ...baseReq,
+        additionalDirs: ['/shared/docs', '/shared/data'],
+      }),
+    ).toEqual(expect.arrayContaining(['--add-dir', '/shared/docs', '--add-dir', '/shared/data']));
+  });
+
   it('never asks for a structured output schema, because cursor-agent has none', () => {
     expect(buildCursorArgs({ ...baseReq, outputSchema: { type: 'object' } })).not.toContain(
       '--output-schema',

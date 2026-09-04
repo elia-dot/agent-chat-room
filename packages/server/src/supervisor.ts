@@ -11,7 +11,7 @@ import type {
   TurnEvent,
   gh,
 } from '@agent-chat-room/core';
-import { EngineError, RoomEngine } from '@agent-chat-room/core';
+import { EngineError, RoomEngine, validateAdditionalDirs } from '@agent-chat-room/core';
 
 import { notify, type NotifyOptions } from './notify.js';
 
@@ -203,10 +203,26 @@ export class RoomSupervisor {
    * Edit the room row and tell the engine about it. Going through here rather than through
    * the store directly is what keeps a running loop from reading a stale `maxRounds`.
    */
-  patch(roomId: string, patch: { maxRounds?: number; title?: string }): Room {
-    const updated = this.opts.store.updateRoom(roomId, patch);
-    const entry = this.rooms.get(roomId);
-    return entry ? entry.engine.reload() : updated;
+  async patch(
+    roomId: string,
+    patch: { maxRounds?: number; title?: string; additionalDirs?: string[] },
+  ): Promise<Room> {
+    const entry = await this.entry(roomId);
+    if (patch.additionalDirs !== undefined && entry.running) {
+      throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
+    }
+    if (patch.additionalDirs !== undefined && entry.engine.room.closedAt) {
+      throw new EngineError(`room ${roomId.slice(0, 8)} is closed`);
+    }
+    const additionalDirs =
+      patch.additionalDirs === undefined
+        ? undefined
+        : await validateAdditionalDirs(patch.additionalDirs);
+    this.opts.store.updateRoom(roomId, {
+      ...patch,
+      ...(additionalDirs === undefined ? {} : { additionalDirs }),
+    });
+    return entry.engine.reload();
   }
 
   /**

@@ -53,6 +53,7 @@ export function buildCursorArgs(req: TurnRequest): string[] {
   // what PLAN.md section 4.1 documents and it removes any doubt about which repo a turn
   // is looking at when `acr run` was pointed at a subdirectory.
   args.push('--workspace', req.cwd);
+  for (const path of req.additionalDirs ?? []) args.push('--add-dir', path);
   if (req.model) args.push('--model', req.model);
   if (req.sessionId) args.push('--resume', req.sessionId);
   // No `--output-schema` equivalent: `capabilities.structuredOutput` is false and the

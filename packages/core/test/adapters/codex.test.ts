@@ -55,6 +55,24 @@ describe('buildCodexArgs', () => {
       expect.arrayContaining(['--output-schema', '/tmp/s.json']),
     );
   });
+
+  it('puts additional folders before the subcommand so resume accepts the global flag', () => {
+    const args = buildCodexArgs({
+      ...baseReq,
+      sessionId: 'thread-9',
+      additionalDirs: ['/shared/docs', '/shared/data'],
+    });
+    expect(args.slice(0, 8)).toEqual([
+      '--add-dir',
+      '/shared/docs',
+      '--add-dir',
+      '/shared/data',
+      'exec',
+      'resume',
+      'thread-9',
+      '-',
+    ]);
+  });
 });
 
 describe('buildCodexPrompt', () => {

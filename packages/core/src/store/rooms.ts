@@ -32,6 +32,7 @@ export interface CreateRoomInput {
   task: string;
   mode?: RoomMode;
   repoRoot: string;
+  additionalDirs?: string[];
   baseBranch: string;
   roomBranch: string;
   baseSha?: string | null;
@@ -119,10 +120,12 @@ export class RoomStore {
     const id = input.id ?? randomUUID();
     this.db
       .prepare(
-        `INSERT INTO rooms (id, slug, title, task, mode, repo_root, base_branch, room_branch,
-           base_sha, worktree_path, state, round, max_rounds, created_at, updated_at)
-         VALUES (@id, @slug, @title, @task, @mode, @repoRoot, @baseBranch, @roomBranch,
-           @baseSha, @worktreePath, @state, @round, @maxRounds, @createdAt, @updatedAt)`,
+        `INSERT INTO rooms (id, slug, title, task, mode, repo_root, additional_dirs_json,
+           base_branch, room_branch, base_sha, worktree_path, state, round, max_rounds,
+           created_at, updated_at)
+         VALUES (@id, @slug, @title, @task, @mode, @repoRoot, @additionalDirsJson,
+           @baseBranch, @roomBranch, @baseSha, @worktreePath, @state, @round, @maxRounds,
+           @createdAt, @updatedAt)`,
       )
       .run({
         id,
@@ -131,6 +134,7 @@ export class RoomStore {
         task: input.task,
         mode: input.mode ?? 'build-review',
         repoRoot: input.repoRoot,
+        additionalDirsJson: JSON.stringify(input.additionalDirs ?? []),
         baseBranch: input.baseBranch,
         roomBranch: input.roomBranch,
         baseSha: input.baseSha ?? null,
@@ -211,6 +215,7 @@ export class RoomStore {
         | 'closedAt'
         | 'title'
         | 'prUrl'
+        | 'additionalDirs'
       >
     >,
   ): Room {
@@ -227,6 +232,7 @@ export class RoomStore {
       closedAt: 'closed_at',
       title: 'title',
       prUrl: 'pr_url',
+      additionalDirs: 'additional_dirs_json',
     };
     for (const [key, column] of Object.entries(map)) {
       if (!(key in patch)) continue;
@@ -234,7 +240,14 @@ export class RoomStore {
       // `paused` is a boolean here and an INTEGER in SQLite; better-sqlite3 refuses to bind
       // a JavaScript boolean, so it is the one column that needs converting on the way in.
       const value = (patch as Row)[key];
-      params[key] = key === 'paused' ? (value ? 1 : 0) : (value ?? null);
+      params[key] =
+        key === 'paused'
+          ? value
+            ? 1
+            : 0
+          : key === 'additionalDirs'
+            ? JSON.stringify(value ?? [])
+            : (value ?? null);
     }
     sets.push('updated_at = @updatedAt');
     this.db.prepare(`UPDATE rooms SET ${sets.join(', ')} WHERE id = @id`).run(params);
@@ -550,6 +563,13 @@ function parseJson<T>(value: unknown): T | null {
   }
 }
 
+function parseStringArray(value: unknown): string[] {
+  const parsed = parseJson<unknown>(value);
+  return Array.isArray(parsed)
+    ? parsed.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
 /**
  * SQLite hands back `string | number | bigint | Buffer | null`, so every column read goes
  * through here rather than through a bare `String()` that would happily stringify a Buffer
@@ -578,6 +598,7 @@ function toRoom(row: Row): Room {
     task: asText(row.task),
     mode: asText(row.mode) as RoomMode,
     repoRoot: asText(row.repo_root),
+    additionalDirs: parseStringArray(row.additional_dirs_json),
     baseBranch: asText(row.base_branch),
     roomBranch: asText(row.room_branch),
     baseSha: str(row.base_sha),

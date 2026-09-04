@@ -272,6 +272,12 @@ export function App(): React.ReactElement {
               await api.start(room.id);
             })
           }
+          onSetAdditionalDirs={(additionalDirs) =>
+            void act(async () => {
+              const { room: updated } = await api.patchRoom(room.id, { additionalDirs });
+              store.merge({ room: updated });
+            })
+          }
           onSetParticipant={(runtime, patch) =>
             void act(async () => {
               const { participants } = await api.setParticipant(room.id, runtime, patch);

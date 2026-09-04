@@ -8,7 +8,7 @@
 export interface ParsedMessage {
   /** The runtime the next turn goes to, or null for "whoever the room would pick". */
   mention: string | null;
-  /** The message with a leading mention stripped, since it is not part of the sentence. */
+  /** The submitted message, trimmed but otherwise preserved for the transcript. */
   text: string;
 }
 
@@ -32,7 +32,7 @@ export function parseMention(input: string, runtimes: readonly string[]): Parsed
   // read as if it were addressed to nobody.
   if (!target) return { mention: null, text: input.trim() };
 
-  return { mention: target, text: text.slice(match[0].length).trim() };
+  return { mention: target, text: input.trim() };
 }
 
 export interface MentionQuery {

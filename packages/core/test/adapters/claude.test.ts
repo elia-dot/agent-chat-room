@@ -52,6 +52,17 @@ describe('buildClaudeArgs', () => {
     expect(args).toEqual(expect.arrayContaining(['--append-system-prompt', 'you are a reviewer']));
     expect(args[args.indexOf('--json-schema') + 1]).toBe('{"type":"object"}');
   });
+
+  it('grants every additional folder to fresh and resumed turns', () => {
+    const args = buildClaudeArgs({
+      ...baseReq,
+      sessionId: 'sess-1',
+      additionalDirs: ['/shared/docs', '/shared/data'],
+    });
+    expect(args).toEqual(
+      expect.arrayContaining(['--add-dir', '/shared/docs', '/shared/data', '--resume', 'sess-1']),
+    );
+  });
 });
 
 describe('ClaudeParser against a recorded run (claude 2.1.259)', () => {

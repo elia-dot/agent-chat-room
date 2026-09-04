@@ -30,6 +30,7 @@ const room = (over: Partial<Room> = {}): Room => ({
   task: 'add subtracts',
   mode: 'build-review',
   repoRoot: '/repo',
+  additionalDirs: [],
   baseBranch: 'main',
   roomBranch: 'acr/fix-add',
   baseSha: 'abc1234',

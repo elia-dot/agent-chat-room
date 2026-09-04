@@ -73,7 +73,10 @@ export function buildCodexArgs(req: TurnRequest, opts: CodexArgsOptions = {}): s
   // neither `-C` nor `-s`. The working directory comes from the spawn instead, and the
   // sandbox has to be set through the config override that `-s` is sugar for.
   const resuming = Boolean(req.sessionId);
-  const args = resuming ? ['exec', 'resume', req.sessionId!, '-'] : ['exec'];
+  // `--add-dir` is a global option. Keeping it before the subcommand makes it available to
+  // both fresh `exec` turns and `exec resume`, whose own option set does not include it.
+  const args = (req.additionalDirs ?? []).flatMap((path) => ['--add-dir', path]);
+  args.push(...(resuming ? ['exec', 'resume', req.sessionId!, '-'] : ['exec']));
 
   args.push('--json');
   if (!resuming) args.push('-C', req.cwd);

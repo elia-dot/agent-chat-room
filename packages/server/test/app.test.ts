@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -168,6 +168,33 @@ describe('the REST surface', () => {
     expect(byPrefix.statusCode).toBe(200);
   });
 
+  it('creates and updates a room with additional folders', async () => {
+    const first = repo();
+    const second = repo();
+    const created = await createRoom({ additionalDirs: [first, first] });
+    expect(created.status).toBe(201);
+    expect(created.body.room.additionalDirs).toEqual([realpathSync(first)]);
+
+    const updated = await h.app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${created.body.room.id}`,
+      payload: { additionalDirs: [second] },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json<{ room: Room }>().room.additionalDirs).toEqual([realpathSync(second)]);
+    expect(h.store.getRoom(created.body.room.id)?.additionalDirs).toEqual([realpathSync(second)]);
+  });
+
+  it('rejects an invalid additional folder', async () => {
+    const relative = await createRoom({ additionalDirs: ['relative/path'] });
+    expect(relative.status).toBe(400);
+    expect(relative.body.error).toContain('additional folder must be absolute');
+
+    const missing = await createRoom({ additionalDirs: ['/definitely/not/a/real/acr-folder'] });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toContain('does not exist or cannot be read');
+  });
+
   it('404s an unknown room and 400s a body zod rejects', async () => {
     const missing = await h.app.inject({ url: '/api/rooms/nope' });
     expect(missing.statusCode).toBe(404);
@@ -262,11 +289,12 @@ describe('the REST surface', () => {
     const posted = await h.app.inject({
       method: 'POST',
       url: `/api/rooms/${id}/messages`,
-      payload: { text: 'Use a named constant.', mention: 'echo2' },
+      payload: { text: '@echo2 Use a named constant.', mention: 'echo2' },
     });
     expect(posted.statusCode).toBe(201);
     const { message, room } = posted.json<{ message: Message; room: Room }>();
     expect(message.author).toBe('you');
+    expect(message.text).toBe('@echo2 Use a named constant.');
     expect(room.paused).toBe(true);
     expect(room.nextSpeaker).toBe('echo2');
 

@@ -25,6 +25,8 @@ export interface Room {
   mode: RoomMode;
   /** The human's checkout. Turns run in `worktreePath` when the room has one. */
   repoRoot: string;
+  /** Extra absolute workspace roots granted to every runtime in this room. */
+  additionalDirs: string[];
   /** The branch the checkout was on when the room opened. */
   baseBranch: string;
   /** `acr/<slug>`. */

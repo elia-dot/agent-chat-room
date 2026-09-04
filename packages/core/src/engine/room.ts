@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { constants, mkdirSync, writeFileSync } from 'node:fs';
+import { access, realpath, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute } from 'node:path';
 
 import { adapters as defaultAdapters } from '../adapters/index.js';
 import { loadRepoConfig, resolveRoomDefaults } from '../config.js';
@@ -46,6 +47,8 @@ export interface RoomEngineOptions {
 export interface CreateRoomInput {
   task: string;
   cwd: string;
+  /** Extra absolute workspace roots granted to every runtime in the room. */
+  additionalDirs?: string[];
   /** Runtime ids. The first is the worker, every other one reviews. */
   agents: string[];
   title?: string;
@@ -78,6 +81,40 @@ export interface RoomOutcome {
   /** Short sha of the commit the approved round produced. */
   commit?: string;
   changedFiles: string[];
+}
+
+export const MAX_ADDITIONAL_DIRS = 20;
+
+/** Validate and canonicalise workspace roots before they reach a CLI argument list. */
+export async function validateAdditionalDirs(paths: readonly string[]): Promise<string[]> {
+  if (paths.length > MAX_ADDITIONAL_DIRS) {
+    throw new EngineError(`a room can grant at most ${MAX_ADDITIONAL_DIRS} additional folders`);
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of paths) {
+    const path = raw.trim();
+    if (!path) continue;
+    if (!isAbsolute(path)) throw new EngineError(`additional folder must be absolute: "${path}"`);
+
+    let canonical: string;
+    try {
+      canonical = await realpath(path);
+      if (!(await stat(canonical)).isDirectory()) {
+        throw new EngineError(`additional path is not a folder: "${path}"`);
+      }
+      await access(canonical, constants.R_OK | constants.X_OK);
+    } catch (err) {
+      if (err instanceof EngineError) throw err;
+      throw new EngineError(`additional folder does not exist or cannot be read: "${path}"`);
+    }
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      result.push(canonical);
+    }
+  }
+  return result;
 }
 
 export interface RunOptions {
@@ -258,6 +295,7 @@ export class RoomEngine {
 
     const task = input.task.trim();
     if (!task) throw new EngineError('a room needs a task');
+    const additionalDirs = await validateAdditionalDirs(input.additionalDirs ?? []);
 
     // Precedence: whatever the caller passed > `.acr.json` in the repo > built-in defaults.
     const repoConfig = loadRepoConfig(repoRoot);
@@ -344,6 +382,7 @@ export class RoomEngine {
       task,
       mode,
       repoRoot,
+      additionalDirs,
       baseBranch,
       roomBranch,
       baseSha,
@@ -1210,6 +1249,7 @@ export class RoomEngine {
     const handle = adapter.run(
       {
         cwd: ctx.cwd,
+        ...(room.additionalDirs.length > 0 ? { additionalDirs: room.additionalDirs } : {}),
         prompt,
         permission: participant.permission,
         timeoutMs: this.timeoutMs,

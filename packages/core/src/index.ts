@@ -43,6 +43,8 @@ export {
   deriveTitle,
   assertRoster,
   BRAINSTORM_ROUNDS,
+  MAX_ADDITIONAL_DIRS,
+  validateAdditionalDirs,
 } from './engine/room.js';
 export type {
   CreateRoomInput,

@@ -10,6 +10,7 @@ const room = (over: Partial<Room> = {}): Room => ({
   task: 'math.js exports add() but the body subtracts. Fix it.',
   mode: 'build-review',
   repoRoot: '/repo',
+  additionalDirs: [],
   baseBranch: 'main',
   roomBranch: 'acr/fix-add',
   baseSha: 'abc1234',

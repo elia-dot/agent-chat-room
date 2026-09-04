@@ -48,6 +48,24 @@ describe('buildAgyArgs', () => {
     );
   });
 
+  it('grants access to each additional folder', () => {
+    expect(
+      buildAgyArgs({
+        ...baseReq,
+        additionalDirs: ['/shared/docs', '/shared/data'],
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        '--add-dir',
+        '/repo',
+        '--add-dir',
+        '/shared/docs',
+        '--add-dir',
+        '/shared/data',
+      ]),
+    );
+  });
+
   it('derives --print-timeout from the turn timeout, overriding the agy 5m default', () => {
     const args = buildAgyArgs({ ...baseReq, timeoutMs: 1_800_000 });
     expect(args[args.indexOf('--print-timeout') + 1]).toBe('1800s');

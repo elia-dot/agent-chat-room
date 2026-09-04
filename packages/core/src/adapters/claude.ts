@@ -37,6 +37,7 @@ export function buildClaudeArgs(req: TurnRequest): string[] {
     'project',
     ...claudePermissionArgs(req.permission),
   ];
+  if (req.additionalDirs?.length) args.push('--add-dir', ...req.additionalDirs);
   if (req.model) args.push('--model', req.model);
   if (req.systemAppend) args.push('--append-system-prompt', req.systemAppend);
   if (req.sessionId) args.push('--resume', req.sessionId);

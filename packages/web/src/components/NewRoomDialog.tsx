@@ -6,6 +6,7 @@ import { api } from '../api/client.js';
 import { basename, dirname, relativeTime } from '../lib/format.js';
 import { byRuntime } from '../lib/models.js';
 import { filterRepos } from '../lib/repos.js';
+import { AdditionalDirsEditor } from './AdditionalDirsEditor.js';
 import { ModelSelect } from './ModelSelect.js';
 
 /** Enough recents to cover a normal week of projects; past that, filter instead of scroll. */
@@ -37,6 +38,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [repoHint, setRepoHint] = useState<{ text: string; useRoot?: string } | null>(null);
 
   const [cwd, setCwd] = useState('');
+  const [additionalDirs, setAdditionalDirs] = useState<string[]>([]);
   const [task, setTask] = useState('');
   const [title, setTitle] = useState('');
   const [agents, setAgents] = useState<string[]>([]);
@@ -144,6 +146,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
       await onCreate({
         task,
         cwd,
+        ...(additionalDirs.length > 0 ? { additionalDirs } : {}),
         agents,
         mode,
         worktree,
@@ -311,6 +314,13 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 </ul>
               )}
             </div>
+          </Field>
+
+          <Field label="Additional folders (optional)">
+            <AdditionalDirsEditor value={additionalDirs} onChange={setAdditionalDirs} />
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Every agent can access these folders in addition to the repository.
+            </p>
           </Field>
 
           <Field label="Task">

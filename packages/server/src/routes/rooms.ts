@@ -9,6 +9,7 @@ import type { RoomSupervisor } from '../supervisor.js';
 const CreateRoomBody = z.object({
   task: z.string().min(1, 'a room needs a task'),
   cwd: z.string().min(1),
+  additionalDirs: z.array(z.string().min(1)).max(20).optional(),
   agents: z.array(z.string().min(1)).min(2, 'a room needs a worker and at least one reviewer'),
   title: z.string().optional(),
   mode: z.enum(['build-review', 'brainstorm']).optional(),
@@ -70,10 +71,14 @@ const PatchBody = z
   .object({
     maxRounds: z.number().int().positive().max(50).optional(),
     title: z.string().min(1).optional(),
+    additionalDirs: z.array(z.string().min(1)).max(20).optional(),
   })
-  .refine((v) => v.maxRounds !== undefined || v.title !== undefined, {
-    message: 'nothing to change',
-  });
+  .refine(
+    (v) => v.maxRounds !== undefined || v.title !== undefined || v.additionalDirs !== undefined,
+    {
+      message: 'nothing to change',
+    },
+  );
 
 const ListQuery = z.object({
   repo: z.string().optional(),
@@ -108,6 +113,7 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
     const engine = await supervisor.create({
       task: body.task,
       cwd: body.cwd,
+      ...(body.additionalDirs ? { additionalDirs: body.additionalDirs } : {}),
       agents: body.agents,
       ...(body.title ? { title: body.title } : {}),
       ...(body.mode ? { mode: body.mode } : {}),
@@ -274,15 +280,16 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       .send(markdown);
   });
 
-  app.patch('/api/rooms/:id', (request) => {
+  app.patch('/api/rooms/:id', async (request) => {
     const room = requireRoom(supervisor, request.params);
     const body = PatchBody.parse(request.body);
     // Raising the round limit is the one edit M2 needs: without it a room that used up its
     // rounds dead-ends in the browser, and the engine's own message says to raise it.
     return {
-      room: supervisor.patch(room.id, {
+      room: await supervisor.patch(room.id, {
         ...(body.maxRounds === undefined ? {} : { maxRounds: body.maxRounds }),
         ...(body.title === undefined ? {} : { title: body.title }),
+        ...(body.additionalDirs === undefined ? {} : { additionalDirs: body.additionalDirs }),
       }),
     };
   });

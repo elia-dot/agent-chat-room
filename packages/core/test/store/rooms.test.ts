@@ -32,6 +32,16 @@ afterEach(() => {
 });
 
 describe('RoomStore', () => {
+  it('round-trips and updates additional folders', () => {
+    const created = room({ additionalDirs: ['/shared/docs', '/shared/data'] });
+    expect(created.additionalDirs).toEqual(['/shared/docs', '/shared/data']);
+    expect(store.getRoom(created.id)?.additionalDirs).toEqual(['/shared/docs', '/shared/data']);
+
+    const updated = store.updateRoom(created.id, { additionalDirs: ['/other'] });
+    expect(updated.additionalDirs).toEqual(['/other']);
+    expect(store.getRoom(created.id)?.additionalDirs).toEqual(['/other']);
+  });
+
   it('round-trips the pause flag and the next speaker', () => {
     const r = room();
     expect(r.paused).toBe(false);

@@ -69,6 +69,7 @@ export function buildAgyArgs(req: TurnRequest): string[] {
     '--disable-slash-commands',
     '--add-dir',
     req.cwd,
+    ...(req.additionalDirs ?? []).flatMap((path) => ['--add-dir', path]),
     '--print-timeout',
     `${Math.max(1, Math.ceil(req.timeoutMs / 1000))}s`,
     ...agyPermissionArgs(req.permission),

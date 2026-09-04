@@ -11,6 +11,7 @@ import { useState } from 'react';
 import type { ChangedFiles } from '../api/client.js';
 import { api } from '../api/client.js';
 import { basename, duration, initials, runtimeClasses, stateLabel } from '../lib/format.js';
+import { AdditionalDirsEditor } from './AdditionalDirsEditor.js';
 import { DiffViewer } from './DiffViewer.js';
 import { ModelSelect } from './ModelSelect.js';
 
@@ -31,6 +32,7 @@ export interface RightPanelProps {
   onStop: () => void;
   onCloseRoom: () => void;
   onRaiseRounds: (rounds: number) => void;
+  onSetAdditionalDirs: (paths: string[]) => void;
   onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
   onCommit: () => void;
   onOpenPr: (remote: string) => void;
@@ -111,6 +113,13 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
           </ul>
         </Section>
 
+        <AdditionalFolders
+          key={`${room.id}:${room.additionalDirs.join('\0')}`}
+          room={room}
+          busy={props.busy}
+          onSave={props.onSetAdditionalDirs}
+        />
+
         <Section title="Changed files">
           {files === null ? (
             <p className="text-xs text-zinc-500">loading…</p>
@@ -135,6 +144,41 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
 
       <RoomActions {...props} />
     </Panel>
+  );
+}
+
+function AdditionalFolders({
+  room,
+  busy,
+  onSave,
+}: {
+  room: Room;
+  busy: boolean;
+  onSave: (paths: string[]) => void;
+}): React.ReactElement {
+  const [paths, setPaths] = useState(room.additionalDirs);
+
+  const running = room.state === 'running' || room.state === 'waiting-reviews';
+  const locked = busy || running || room.closedAt !== null;
+  const changed =
+    paths.length !== room.additionalDirs.length ||
+    paths.some((path, index) => path !== room.additionalDirs[index]);
+
+  return (
+    <Section title="Additional folders">
+      <AdditionalDirsEditor value={paths} onChange={setPaths} disabled={locked} />
+      {paths.length === 0 && (
+        <p className="mt-1 text-[11px] text-zinc-500">Only the room repository is accessible.</p>
+      )}
+      <button
+        type="button"
+        disabled={locked || !changed}
+        onClick={() => onSave(paths)}
+        className="mt-1.5 rounded border border-zinc-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-zinc-700"
+      >
+        Save folder access
+      </button>
+    </Section>
   );
 }
 

@@ -80,3 +80,26 @@ describe('002_interactivity', () => {
     db.close();
   });
 });
+
+describe('004_additional_dirs', () => {
+  it('adds an empty folder list to an existing v3 room', () => {
+    const db = new Database(':memory:');
+    for (const migration of migrations.filter((entry) => entry.version <= 3)) {
+      db.exec(migration.sql);
+      db.pragma(`user_version = ${migration.version}`);
+    }
+    db.prepare(
+      `INSERT INTO rooms (id, slug, title, task, mode, repo_root, base_branch, room_branch,
+         state, round, max_rounds, created_at, updated_at)
+       VALUES ('r1', 'fix-add', 'Fix add()', 'add subtracts', 'build-review', '/repo', 'main',
+         'acr/fix-add', 'idle', 0, 4, 'then', 'then')`,
+    ).run();
+
+    expect(migrate(db)).toBe(LATEST_VERSION);
+    const row = db.prepare('SELECT additional_dirs_json FROM rooms WHERE id = ?').get('r1') as {
+      additional_dirs_json: string;
+    };
+    expect(row.additional_dirs_json).toBe('[]');
+    db.close();
+  });
+});

@@ -26,6 +26,7 @@ export interface RoomDetail {
 export interface CreateRoomRequest {
   task: string;
   cwd: string;
+  additionalDirs?: string[];
   agents: string[];
   title?: string;
   mode?: RoomMode;
@@ -151,7 +152,10 @@ export const api = {
   stop: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/stop`),
   close: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/close`),
 
-  patchRoom: (id: string, body: { maxRounds?: number; title?: string }) =>
+  patchRoom: (
+    id: string,
+    body: { maxRounds?: number; title?: string; additionalDirs?: string[] },
+  ) =>
     request<{ room: Room }>(`/api/rooms/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
