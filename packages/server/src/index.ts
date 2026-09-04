@@ -6,7 +6,16 @@ export { RoomSupervisor, ConflictError } from './supervisor.js';
 export type { SupervisorOptions, LiveTurn } from './supervisor.js';
 export { notify } from './notify.js';
 export type { NotifyOptions, Spawn } from './notify.js';
+export { folderPicker, pickFolder, pickerAvailability, PickerUnavailableError } from './picker.js';
+export type {
+  FolderPicker,
+  PickerAvailability,
+  PickerOptions,
+  PickerRun,
+  PickerTool,
+  PickResult,
+} from './picker.js';
 export { NotFoundError } from './errors.js';
 export { isLocalOrigin, isLoopbackHost, isAllowed } from './security.js';
 export type { ClientFrame, ServerFrame } from './ws.js';
-export type { BrowseEntry, BrowseResult } from './routes/repos.js';
+export type { BrowseEntry, BrowseResult, PickResponse } from './routes/repos.js';

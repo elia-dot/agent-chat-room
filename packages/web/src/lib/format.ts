@@ -73,3 +73,15 @@ export function basename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
   return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed;
 }
+
+/**
+ * The parent of a path, for the dimmed half of a recent-project row. `''` when there is no
+ * parent to show – a bare name, or the root itself, where the basename already says it all.
+ */
+export function dirname(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  const cut = trimmed.lastIndexOf('/');
+  if (cut === -1) return '';
+  if (cut === 0) return '/';
+  return trimmed.slice(0, cut);
+}

@@ -325,10 +325,16 @@ Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
 | `POST /api/rooms/:id/promote`                                               | a brainstorm proposal becomes a new `build-review` room          |
 | `GET /api/rooms/:id/export.md`                                              | the whole room as markdown                                       |
 | `GET /api/repos` \| `/api/repos/browse?path=`                               | the repo picker                                                  |
+| `GET /api/repos/picker`                                                     | whether this host can show a native folder dialog                |
+| `POST /api/repos/pick`                                                      | `{ path? }` – open that dialog; `{ path, repoRoot }` back        |
 
 `GET /api/repos/browse` reads directories and `POST /api/rooms` spawns an agent CLI with `edits`
 permission, so the origin check is load-bearing rather than a nicety: without it, any page you have
-open could POST to `127.0.0.1:4321`.
+open could POST to `127.0.0.1:4321`. `POST /api/repos/pick` raises the stakes again – it opens a
+native folder dialog on the machine running the server, which is why it is a POST rather than a GET
+a plain navigation could trigger. On a headless host `GET /api/repos/picker` reports
+`available: false` (as it does when `ACR_NO_PICKER` is set) and the in-app directory browser is what
+the dialog falls back to.
 
 ## License
 
