@@ -43,7 +43,13 @@ describe('acr doctor', () => {
       runtimes: { id: string; installed: boolean; usable: boolean }[];
     };
     expect(payload.node).toBe(process.version);
-    expect(payload.runtimes.map((r) => r.id)).toEqual(['claude', 'codex', 'cursor', 'echo']);
+    expect(payload.runtimes.map((r) => r.id)).toEqual([
+      'claude',
+      'codex',
+      'cursor',
+      'antigravity',
+      'echo',
+    ]);
     expect(payload.runtimes.every((r) => r.installed === false)).toBe(true);
   });
 });

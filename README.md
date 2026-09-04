@@ -23,9 +23,9 @@ somewhere for a finished room to go. What works today:
 - **Interrupt any time.** Posting a message holds the loop and points the next turn at whoever you
   `@mention`; Continue picks the round loop back up.
 - **macOS notifications** when a room reaches `approved` or `needs-you` (`ACR_NO_NOTIFY=1` to skip).
-- **Adapters** for Claude Code, Codex CLI and Cursor Agent: `detect()`, argv building, streaming
-  `run()`, session resume, and a permission model with exactly three levels (`read-only`,
-  `edits`, `full`).
+- **Adapters** for Claude Code, Codex CLI, Cursor Agent and Antigravity: `detect()`, argv
+  building, streaming `run()`, session resume, and a permission model with exactly three levels
+  (`read-only`, `edits`, `full`).
 - **Brainstorm mode.** Three rounds instead of a build loop: everyone answers in parallel,
   everyone reacts to the others, and the moderator writes a merged proposal. Nobody edits.
   One button turns the proposal into a `build-review` room.
@@ -84,7 +84,7 @@ node packages/cli/dist/bin.js run \
 node packages/cli/dist/bin.js run \
   --mode brainstorm \
   --task "How should we restructure the pricing module?" \
-  --agents claude,codex,cursor
+  --agents claude,codex,cursor,antigravity
 
 node packages/cli/dist/bin.js rooms ls
 node packages/cli/dist/bin.js rooms show <id>
@@ -138,8 +138,8 @@ and `acr run --mode brainstorm` exits 0. Promote turns the proposal into the tas
 
 Models are **picked, not typed**. The new-room dialog and the right panel both show a list
 per runtime, served by `GET /api/runtimes/models`: live from the CLI where a runtime can list
-its own models (`cursor-agent --list-models`, which is account-specific), and a written-down
-list where it cannot (`claude` and `codex` have no models subcommand). The list is a picker
+its own models (`cursor-agent --list-models`, which is account-specific, and `agy models`), and
+a written-down list where it cannot (`claude` and `codex` have no models subcommand). The list is a picker
 seed, never a validator – it goes stale the week a model ships – so `Custom…` is always there
 for the strings no list can hold, such as `claude-opus-5[1m]` or
 `claude-opus-4-8[context=1m,effort=high]`. Opening a room with a name the runtime has never
@@ -155,8 +155,8 @@ same step, so there is never briefly more than one writer.
 Sessions are kept, which is the point of swapping rather than opening a new room. That does
 mean a swapped agent's session still remembers being the other role, so the engine prepends a
 "your role has changed" block to its next prompt: Claude would notice on its own through
-`--append-system-prompt`, but Codex and Cursor only see role instructions on the first prompt
-of a session.
+`--append-system-prompt`, but Codex, Cursor and Antigravity only see role instructions on the
+first prompt of a session.
 
 ### Commit, Open PR, Export
 

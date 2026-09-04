@@ -9,6 +9,8 @@ export function runtimeClasses(author: string): string {
       return 'bg-codex/15 text-codex ring-codex/30';
     case 'cursor':
       return 'bg-cursor/15 text-cursor ring-cursor/30';
+    case 'antigravity':
+      return 'bg-antigravity/15 text-antigravity ring-antigravity/30';
     case 'you':
       return 'bg-zinc-500/15 text-zinc-700 ring-zinc-500/30 dark:text-zinc-300';
     default:

@@ -56,6 +56,34 @@ export function cursorPermissionArgs(permission: Permission): string[] {
   }
 }
 
+/**
+ * Antigravity (`agy`). Each row probed against agy 1.1.26 by asking one turn to write a
+ * file *and* run a shell command in a throwaway directory:
+ *
+ *  - `--sandbox` refuses `write_to_file` and refuses `echo X > file` at the command
+ *    permission layer, while still allowing a plain read-only `ls`. Nothing reached disk.
+ *  - `--mode accept-edits` wrote the file and auto-denied `run_command` with "user denied
+ *    permission to run command". An `edits` turn can therefore edit but not run the test
+ *    suite; `full` is the opt-in escape hatch for a worker that needs a shell.
+ *  - `--dangerously-skip-permissions` reports `permission_mode: always-proceed`, and both
+ *    the write and the shell ran.
+ *
+ * `--mode plan` also blocks writes and is deliberately *not* used for `read-only`: it
+ * expands a system `plan` slash command that changes the agent's persona, and a probe under
+ * it answered "I have created the implementation plan… please review it" instead of doing
+ * the task – which would derail a reviewer that has to emit a fenced verdict block.
+ */
+export function agyPermissionArgs(permission: Permission): string[] {
+  switch (permission) {
+    case 'read-only':
+      return ['--sandbox'];
+    case 'edits':
+      return ['--mode', 'accept-edits'];
+    case 'full':
+      return ['--dangerously-skip-permissions'];
+  }
+}
+
 /** True when a permission level lets the runtime modify the working tree. */
 export function canWrite(permission: Permission): boolean {
   return permission !== 'read-only';
