@@ -1,6 +1,7 @@
 import type {
   Detection,
   Message,
+  ModelCatalog,
   Participant,
   RepoRecord,
   Role,
@@ -43,6 +44,13 @@ export interface RuntimesResponse {
   runtimes: RuntimeReportEntry[];
   gh: Detection;
 }
+
+/** `GET /api/runtimes/models` – what the model picker offers, per runtime. */
+export interface ModelCatalogsResponse {
+  catalogs: ModelCatalog[];
+}
+
+export type { ModelCatalog };
 
 export interface BrowseEntry {
   name: string;
@@ -104,6 +112,16 @@ export const api = {
   health: () => request<{ ok: boolean; version: string }>('/api/health'),
 
   runtimes: () => request<RuntimesResponse>('/api/runtimes'),
+
+  /**
+   * Separate from `runtimes()` because it is the one detection-shaped call that may reach
+   * the network (`cursor-agent --list-models`). The server caches it; callers still treat a
+   * failure as "no catalog" rather than an error, so a dialog always opens.
+   */
+  modelCatalogs: (runtime?: string) =>
+    request<ModelCatalogsResponse>(
+      `/api/runtimes/models${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ''}`,
+    ),
 
   rooms: (opts: { repo?: string; open?: boolean; limit?: number } = {}) => {
     const query = new URLSearchParams();

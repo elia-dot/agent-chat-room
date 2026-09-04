@@ -72,6 +72,7 @@ Rooms run inside that process. Closing the tab does not stop a room; Ctrl-C does
 
 ```sh
 node packages/cli/dist/bin.js doctor
+node packages/cli/dist/bin.js doctor --models   # what you may pass to --model
 node packages/cli/dist/bin.js run \
   --task "The login test is flaky. Find out why and fix it." \
   --agents claude,codex \
@@ -134,6 +135,16 @@ and `acr run --mode brainstorm` exits 0. Promote turns the proposal into the tas
 `build-review` room in the same repo, with the moderator as the worker.
 
 ### Swapping roles and models
+
+Models are **picked, not typed**. The new-room dialog and the right panel both show a list
+per runtime, served by `GET /api/runtimes/models`: live from the CLI where a runtime can list
+its own models (`cursor-agent --list-models`, which is account-specific), and a written-down
+list where it cannot (`claude` and `codex` have no models subcommand). The list is a picker
+seed, never a validator – it goes stale the week a model ships – so `Custom…` is always there
+for the strings no list can hold, such as `claude-opus-5[1m]` or
+`claude-opus-4-8[context=1m,effort=high]`. Opening a room with a name the runtime has never
+reported warns and continues; it is never refused, and if the vendor does reject it the turn
+error names the model and says where to change it.
 
 You can make a different agent the worker between rounds, or change any participant's model,
 from the right panel or with `PATCH /api/rooms/:id/participants/:runtime`. The room has to be
@@ -310,6 +321,7 @@ Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `GET /api/health`                                                           | `{ ok, version }`                                                |
 | `GET /api/runtimes`                                                         | `acr doctor --json`, plus `gh` detection for the PR button       |
+| `GET /api/runtimes/models?runtime=`                                         | what the model picker offers, per runtime; `acr doctor --models` |
 | `GET /api/rooms`                                                            | `?repo=&open=&limit=`                                            |
 | `POST /api/rooms`                                                           | open a room; `start: true` kicks the loop off                    |
 | `GET /api/rooms/:id`                                                        | room, roster, transcript, turns, and the in-flight turn buffer   |

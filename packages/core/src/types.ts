@@ -82,10 +82,23 @@ export interface TurnHandle {
   done: Promise<TurnResult>;
 }
 
+/** One entry in a runtime's model catalog. `id` is what goes on the command line. */
+export interface ModelOption {
+  id: string;
+  /** What a human calls it, when the runtime gives us a nicer name than the id. */
+  label?: string;
+}
+
 export interface AdapterCapabilities {
   resume: boolean;
   readOnly: boolean;
   structuredOutput: boolean;
+  /**
+   * Static fallback names for the model picker, used when the CLI cannot list its own
+   * models. A seed for a `<select>`, never a validator: vendors ship models faster than
+   * this array gets edited, and parameterised strings like `claude-opus-5[1m]` can never
+   * be enumerated. See `models.ts`.
+   */
   models?: string[];
 }
 
@@ -96,6 +109,12 @@ export interface AgentAdapter {
   detect(): Promise<Detection>;
   capabilities: AdapterCapabilities;
   run(req: TurnRequest, sink: EventSink): TurnHandle;
+  /**
+   * Ask the CLI which models this account can actually use. Optional: only some vendors
+   * offer a listing, and the ones that do reach the network to answer, so `models.ts`
+   * caches the result and falls back to `capabilities.models` when it fails.
+   */
+  listModels?(): Promise<ModelOption[]>;
 }
 
 /**

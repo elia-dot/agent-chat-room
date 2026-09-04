@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { CodexParser, buildCodexArgs, buildCodexPrompt } from '../../src/adapters/codex.js';
+import {
+  CodexParser,
+  buildCodexArgs,
+  buildCodexPrompt,
+  codexAdapter,
+} from '../../src/adapters/codex.js';
 import type { TurnRequest } from '../../src/types.js';
 import { eventsOfType, fixtureLines, replay } from '../helpers.js';
 
@@ -172,5 +177,21 @@ describe('CodexParser against a recorded failure', () => {
       JSON.stringify({ type: 'turn.completed', usage: {} }),
     ]);
     expect(eventsOfType(events, 'text').map((e) => e.text)).toEqual(['done']);
+  });
+});
+
+describe('a model codex rejects', () => {
+  it('names the model and points at the picker', () => {
+    const { result } = replay(new CodexParser('gpt-9'), [
+      JSON.stringify({ type: 'turn.failed', error: { message: 'model_not_found: gpt-9' } }),
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('"gpt-9"');
+    expect(result.error).toContain('model list');
+  });
+
+  it('offers a static list, because codex cannot be asked for one', () => {
+    expect(codexAdapter.capabilities.models).toContain('gpt-5.3-codex');
+    expect(codexAdapter).not.toHaveProperty('listModels');
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ClaudeParser, buildClaudeArgs } from '../../src/adapters/claude.js';
+import { ClaudeParser, buildClaudeArgs, claudeAdapter } from '../../src/adapters/claude.js';
 import type { TurnRequest } from '../../src/types.js';
 import { eventsOfType, fixtureLines, replay } from '../helpers.js';
 
@@ -148,5 +148,41 @@ describe('ClaudeParser tolerance', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('not on your PATH');
+  });
+});
+
+describe('a model claude rejects', () => {
+  /** The `result` line a real `claude --model opus-5` run emits (claude 2.1.259). */
+  const rejection = JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    api_error_status: 404,
+    session_id: 's',
+    result:
+      "There's an issue with the selected model (opus-5). It may not exist or you may not " +
+      'have access to it. Run --model to pick a different model.',
+  });
+
+  it('keeps the CLI sentence and adds where to fix it', () => {
+    const { result } = replay(new ClaudeParser('opus-5'), [rejection], { exitCode: 1 });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('It may not exist');
+    expect(result.error).toContain('"opus-5"');
+    expect(result.error).toContain('model list');
+  });
+
+  it('says nothing extra when the turn failed for another reason', () => {
+    const { result } = replay(new ClaudeParser('opus'), [
+      JSON.stringify({ type: 'result', is_error: true, result: 'boom', session_id: 's' }),
+    ]);
+    expect(result.error).toBe('boom');
+  });
+
+  it('offers the aliases the installed CLI documents', () => {
+    expect(claudeAdapter.capabilities.models).toEqual(
+      expect.arrayContaining(['opus', 'sonnet', 'haiku', 'fable']),
+    );
+    expect(claudeAdapter.capabilities.models).not.toContain('opus-5');
   });
 });

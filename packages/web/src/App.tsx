@@ -1,4 +1,4 @@
-import type { Detection, Room } from '@agent-chat-room/core';
+import type { Detection, ModelCatalog, Room } from '@agent-chat-room/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { ChangedFiles, CreateRoomRequest } from './api/client.js';
@@ -13,6 +13,7 @@ import { RoomsSidebar } from './components/RoomsSidebar.js';
 import { StatusDot } from './components/StatusDot.js';
 import { Transcript } from './components/Transcript.js';
 import { stateLabel } from './lib/format.js';
+import { byRuntime } from './lib/models.js';
 import type { IncomingFrame } from './state/roomStore.js';
 import { RoomStoreClient } from './state/roomStore.js';
 
@@ -32,11 +33,14 @@ export function App(): React.ReactElement {
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [files, setFiles] = useState<ChangedFiles | null>(null);
   const [gh, setGh] = useState<Detection | null>(null);
+  const [catalogs, setCatalogs] = useState<Record<string, ModelCatalog>>({});
   const [diff, setDiff] = useState<DiffState | null>(null);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [showDoctor, setShowDoctor] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Things worth saying that are not failures – an unrecognised model, so far. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [dark, setDark] = useState(prefersDark);
 
   const socketRef = useRef<RoomSocket | null>(null);
@@ -94,6 +98,12 @@ export function App(): React.ReactElement {
     void api
       .runtimes()
       .then((r) => setGh(r.gh))
+      .catch(() => undefined);
+    // The model picker's list. Cached server-side, so asking once here is enough, and a
+    // failure just means the picker offers `default` and `Custom…`.
+    void api
+      .modelCatalogs()
+      .then((r) => setCatalogs(byRuntime(r.catalogs)))
       .catch(() => undefined);
   }, []);
 
@@ -156,6 +166,9 @@ export function App(): React.ReactElement {
   const createRoom = async (input: CreateRoomRequest): Promise<void> => {
     const created = await api.createRoom(input);
     setShowNewRoom(false);
+    // A model the runtime has never reported is a warning, not a refusal – but it is the
+    // one warning that predicts a dead first turn, so it is said out loud.
+    setNotice(created.warnings.length > 0 ? created.warnings.join(' · ') : null);
     await refreshRooms();
     selectRoom(created.room.id);
   };
@@ -204,6 +217,15 @@ export function App(): React.ReactElement {
           </div>
         )}
 
+        {notice && (
+          <div className="flex items-center gap-2 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <span className="flex-1">{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} className="hover:underline">
+              dismiss
+            </button>
+          </div>
+        )}
+
         {showDoctor ? (
           <DoctorPage onClose={() => setShowDoctor(false)} />
         ) : room ? (
@@ -238,6 +260,7 @@ export function App(): React.ReactElement {
           diff={diff}
           busy={busy}
           gh={gh}
+          catalogs={catalogs}
           onCloseDiff={() => setDiff(null)}
           onPause={() => void act(() => api.pause(room.id))}
           onContinue={() => void act(() => api.start(room.id))}

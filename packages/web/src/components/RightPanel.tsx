@@ -1,10 +1,18 @@
-import type { Detection, Participant, Role, Room, TurnRecord } from '@agent-chat-room/core';
+import type {
+  Detection,
+  ModelCatalog,
+  Participant,
+  Role,
+  Room,
+  TurnRecord,
+} from '@agent-chat-room/core';
 import { useState } from 'react';
 
 import type { ChangedFiles } from '../api/client.js';
 import { api } from '../api/client.js';
 import { basename, duration, initials, runtimeClasses, stateLabel } from '../lib/format.js';
 import { DiffViewer } from './DiffViewer.js';
+import { ModelSelect } from './ModelSelect.js';
 
 export interface RightPanelProps {
   room: Room;
@@ -15,6 +23,8 @@ export interface RightPanelProps {
   busy: boolean;
   /** `gh` detection from `GET /api/runtimes`; null until it has been fetched. */
   gh: Detection | null;
+  /** Model catalogs from `GET /api/runtimes/models`, keyed by runtime. Empty until fetched. */
+  catalogs: Record<string, ModelCatalog>;
   onCloseDiff: () => void;
   onPause: () => void;
   onContinue: () => void;
@@ -85,6 +95,7 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
                 participant={p}
                 room={room}
                 busy={props.busy}
+                catalog={props.catalogs[p.runtime]}
                 onSet={props.onSetParticipant}
               />
             ))}
@@ -127,14 +138,6 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
   );
 }
 
-/** Known model names per runtime, as a `<datalist>`. Free text, because Cursor takes
- * parameterised strings like `claude-opus-4-8[context=1m]` that no fixed list can cover. */
-const MODEL_HINTS: Record<string, string[]> = {
-  claude: ['opus', 'sonnet', 'haiku'],
-  codex: ['gpt-5.3-codex', 'gpt-5.3-codex-high'],
-  cursor: ['auto', 'composer-2.5', 'claude-sonnet-5-thinking-high'],
-};
-
 const ROLES_FOR: Record<Room['mode'], Role[]> = {
   'build-review': ['worker', 'reviewer'],
   brainstorm: ['reviewer', 'moderator'],
@@ -151,17 +154,18 @@ function ParticipantRow({
   participant,
   room,
   busy,
+  catalog,
   onSet,
 }: {
   participant: Participant;
   room: Room;
   busy: boolean;
+  catalog: ModelCatalog | undefined;
   onSet: (runtime: string, patch: { role?: Role; model?: string }) => void;
 }): React.ReactElement {
   const [model, setModel] = useState(participant.model ?? '');
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const locked = busy || running || room.closedAt !== null;
-  const listId = `models-${participant.runtime}`;
 
   return (
     <li className="space-y-1">
@@ -188,25 +192,17 @@ function ParticipantRow({
         <Tag>{participant.permission}</Tag>
       </div>
       <div className="flex items-center gap-1 pl-7">
-        <input
+        <ModelSelect
+          runtime={participant.runtime}
           value={model}
+          catalog={catalog}
           disabled={locked}
-          placeholder="default model"
-          aria-label={`${participant.runtime} model`}
-          list={listId}
-          onChange={(e) => setModel(e.target.value)}
-          onBlur={() => {
-            if (model.trim() !== (participant.model ?? '')) {
-              onSet(participant.runtime, { model: model.trim() });
-            }
+          className="flex-1"
+          onChange={setModel}
+          onCommit={(next) => {
+            if (next !== (participant.model ?? '')) onSet(participant.runtime, { model: next });
           }}
-          className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-1.5 py-px font-mono text-[10px] disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
         />
-        <datalist id={listId}>
-          {(MODEL_HINTS[participant.runtime] ?? []).map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
       </div>
     </li>
   );

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { credentialPresent, home, meetsMinVersion, readVersion, which } from '../detect.js';
+import { withModelHint } from '../modelHint.js';
 import { codexPermissionArgs } from '../permissions.js';
 import { parseJsonLine } from '../process/lines.js';
 import { runTurn } from '../process/runTurn.js';
@@ -91,6 +92,9 @@ export class CodexParser implements TurnParser {
   private usage: Usage | undefined;
   private failure: string | undefined;
   private sawTurnCompleted = false;
+
+  /** The model this turn asked for, so a rejection can name it. */
+  constructor(private readonly model?: string) {}
 
   onLine(line: string, emit: EventSink): void {
     const ev = parseJsonLine(line);
@@ -186,7 +190,7 @@ export class CodexParser implements TurnParser {
     };
 
     const failure = failureReason(ctx, this.failure, 'codex');
-    if (failure) return { ...base, ok: false, error: failure };
+    if (failure) return { ...base, ok: false, error: withModelHint(failure, this.model) };
     if (!this.sawTurnCompleted && this.lastMessage.length === 0) {
       return { ...base, ok: false, error: 'codex produced no message' };
     }
@@ -199,7 +203,21 @@ export class CodexParser implements TurnParser {
 export const codexAdapter: AgentAdapter = {
   id: 'codex',
   displayName: 'Codex CLI',
-  capabilities: { resume: true, readOnly: true, structuredOutput: true },
+  capabilities: {
+    resume: true,
+    readOnly: true,
+    structuredOutput: true,
+    // `codex` has no models subcommand either – `-m/--model` takes a free slug – so this
+    // is a written-down seed for the picker, not a validator. It will go stale; the
+    // `Custom…` box in the UI is the answer to that, not a longer array here.
+    models: [
+      'gpt-5.3-codex',
+      'gpt-5.3-codex-low',
+      'gpt-5.3-codex-high',
+      'gpt-5.3-codex-xhigh',
+      'gpt-5.2',
+    ],
+  },
 
   async detect(): Promise<Detection> {
     const binPath = which(CODEX_BIN);
@@ -241,7 +259,7 @@ export const codexAdapter: AgentAdapter = {
       cwd: req.cwd,
       stdin: buildCodexPrompt(req),
       timeoutMs: req.timeoutMs,
-      parser: new CodexParser(),
+      parser: new CodexParser(req.model),
       sink,
       turnId: req.turnId,
       cleanup: () => {

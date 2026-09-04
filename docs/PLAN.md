@@ -130,6 +130,7 @@ export interface AgentAdapter {
   detect(): Promise<Detection>;     // { installed, version, loggedIn?, minVersionOk }
   capabilities: { resume: boolean; readOnly: boolean; structuredOutput: boolean; models?: string[] };
   run(req: TurnRequest, sink: EventSink): TurnHandle;   // spawn, stream, cancel
+  listModels?(): Promise<ModelOption[]>;                // optional: ask the CLI, where it can
 }
 
 interface TurnRequest {
@@ -229,7 +230,7 @@ SQLite via `better-sqlite3`. Tables: `rooms`, `participants`, `messages`, `turns
 ### 4.4 Server
 
 Fastify on localhost only. REST for CRUD (`/rooms`, `/rooms/:id/messages`, `/runtimes`,
-`/repos/browse`), one WebSocket per client for streaming events (`message.delta`,
+`/runtimes/models`, `/repos/browse`), one WebSocket per client for streaming events (`message.delta`,
 `message.done`, `room.state`, `turn.activity`). Serves `packages/web/dist`.
 
 ---
@@ -279,7 +280,8 @@ Screens:
    Pause / Continue, Stop, "Next: choose who speaks". Slash commands: `/role codex worker`,
    `/rounds 6`, `/mode brainstorm`.
 4. **Right panel.** Repo + branch, mode, round counter, participants with role dropdown,
-   permission chip and model picker, changed-files tree with a side-by-side diff viewer,
+   permission chip and model picker (a list from `/runtimes/models`, with `Custom…` for the
+   parameterised strings a list cannot hold), changed-files tree with a side-by-side diff viewer,
    usage (turns, wall time, tokens if the CLI reports them), actions (Commit with a
    generated message, Open PR via `gh`, Export markdown).
 5. **New room dialog.** Repo picker (recent + browse), task textarea, mode, roster: every

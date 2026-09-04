@@ -1,10 +1,12 @@
-import type { RepoRecord, RoomMode, RuntimeReportEntry } from '@agent-chat-room/core';
+import type { ModelCatalog, RepoRecord, RoomMode, RuntimeReportEntry } from '@agent-chat-room/core';
 import { useEffect, useState } from 'react';
 
 import type { BrowseResult, CreateRoomRequest } from '../api/client.js';
 import { api } from '../api/client.js';
 import { basename, dirname, relativeTime } from '../lib/format.js';
+import { byRuntime } from '../lib/models.js';
 import { filterRepos } from '../lib/repos.js';
+import { ModelSelect } from './ModelSelect.js';
 
 /** Enough recents to cover a normal week of projects; past that, filter instead of scroll. */
 const RECENT_LIMIT = 8;
@@ -25,6 +27,7 @@ export interface NewRoomDialogProps {
 export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.ReactElement {
   const [repos, setRepos] = useState<RepoRecord[]>([]);
   const [runtimes, setRuntimes] = useState<RuntimeReportEntry[]>([]);
+  const [catalogs, setCatalogs] = useState<Record<string, ModelCatalog>>({});
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const [nativePicker, setNativePicker] = useState(false);
@@ -46,15 +49,20 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
 
   useEffect(() => {
     void (async () => {
-      const [recent, detected, picker] = await Promise.all([
+      const [recent, detected, picker, catalog] = await Promise.all([
         api.repos(20).catch(() => []),
         api.runtimes().catch(() => ({ node: '', runtimes: [] })),
         // An older server, or a headless one, simply keeps the in-app browser.
         api.pickerStatus().catch(() => ({ available: false, tool: null })),
+        // Listing models can reach the network, so it is the call most likely to fail –
+        // and the least allowed to stop the dialog opening. No catalog means the picker
+        // offers `default` and `Custom…`, which is still better than a bare text box.
+        api.modelCatalogs().catch(() => ({ catalogs: [] })),
       ]);
       setRepos(recent);
       setRuntimes(detected.runtimes);
       setNativePicker(picker.available);
+      setCatalogs(byRuntime(catalog.catalogs));
       // A usable roster by default, worker first, so the common case is one click.
       setAgents(
         detected.runtimes
@@ -375,14 +383,12 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                     </span>
                     {on && (
                       <>
-                        <input
+                        <ModelSelect
+                          runtime={runtime.id}
                           value={models[runtime.id] ?? ''}
-                          onChange={(e) =>
-                            setModels((m) => ({ ...m, [runtime.id]: e.target.value }))
-                          }
-                          placeholder="model"
-                          aria-label={`${runtime.id} model`}
-                          className="w-32 rounded border border-zinc-300 bg-white px-1.5 py-px font-mono text-[11px] dark:border-zinc-700 dark:bg-zinc-950"
+                          catalog={catalogs[runtime.id]}
+                          className="w-44"
+                          onChange={(value) => setModels((m) => ({ ...m, [runtime.id]: value }))}
                         />
                         <span className="rounded bg-zinc-200 px-1.5 py-px text-[10px] dark:bg-zinc-800">
                           {roleFor(mode, index, agents.length)}

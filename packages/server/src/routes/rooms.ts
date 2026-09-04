@@ -1,5 +1,5 @@
 import type { Message, Room } from '@agent-chat-room/core';
-import { EngineError, git, roomToMarkdown } from '@agent-chat-room/core';
+import { EngineError, git, listModels, roomToMarkdown } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -119,13 +119,19 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       ...(body.allowDirty ? { allowDirty: true } : {}),
     });
 
+    // Asked for before the room starts, so a typo like `opus-5` is a sentence in the UI
+    // rather than a dead first turn. A warning, never a rejection: the catalog is a picker
+    // seed, models ship faster than it is edited, and `claude-opus-5[1m]` is legal and
+    // unlistable. See `models.ts`.
+    const modelWarnings = await unknownModelWarnings(body.models);
+
     let room = engine.room;
     if (body.start) room = await supervisor.start(room.id);
 
     await reply.status(201).send({
       room,
       participants: engine.participants,
-      warnings: engine.configWarnings,
+      warnings: [...engine.configWarnings, ...modelWarnings],
     });
   });
 
@@ -280,6 +286,26 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       }),
     };
   });
+}
+
+/**
+ * One sentence per model the runtime has never reported. Empty when the runtime offers no
+ * catalog at all, because "we do not know" is not a reason to warn about a name that is
+ * probably fine.
+ */
+async function unknownModelWarnings(models: Record<string, string> | undefined): Promise<string[]> {
+  if (!models) return [];
+  const warnings: string[] = [];
+  for (const [runtime, model] of Object.entries(models)) {
+    if (!model.trim()) continue;
+    const catalog = await listModels(runtime);
+    if (catalog.models.length === 0) continue;
+    if (catalog.models.some((m) => m.id === model)) continue;
+    warnings.push(
+      `${runtime} has not reported a model called "${model}"; the turn will fail if it does not exist`,
+    );
+  }
+  return warnings;
 }
 
 function requireRoom(supervisor: RoomSupervisor, params: unknown): Room {
