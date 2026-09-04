@@ -56,6 +56,15 @@ export interface BrowseResult {
   entries: BrowseEntry[];
 }
 
+/** `GET /api/repos/picker` – whether this host can show a native folder dialog at all. */
+export interface PickerStatus {
+  available: boolean;
+  tool: 'osascript' | 'powershell' | 'zenity' | 'kdialog' | null;
+}
+
+/** `POST /api/repos/pick`. `cancelled` is the human dismissing the dialog, not an error. */
+export type PickResult = { path: string; repoRoot: string | null } | { cancelled: true };
+
 export interface ChangedFiles {
   changed: string[];
   stat: string;
@@ -160,8 +169,16 @@ export const api = {
     return await response.text();
   },
 
-  repos: () => request<RepoRecord[]>('/api/repos'),
+  repos: (limit?: number) => request<RepoRecord[]>(`/api/repos${limit ? `?limit=${limit}` : ''}`),
 
   browse: (path?: string) =>
     request<BrowseResult>(`/api/repos/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+
+  pickerStatus: () => request<PickerStatus>('/api/repos/picker'),
+
+  /**
+   * Opens a folder dialog on the machine running the server, which for `acr serve` is this
+   * one. POST because it spawns a GUI process – see the route for why that matters.
+   */
+  pickFolder: (path?: string) => post<PickResult>('/api/repos/pick', path ? { path } : {}),
 };

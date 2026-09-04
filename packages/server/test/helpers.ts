@@ -8,6 +8,7 @@ import { RoomStore, echoAdapter, resetEchoAdapter } from '@agent-chat-room/core'
 import type { FastifyInstance } from 'fastify';
 
 import { createApp } from '../src/app.js';
+import type { FolderPicker } from '../src/picker.js';
 import { RoomSupervisor } from '../src/supervisor.js';
 
 /** A throwaway git repo with one committed file, so a room has something real to diff. */
@@ -75,7 +76,13 @@ export interface Harness {
 
 /** An app over an in-memory database and the echo adapter. No port, no network. */
 export async function harness(
-  opts: { coalesceMs?: number; webRoot?: string; gh?: gh.GhRunner } = {},
+  opts: {
+    coalesceMs?: number;
+    webRoot?: string;
+    gh?: gh.GhRunner;
+    /** Injected so no test ever opens a real folder dialog. */
+    picker?: FolderPicker;
+  } = {},
 ): Promise<Harness> {
   const store = RoomStore.open(':memory:');
   const supervisor = new RoomSupervisor({
@@ -89,6 +96,7 @@ export async function harness(
   const app = await createApp({
     supervisor,
     ...(opts.webRoot ? { webRoot: opts.webRoot } : {}),
+    ...(opts.picker ? { picker: opts.picker } : {}),
   });
   return {
     app,

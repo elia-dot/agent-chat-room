@@ -1,7 +1,13 @@
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { Message, Room } from '@agent-chat-room/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import type { FolderPicker, PickResult } from '../src/picker.js';
+import { PickerUnavailableError } from '../src/picker.js';
+import { ConflictError } from '../src/supervisor.js';
 
 import {
   type Harness,
@@ -12,6 +18,14 @@ import {
   waitFor,
   writeEchoScript,
 } from './helpers.js';
+
+/** A folder dialog that answers instantly with whatever the test decided. */
+function fakePicker(answer: PickResult | Error): FolderPicker {
+  return {
+    available: () => ({ available: true, tool: 'osascript' }),
+    pick: () => (answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer)),
+  };
+}
 
 const BROKEN = 'export function add(a, b) {\n  return a - b;\n}\n';
 const FIXED = 'export function add(a, b) {\n  return a + b;\n}\n';
@@ -312,6 +326,81 @@ describe('the REST surface', () => {
       url: `/api/repos/browse?path=${encodeURIComponent(`${root}/not-there`)}`,
     });
     expect(nowhere.statusCode).toBe(404);
+  });
+
+  it('opens a native folder dialog and says whether the pick is a repo', async () => {
+    const dir = repo();
+    const created = await createRoom({ cwd: dir });
+    const root = created.body.room.repoRoot;
+
+    const picked = await harness({ picker: fakePicker({ path: root }) });
+    try {
+      const status = await picked.app.inject({ url: '/api/repos/picker' });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toEqual({ available: true, tool: 'osascript' });
+
+      const pick = await picked.app.inject({ method: 'POST', url: '/api/repos/pick' });
+      expect(pick.statusCode).toBe(200);
+      expect(pick.json()).toEqual({ path: root, repoRoot: root });
+
+      // A page in another tab must not be able to pop a dialog on the desktop.
+      const foreign = await picked.app.inject({
+        method: 'POST',
+        url: '/api/repos/pick',
+        headers: { origin: 'https://evil.example' },
+      });
+      expect(foreign.statusCode).toBe(403);
+    } finally {
+      await picked.close();
+    }
+
+    // A directory that is not in a repo is a legitimate pick the dialog can warn about.
+    const plain = mkdtempSync(join(tmpdir(), 'acr-srv-plain-'));
+    repos.push(plain);
+    const outside = await harness({ picker: fakePicker({ path: plain }) });
+    try {
+      const pick = await outside.app.inject({ method: 'POST', url: '/api/repos/pick' });
+      expect(pick.json()).toMatchObject({ repoRoot: null });
+    } finally {
+      await outside.close();
+    }
+  });
+
+  it('passes a dismissed dialog through, and explains the ways it can fail', async () => {
+    const cancelled = await harness({ picker: fakePicker({ cancelled: true }) });
+    try {
+      const pick = await cancelled.app.inject({ method: 'POST', url: '/api/repos/pick' });
+      expect(pick.statusCode).toBe(200);
+      expect(pick.json()).toEqual({ cancelled: true });
+    } finally {
+      await cancelled.close();
+    }
+
+    const busy = await harness({ picker: fakePicker(new ConflictError('already open')) });
+    try {
+      const pick = await busy.app.inject({ method: 'POST', url: '/api/repos/pick' });
+      expect(pick.statusCode).toBe(409);
+    } finally {
+      await busy.close();
+    }
+
+    const headless = await harness({
+      picker: fakePicker(new PickerUnavailableError('no native folder picker')),
+    });
+    try {
+      const pick = await headless.app.inject({ method: 'POST', url: '/api/repos/pick' });
+      expect(pick.statusCode).toBe(501);
+    } finally {
+      await headless.close();
+    }
+
+    const gone = await harness({ picker: fakePicker({ path: '/definitely/not/here' }) });
+    try {
+      const pick = await gone.app.inject({ method: 'POST', url: '/api/repos/pick' });
+      expect(pick.statusCode).toBe(404);
+    } finally {
+      await gone.close();
+    }
   });
 
   it('returns the tail of the transcript rather than all of it', async () => {

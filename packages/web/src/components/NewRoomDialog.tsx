@@ -3,7 +3,11 @@ import { useEffect, useState } from 'react';
 
 import type { BrowseResult, CreateRoomRequest } from '../api/client.js';
 import { api } from '../api/client.js';
-import { basename } from '../lib/format.js';
+import { basename, dirname, relativeTime } from '../lib/format.js';
+import { filterRepos } from '../lib/repos.js';
+
+/** Enough recents to cover a normal week of projects; past that, filter instead of scroll. */
+const RECENT_LIMIT = 8;
 
 export interface NewRoomDialogProps {
   onClose: () => void;
@@ -23,6 +27,11 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [runtimes, setRuntimes] = useState<RuntimeReportEntry[]>([]);
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  const [nativePicker, setNativePicker] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [repoQuery, setRepoQuery] = useState('');
+  /** What the pick told us about the folder: not a repo, or a repo whose root is elsewhere. */
+  const [repoHint, setRepoHint] = useState<{ text: string; useRoot?: string } | null>(null);
 
   const [cwd, setCwd] = useState('');
   const [task, setTask] = useState('');
@@ -37,12 +46,15 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
 
   useEffect(() => {
     void (async () => {
-      const [recent, detected] = await Promise.all([
-        api.repos().catch(() => []),
+      const [recent, detected, picker] = await Promise.all([
+        api.repos(20).catch(() => []),
         api.runtimes().catch(() => ({ node: '', runtimes: [] })),
+        // An older server, or a headless one, simply keeps the in-app browser.
+        api.pickerStatus().catch(() => ({ available: false, tool: null })),
       ]);
       setRepos(recent);
       setRuntimes(detected.runtimes);
+      setNativePicker(picker.available);
       // A usable roster by default, worker first, so the common case is one click.
       setAgents(
         detected.runtimes
@@ -80,6 +92,38 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
     }
   };
 
+  const choose = (path: string): void => {
+    setCwd(path);
+    setRepoHint(null);
+    setError(null);
+  };
+
+  /**
+   * The native dialog opens on the machine running the server – which for `acr serve` is
+   * this one – because only that machine can name an absolute path the agents can `cd` to.
+   */
+  const openNativePicker = async (): Promise<void> => {
+    setPicking(true);
+    try {
+      const result = await api.pickFolder(cwd.trim() || undefined);
+      if ('cancelled' in result) return;
+      choose(result.path);
+      // Caught here rather than at submit, where the room creation would just fail.
+      if (!result.repoRoot) {
+        setRepoHint({ text: 'That folder is not inside a git repository.' });
+      } else if (result.repoRoot !== result.path) {
+        setRepoHint({
+          text: `That is inside the repo at ${result.repoRoot}.`,
+          useRoot: result.repoRoot,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPicking(false);
+    }
+  };
+
   const submit = async (): Promise<void> => {
     setError(null);
     setBusy(true);
@@ -108,6 +152,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   };
 
   const ready = cwd.trim() !== '' && task.trim() !== '' && agents.length >= 2;
+  const shown = filterRepos(repos, repoQuery).slice(0, RECENT_LIMIT);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-6">
@@ -124,10 +169,23 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             <div className="flex gap-2">
               <input
                 value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
+                onChange={(e) => {
+                  setCwd(e.target.value);
+                  setRepoHint(null);
+                }}
                 placeholder="/Users/you/code/your-repo"
                 className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
+              {nativePicker && (
+                <button
+                  type="button"
+                  onClick={() => void openNativePicker()}
+                  disabled={picking}
+                  className="rounded-md border border-sky-500 px-3 text-sm text-sky-600 hover:bg-sky-500/10 disabled:opacity-40 dark:text-sky-400"
+                >
+                  {picking ? 'Choosing…' : 'Choose folder…'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void openBrowse(cwd || undefined)}
@@ -137,20 +195,19 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
               </button>
             </div>
 
-            {repos.length > 0 && !browsing && (
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {repos.slice(0, 6).map((repo) => (
+            {repoHint && (
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                {repoHint.text}
+                {repoHint.useRoot && (
                   <button
-                    key={repo.path}
                     type="button"
-                    onClick={() => setCwd(repo.path)}
-                    title={repo.path}
-                    className="rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                    onClick={() => choose(repoHint.useRoot!)}
+                    className="ml-1 underline"
                   >
-                    {basename(repo.path)}
+                    use the repo root
                   </button>
-                ))}
-              </div>
+                )}
+              </p>
             )}
 
             {browsing && browse && (
@@ -201,6 +258,51 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 </ul>
               </div>
             )}
+
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs font-medium text-zinc-500">Recent projects</span>
+                {repos.length > RECENT_LIMIT && (
+                  <input
+                    value={repoQuery}
+                    onChange={(e) => setRepoQuery(e.target.value)}
+                    placeholder="filter"
+                    aria-label="filter recent projects"
+                    className="w-28 rounded border border-zinc-300 bg-white px-1.5 py-px text-[11px] dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                )}
+              </div>
+              {shown.length === 0 ? (
+                <p className="text-[11px] text-zinc-500">
+                  {repos.length === 0
+                    ? 'Nothing yet – the folders you open rooms on show up here.'
+                    : 'No recent project matches that.'}
+                </p>
+              ) : (
+                <ul className="divide-y divide-zinc-100 overflow-hidden rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+                  {shown.map((repo) => (
+                    <li key={repo.path}>
+                      <button
+                        type="button"
+                        onClick={() => choose(repo.path)}
+                        title={repo.path}
+                        className={`flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                          repo.path === cwd.trim() ? 'bg-sky-500/10' : ''
+                        }`}
+                      >
+                        <span className="truncate text-sm font-medium">{basename(repo.path)}</span>
+                        <span className="flex-1 truncate font-mono text-[11px] text-zinc-500">
+                          {dirname(repo.path)}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-zinc-400">
+                          {relativeTime(repo.lastUsedAt)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </Field>
 
           <Field label="Task">

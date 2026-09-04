@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
 import { NotFoundError } from './errors.js';
+import type { FolderPicker } from './picker.js';
 import { repoRoutes } from './routes/repos.js';
 import { roomRoutes } from './routes/rooms.js';
 import { runtimeRoutes } from './routes/runtimes.js';
@@ -25,6 +26,8 @@ export interface CreateAppOptions {
   supervisor: RoomSupervisor;
   /** Directory holding the built web app. Omitted in tests. */
   webRoot?: string;
+  /** The native folder dialog. Injected by tests, so no suite opens a window. */
+  picker?: FolderPicker;
   logger?: boolean;
 }
 
@@ -92,7 +95,7 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
   app.get('/api/health', () => ({ ok: true, version: SERVER_VERSION }));
   roomRoutes(app, opts.supervisor);
   runtimeRoutes(app);
-  repoRoutes(app, opts.supervisor);
+  repoRoutes(app, opts.supervisor, opts.picker);
   websocketRoute(app, opts.supervisor);
 
   if (opts.webRoot) await serveWeb(app, opts.webRoot);
