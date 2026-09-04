@@ -1,9 +1,10 @@
 import type { Message, TurnEvent, Verdict } from '@agent-chat-room/core';
 
 import { initials, runtimeClasses } from '../lib/format.js';
+import { verdictForDisplay } from '../lib/verdict.js';
 import { ActivityDrawer } from './ActivityDrawer.js';
 import { Markdown } from './Markdown.js';
-import { VerdictPill } from './VerdictPill.js';
+import { VerdictCard } from './VerdictCard.js';
 
 export interface BubbleProps {
   author: string;
@@ -18,9 +19,17 @@ export interface BubbleProps {
   streaming?: boolean;
 }
 
-/** One message. PLAN.md section 5.2: avatar, role and round chips, verdict pill, drawers. */
+/**
+ * One message. PLAN.md section 5.2: avatar, role and round chips, verdict, drawers.
+ *
+ * The verdict pill lives in the `VerdictCard` under the prose rather than in the header,
+ * so the decision is stated once, next to the blocking items and nits it explains.
+ */
 export function MessageBubble(props: BubbleProps): React.ReactElement {
   const { author, role, round, text, activity, verdict, streaming } = props;
+  // The reviewer's ```verdict block is lifted out of the prose and rendered as a card:
+  // as markdown it is a sideways-scrolling box repeating what the pill already says.
+  const display = verdictForDisplay({ text, role, verdict });
   return (
     <article className="flex gap-3 px-4 py-3">
       <div
@@ -34,7 +43,6 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
           <span className="font-medium">{author}</span>
           {role && role !== 'owner' && <Chip>{role}</Chip>}
           {round > 0 && <Chip>r{round}</Chip>}
-          {verdict && <VerdictPill decision={verdict.decision} />}
           {streaming && (
             <span className="text-zinc-500">
               <span className="acr-pulse inline-block">▍</span> streaming…
@@ -42,15 +50,18 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
           )}
         </header>
 
-        {text ? <Markdown text={text} /> : streaming && <p className="text-sm text-zinc-500">…</p>}
-
-        {verdict && verdict.blocking.length > 0 && (
-          <ul className="mt-2 space-y-0.5 text-sm text-amber-700 dark:text-amber-400">
-            {verdict.blocking.map((item, i) => (
-              <li key={i}>• {item}</li>
-            ))}
-          </ul>
+        {display.body ? (
+          <Markdown text={display.body} />
+        ) : (
+          // A review whose whole reply is the fence has no prose – the card stands alone.
+          !display.verdict && streaming && <p className="text-sm text-zinc-500">…</p>
         )}
+
+        <VerdictCard
+          verdict={display.verdict}
+          rawBlocks={display.rawBlocks}
+          unreadable={display.unreadable}
+        />
 
         <div className="mt-1.5 flex flex-wrap items-center gap-3">
           <ActivityDrawer activity={activity} />
