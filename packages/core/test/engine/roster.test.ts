@@ -38,9 +38,9 @@ function script(turns: unknown[]): void {
   process.env.ACR_ECHO_SCRIPT = writeEchoScript({ turns });
 }
 
-function open(dir: string, maxRounds = 4): Promise<RoomEngine> {
+function open(dir: string): Promise<RoomEngine> {
   return RoomEngine.create(
-    { task: 'fix add()', cwd: dir, agents: ['echo', 'echo2'], maxRounds },
+    { task: 'fix add()', cwd: dir, agents: ['echo', 'echo2'] },
     { store, adapters, timeoutMs: 5000 },
   );
 }
@@ -104,10 +104,11 @@ describe('RoomEngine.setParticipant', () => {
     const dir = repo();
     script([
       { when: { role: 'worker', round: 1 }, text: 'did a thing', writeFiles: { 'math.js': 'x\n' } },
-      { when: { role: 'reviewer', round: 1 }, text: verdict('request-changes') },
+      // A question parks the room in `needs-you` after one round, with both sessions live.
+      { when: { role: 'reviewer', round: 1 }, text: verdict('question') },
     ]);
 
-    const engine = await open(dir, 1);
+    const engine = await open(dir);
     await engine.run();
 
     const before = engine.participants;
@@ -139,22 +140,19 @@ describe('RoomEngine.setParticipant', () => {
     const dir = repo();
     script([
       { when: { role: 'worker', round: 1 }, text: 'did a thing', writeFiles: { 'math.js': 'x\n' } },
-      { when: { role: 'reviewer', round: 1 }, text: verdict('request-changes') },
+      { when: { role: 'reviewer', round: 1 }, text: verdict('question') },
       { when: { role: 'worker', round: 2 }, text: 'did another thing' },
       { when: { role: 'reviewer', round: 2 }, text: verdict('request-changes') },
       { when: { role: 'worker', round: 3 }, text: 'and another' },
-      { when: { role: 'reviewer', round: 3 }, text: verdict('request-changes') },
+      { when: { role: 'reviewer', round: 3 }, text: verdict('approve') },
     ]);
 
-    // One round, so the room lands in `needs-you` with both agents holding a session –
-    // which is exactly the moment the human pauses and swaps.
-    const engine = await open(dir, 1);
+    // A question after round 1 lands the room in `needs-you` with both agents holding a
+    // session – which is exactly the moment the human swaps.
+    const engine = await open(dir);
     await engine.run();
     engine.setParticipant('echo2', { role: 'worker' });
 
-    // Raising the round limit is what "continue after a swap" actually needs.
-    store.updateRoom(engine.room.id, { maxRounds: 3 });
-    engine.reload();
     requests.length = 0;
     await engine.run();
 
@@ -185,7 +183,7 @@ describe('RoomEngine.setParticipant', () => {
       { when: { role: 'reviewer', round: 1 }, text: verdict('approve') },
     ]);
 
-    const engine = await open(dir, 1);
+    const engine = await open(dir);
     const running = engine.run();
     await new Promise((r) => setTimeout(r, 80));
     expect(() => engine.setParticipant('echo2', { role: 'worker' })).toThrow(/mid-round/);

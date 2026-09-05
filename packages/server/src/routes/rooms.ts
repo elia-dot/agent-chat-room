@@ -13,7 +13,6 @@ const CreateRoomBody = z.object({
   agents: z.array(z.string().min(1)).min(2, 'a room needs a worker and at least one reviewer'),
   title: z.string().optional(),
   mode: z.enum(['build-review', 'brainstorm']).optional(),
-  maxRounds: z.number().int().positive().max(50).optional(),
   worktree: z.boolean().optional(),
   modelWorker: z.string().optional(),
   modelReviewer: z.string().optional(),
@@ -69,16 +68,12 @@ const StartBody = z
 
 const PatchBody = z
   .object({
-    maxRounds: z.number().int().positive().max(50).optional(),
     title: z.string().min(1).optional(),
     additionalDirs: z.array(z.string().min(1)).max(20).optional(),
   })
-  .refine(
-    (v) => v.maxRounds !== undefined || v.title !== undefined || v.additionalDirs !== undefined,
-    {
-      message: 'nothing to change',
-    },
-  );
+  .refine((v) => v.title !== undefined || v.additionalDirs !== undefined, {
+    message: 'nothing to change',
+  });
 
 const ListQuery = z.object({
   repo: z.string().optional(),
@@ -118,7 +113,6 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       ...(body.title ? { title: body.title } : {}),
       ...(body.mode ? { mode: body.mode } : {}),
       ...(body.models ? { models: body.models } : {}),
-      ...(body.maxRounds ? { maxRounds: body.maxRounds } : {}),
       ...(body.worktree === undefined ? {} : { worktree: body.worktree }),
       ...(body.modelWorker ? { modelWorker: body.modelWorker } : {}),
       ...(body.modelReviewer ? { modelReviewer: body.modelReviewer } : {}),
@@ -283,11 +277,8 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
   app.patch('/api/rooms/:id', async (request) => {
     const room = requireRoom(supervisor, request.params);
     const body = PatchBody.parse(request.body);
-    // Raising the round limit is the one edit M2 needs: without it a room that used up its
-    // rounds dead-ends in the browser, and the engine's own message says to raise it.
     return {
       room: await supervisor.patch(room.id, {
-        ...(body.maxRounds === undefined ? {} : { maxRounds: body.maxRounds }),
         ...(body.title === undefined ? {} : { title: body.title }),
         ...(body.additionalDirs === undefined ? {} : { additionalDirs: body.additionalDirs }),
       }),

@@ -206,12 +206,10 @@ export class RoomSupervisor {
 
   /**
    * Edit the room row and tell the engine about it. Going through here rather than through
-   * the store directly is what keeps a running loop from reading a stale `maxRounds`.
+   * the store directly is what keeps a live engine from building its next prompt from a
+   * stale row.
    */
-  async patch(
-    roomId: string,
-    patch: { maxRounds?: number; title?: string; additionalDirs?: string[] },
-  ): Promise<Room> {
+  async patch(roomId: string, patch: { title?: string; additionalDirs?: string[] }): Promise<Room> {
     const entry = await this.entry(roomId);
     if (patch.additionalDirs !== undefined && entry.running) {
       throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
@@ -289,16 +287,26 @@ export class RoomSupervisor {
     if (!proposal?.text.trim()) {
       throw new ConflictError('this brainstorm has not produced a proposal yet');
     }
-    // Default roster: the same runtimes, in the same order, but as a build room – so the
-    // moderator, who wrote the proposal, is the one that builds it.
-    const roster = entry.engine.participants.map((p) => p.runtime);
-    const agents = opts.agents ?? [...roster].reverse();
-    return await this.create({
+    const participants = entry.engine.participants;
+    // Preserve the selection order: brainstorm makes the last runtime the moderator while
+    // build-review makes the first runtime the worker. Reversing this roster unexpectedly
+    // promoted the moderator (often an edit-only runtime) into the build worker role.
+    const agents = opts.agents ?? participants.map((p) => p.runtime);
+    const models = Object.fromEntries(
+      participants.flatMap((participant) =>
+        participant.model ? [[participant.runtime, participant.model]] : [],
+      ),
+    );
+    const promoted = await this.create({
       task: proposal.text.trim(),
       cwd: source.repoRoot,
+      ...(source.additionalDirs.length > 0 ? { additionalDirs: source.additionalDirs } : {}),
       agents,
+      ...(Object.keys(models).length > 0 ? { models } : {}),
       title: opts.title ?? `build: ${source.title}`,
     });
+    await this.start(promoted.room.id);
+    return promoted;
   }
 
   async pause(roomId: string): Promise<Room> {

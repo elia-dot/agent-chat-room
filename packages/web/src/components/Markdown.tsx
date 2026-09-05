@@ -52,7 +52,7 @@ function linkifyCitations(text: string, basePath?: string): string {
       }
       return part.replace(
         /(?<![\w/`])((?:[a-zA-Z0-9_.-]+\/)*[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]+):(\d+)(?![\w/`])/g,
-        (_match, file, line) => {
+        (_match: string, file: string, line: string) => {
           const fullPath = basePath
             ? `${basePath.replace(/\/+$/, '')}/${file.replace(/^\/+/, '')}`
             : file;

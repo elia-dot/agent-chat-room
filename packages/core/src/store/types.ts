@@ -44,6 +44,7 @@ export interface Room {
   /** Runtime id the next turn is routed to, set by an `@mention`. Null means "the worker". */
   nextSpeaker: string | null;
   round: number;
+  /** The fixed phase count of a brainstorm. A build-review room has no limit and stores 0. */
   maxRounds: number;
   /** The pull request "Open PR" created, kept so it survives a reload. */
   prUrl: string | null;

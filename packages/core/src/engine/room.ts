@@ -21,7 +21,7 @@ import type { RoomStore } from '../store/rooms.js';
 import type { Message, Participant, Room, RoomMode, RoomState } from '../store/types.js';
 import type { AgentAdapter, Permission, TurnResult } from '../types.js';
 import type { ParsedVerdict, Verdict } from '../verdict.js';
-import { enforceGoalposts, parseVerdict } from '../verdict.js';
+import { enforceGoalposts, parseVerdict, verdictJsonSchema } from '../verdict.js';
 import {
   branchFor,
   createWorktree,
@@ -56,7 +56,6 @@ export interface CreateRoomInput {
   agents: string[];
   title?: string;
   mode?: RoomMode;
-  maxRounds?: number;
   /** Run in a dedicated git worktree (default). `false` works in the checkout itself. */
   worktree?: boolean;
   /** Per-runtime model override, e.g. `{ claude: 'opus' }`. */
@@ -145,8 +144,9 @@ const DEFAULT_TIMEOUT_MS = 1800_000;
 
 /**
  * Brainstorm mode is exactly three rounds (PLAN.md section 3): answer, react, merge. It is
- * a fixed shape rather than a limit, so `maxRounds` on a brainstorm room is this and the
- * new-room dialog hides the field.
+ * a fixed shape, so `maxRounds` on a brainstorm room is this. A build-review room has no
+ * round limit at all – it runs until every reviewer approves, someone asks you a question,
+ * or you pause or stop it – and stores `0` there.
  */
 export const BRAINSTORM_ROUNDS = 3;
 
@@ -271,7 +271,7 @@ export class RoomEngine {
 
   /**
    * Re-read the room row. A long-lived engine caches it, so anything that edits the row
-   * from outside – the server raising the round limit, say – has to say so.
+   * from outside – the server renaming the room, say – has to say so.
    */
   reload(): Room {
     const row = this.store.getRoom(this.roomRow.id);
@@ -306,7 +306,6 @@ export class RoomEngine {
     const repoConfig = loadRepoConfig(repoRoot);
     const settings = resolveRoomDefaults(repoConfig.config, {
       ...(input.agents.length > 0 ? { agents: input.agents } : {}),
-      ...(input.maxRounds ? { rounds: input.maxRounds } : {}),
       ...(input.worktree === undefined ? {} : { worktree: input.worktree }),
       ...(input.models ? { models: input.models } : {}),
       ...(input.additionalDirs ? { additional_dirs: input.additionalDirs } : {}),
@@ -394,8 +393,8 @@ export class RoomEngine {
       roomBranch,
       baseSha,
       worktreePath,
-      // A brainstorm is three fixed phases, not a loop with a budget.
-      maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : settings.rounds,
+      // A brainstorm is three fixed phases; a build loop has no budget at all.
+      maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : 0,
     });
 
     roster.forEach((participant, index) => {
@@ -529,16 +528,6 @@ export class RoomEngine {
         break;
       }
       const round = this.roomRow.round + 1;
-      if (round > this.roomRow.maxRounds) {
-        // Resuming a room that already used up its rounds. Say so rather than looking
-        // like a no-op: raising `maxRounds` is what the human has to decide.
-        this.system(
-          `this room has already used all ${this.roomRow.maxRounds} of its rounds. ` +
-            `Raise the round limit to continue.`,
-        );
-        this.setState('needs-you');
-        break;
-      }
 
       let lock: LockHandle;
       try {
@@ -693,7 +682,10 @@ export class RoomEngine {
     if (turn.result.ok) {
       const captured = writes ? await git.diffSince(cwd, this.baseSha()) : null;
       if (writes) this.lastChangedFiles = await git.changedFiles(cwd, this.baseSha());
-      const verdict = participant.role === 'reviewer' ? parseVerdict(turn.result.text) : null;
+      const verdict =
+        participant.role === 'reviewer'
+          ? parseVerdict(turn.result.text, turn.result.structured)
+          : null;
       this.postTurnMessage(
         participant,
         turn,
@@ -1093,11 +1085,9 @@ export class RoomEngine {
         return { done: true };
       }
       const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
-      testResults =
-        `Command: ${testCmd}\nExit code: ${exitCode}\nDuration: ${durationSec}s\n\n${output}`;
+      testResults = `Command: ${testCmd}\nExit code: ${exitCode}\nDuration: ${durationSec}s\n\n${output}`;
       const detail = output ? `:\n\`\`\`\n${output}\n\`\`\`` : '';
-      const summary =
-        `[test runner] \`${testCmd}\` finished with exit code ${exitCode} (${durationSec}s)`;
+      const summary = `[test runner] \`${testCmd}\` finished with exit code ${exitCode} (${durationSec}s)`;
       this.system(`${summary}${detail}`, round);
     }
 
@@ -1112,51 +1102,46 @@ export class RoomEngine {
     }));
 
     const reviews = await Promise.all(
-      reviewerRequests.map(
-        async ({ reviewer, newMessages, watermark }): Promise<ReviewOutcome> => {
-          const turn = await this.runParticipantTurn(reviewer, {
-            round,
-            cwd,
-            diffStat,
-            diff,
-            ...(diffFile ? { diffFile } : {}),
-            ...(testResults ? { testResults } : {}),
-            newMessages,
-            watermark,
-          });
-          let verdict = parseVerdict(turn.result.text);
-          if (verdict.ok && round >= 3 && verdict.verdict.blocking.length > 0) {
-            const enforced = enforceGoalposts(verdict.verdict, diff);
-            if (enforced.downgraded.length > 0) {
-              for (const d of enforced.downgraded) {
-                const citStr = d.citations.map((c) => `${c.file}:${c.line}`).join(', ');
-                const msg =
-                  `[goalpost enforcement] downgraded blocking citation from ${reviewer.runtime} ` +
-                  `("${d.item}") to nit: line(s) ${citStr} untouched by worker`;
-                this.system(msg, round);
-              }
-              if (
-                enforced.verdict.decision === 'approve' &&
-                verdict.verdict.decision !== 'approve'
-              ) {
-                const msg =
-                  `[goalpost enforcement] all blocking issues from ${reviewer.runtime} ` +
-                  'were on untouched code – verdict changed to APPROVE';
-                this.system(msg, round);
-              }
-              verdict = { ...verdict, verdict: enforced.verdict };
+      reviewerRequests.map(async ({ reviewer, newMessages, watermark }): Promise<ReviewOutcome> => {
+        const turn = await this.runParticipantTurn(reviewer, {
+          round,
+          cwd,
+          diffStat,
+          diff,
+          ...(diffFile ? { diffFile } : {}),
+          ...(testResults ? { testResults } : {}),
+          newMessages,
+          watermark,
+        });
+        let verdict = parseVerdict(turn.result.text, turn.result.structured);
+        if (verdict.ok && round >= 3 && verdict.verdict.blocking.length > 0) {
+          const enforced = enforceGoalposts(verdict.verdict, diff);
+          if (enforced.downgraded.length > 0) {
+            for (const d of enforced.downgraded) {
+              const citStr = d.citations.map((c) => `${c.file}:${c.line}`).join(', ');
+              const msg =
+                `[goalpost enforcement] downgraded blocking citation from ${reviewer.runtime} ` +
+                `("${d.item}") to nit: line(s) ${citStr} untouched by worker`;
+              this.system(msg, round);
             }
+            if (enforced.verdict.decision === 'approve' && verdict.verdict.decision !== 'approve') {
+              const msg =
+                `[goalpost enforcement] all blocking issues from ${reviewer.runtime} ` +
+                'were on untouched code – verdict changed to APPROVE';
+              this.system(msg, round);
+            }
+            verdict = { ...verdict, verdict: enforced.verdict };
           }
-          const message = this.postTurnMessage(
-            reviewer,
-            turn,
-            round,
-            null,
-            verdict.ok ? verdict.verdict : null,
-          );
-          return { participant: reviewer, result: turn.result, message, verdict };
-        },
-      ),
+        }
+        const message = this.postTurnMessage(
+          reviewer,
+          turn,
+          round,
+          null,
+          verdict.ok ? verdict.verdict : null,
+        );
+        return { participant: reviewer, result: turn.result, message, verdict };
+      }),
     );
 
     if (this.stopping) {
@@ -1182,8 +1167,18 @@ export class RoomEngine {
         round,
       );
     }
-    if (reviews.length > 0 && failed.length === reviews.length) {
-      const error = failed[0]?.result.error ?? 'every reviewer turn failed';
+    if (failed.length > 0) {
+      // Not something another worker round can fix: a reviewer that hit a usage limit or
+      // crashed will do the same next round, and without a round budget that loop never
+      // ends. Hand the room to the human, who can wait it out or change the roster.
+      const error = failed[0]?.result.error ?? 'a reviewer turn failed';
+      this.system(
+        `a failed review cannot be addressed by the worker, so the room is waiting for you. ` +
+          `Press Continue to run another round once ${failed
+            .map((r) => r.participant.runtime)
+            .join(' and ')} can review again, or change the roster.`,
+        round,
+      );
       this.setState('needs-you');
       return { done: true, error };
     }
@@ -1217,18 +1212,8 @@ export class RoomEngine {
       return { done: true, ...(commit ? { commit } : {}) };
     }
 
-    if (round >= this.roomRow.maxRounds) {
-      const open = ok.flatMap((r) => (r.verdict.ok ? r.verdict.verdict.blocking : []));
-      const list = open.length > 0 ? `\n${open.map((i) => `- ${i}`).join('\n')}` : ' none cited.';
-      this.system(
-        `stopping after ${round} of ${this.roomRow.maxRounds} rounds without an approval. ` +
-          `Open blocking items:${list}`,
-        round,
-      );
-      this.setState('needs-you');
-      return { done: true };
-    }
-
+    // No round budget: a request-changes round is followed by another round, for as long
+    // as it takes. The human has Pause and Stop for the case where it is taking too long.
     return { done: false };
   }
 
@@ -1341,6 +1326,9 @@ export class RoomEngine {
           round: ctx.round,
           ...(ctx.phase ? { phase: ctx.phase } : {}),
         }),
+        ...(role === 'reviewer' && adapter.capabilities.structuredOutput
+          ? { outputSchema: verdictJsonSchema }
+          : {}),
         ...(participant.sessionId ? { sessionId: participant.sessionId } : {}),
         ...(participant.model ? { model: participant.model } : {}),
       },

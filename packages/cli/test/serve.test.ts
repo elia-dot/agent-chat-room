@@ -43,9 +43,12 @@ describe('acr serve', () => {
     expect(code).toBe(EXIT.ok);
     expect(opened).toHaveLength(1);
     // The URL printed has to be the one actually bound, or a browser opens on nothing.
+    // It carries the capability token, and the browser has to be handed that whole URL:
+    // the token is what the one-time cookie redemption needs.
+    const printed = /http:\/\/127\.0\.0\.1:\d+(?:\/\?token=\S+)?/.exec(capture.text)?.[0];
     const url = /http:\/\/127\.0\.0\.1:\d+/.exec(capture.text)?.[0];
     expect(url).toBeTruthy();
-    expect(opened[0]).toBe(url);
+    expect(opened[0]).toBe(printed);
     expect(capture.text).toContain('127.0.0.1');
 
     const health = await fetch(`${url!}/api/health`);

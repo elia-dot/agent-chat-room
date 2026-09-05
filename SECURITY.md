@@ -13,6 +13,7 @@ If you discover a security vulnerability in `agent-chat-room`, please do not ope
 issue. Instead, report it privately to the maintainers or via GitHub Security Advisories.
 
 Please include:
+
 - A description of the issue and reproduction steps.
 - The environment details (OS, Node version, agent CLIs).
 - Any potential impact.

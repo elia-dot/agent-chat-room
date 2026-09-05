@@ -102,11 +102,6 @@ describe('acr argument handling', () => {
     expect(err.join('')).toContain('at least one reviewer');
   });
 
-  it('rejects a non-integer round count', async () => {
-    expect(await main(['run', '--task', 'a', '--rounds', 'lots'])).toBe(EXIT.usage);
-    expect(err.join('')).toContain('--rounds');
-  });
-
   it('rejects a mode that is not one of the two, before opening anything', async () => {
     expect(await main(['run', '--task', 'a', '--mode', 'freeform'])).toBe(EXIT.usage);
     expect(err.join('')).toContain('--mode must be build-review or brainstorm');
@@ -122,13 +117,13 @@ describe('acr argument handling', () => {
     expect(await main(['run', '--task', 'a', '--frobnicate'])).toBe(EXIT.usage);
   });
 
-  it('documents the surface: serve, rounds, worktrees, .acr.json, rooms, mode and models', async () => {
+  it('documents the surface: serve, worktrees, .acr.json, rooms, mode and models', async () => {
     await main(['--help']);
     const help = out.join('');
     expect(help).toContain('acr serve [--port N] [--no-open]');
     expect(help).toContain('127.0.0.1');
     expect(help).toContain('acr rooms ls | show <id> | export <id> | resume <id> | close <id>');
-    expect(help).toContain('--rounds <n>');
+    expect(help).not.toContain('--rounds');
     expect(help).toContain('--no-worktree');
     expect(help).toContain('.acr.json');
     expect(help).toContain('--mode <mode>');

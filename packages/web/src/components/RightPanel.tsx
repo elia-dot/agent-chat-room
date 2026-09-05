@@ -32,7 +32,6 @@ export interface RightPanelProps {
   onStop: () => void;
   onCloseRoom: () => void;
   onPurgeRoom: () => void;
-  onRaiseRounds: (rounds: number) => void;
   onSetAdditionalDirs: (paths: string[]) => void;
   onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
   onCommit: () => void;
@@ -77,7 +76,12 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
           {room.worktreePath && <Row label="worktree" value={room.worktreePath} mono />}
           <Row label="base" value={room.baseSha?.slice(0, 8) ?? '–'} mono />
           <Row label="mode" value={room.mode} />
-          <Row label="round" value={`${room.round}/${room.maxRounds}`} />
+          <Row
+            label="round"
+            value={
+              room.mode === 'brainstorm' ? `${room.round}/${room.maxRounds}` : String(room.round)
+            }
+          />
           <Row label="state" value={stateLabel(room.state, room.paused, room.mode)} />
           {room.prUrl && (
             <div className="flex gap-2 text-xs">
@@ -282,11 +286,8 @@ function Usage({ turns }: { turns: TurnRecord[] }): React.ReactElement {
 
 function RoomActions(props: RightPanelProps): React.ReactElement {
   const { room, busy } = props;
-  const [rounds, setRounds] = useState(room.maxRounds + 2);
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
-  const exhausted =
-    room.mode !== 'brainstorm' && room.round >= room.maxRounds && room.state !== 'approved';
   // The room ran in a worktree on `acr/<slug>`; with `--no-worktree` there is no room
   // branch to push, which is what makes the PR button meaningless there.
   const remote = room.roomBranch === room.baseBranch ? '' : 'origin';
@@ -313,22 +314,6 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
           Stop
         </Action>
       </div>
-
-      {exhausted && (
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={room.round + 1}
-            max={50}
-            value={rounds}
-            onChange={(e) => setRounds(Number(e.target.value))}
-            className="w-16 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <Action onClick={() => props.onRaiseRounds(rounds)} disabled={busy}>
-            Raise round limit
-          </Action>
-        </div>
-      )}
 
       {room.mode === 'brainstorm' ? (
         <Action onClick={props.onPromote} disabled={busy || running || room.closedAt !== null}>

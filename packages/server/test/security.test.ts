@@ -153,9 +153,8 @@ describe('startServer', () => {
       body: JSON.stringify({ task: 'foo', cwd: '/', agents: ['echo', 'echo2'] }),
     });
     expect(unauthPost.status).toBe(401);
-    expect(await unauthPost.json()).toMatchObject({
-      error: expect.stringContaining('unauthorized'),
-    });
+    const unauthBody = (await unauthPost.json()) as { error?: string };
+    expect(unauthBody.error).toContain('unauthorized');
 
     // 3. Mutating API call with token via header succeeds past auth
     // (can hit validation or 400, not 401)

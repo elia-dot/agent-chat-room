@@ -5,11 +5,13 @@ Thank you for your interest in contributing to `agent-chat-room`!
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js >= 20.19 (LTS)
 - npm >= 10
 - git
 
 ### Development Setup
+
 ```bash
 git clone https://github.com/elia-dot/agent-chat-room.git
 cd agent-chat-room
@@ -50,6 +52,7 @@ export interface AgentAdapter {
 3. **`listModels()`** (Optional): Queries the runtime for available models.
 
 ### Reference Implementations
+
 - **`echo.ts`** ([`packages/core/src/adapters/echo.ts`](packages/core/src/adapters/echo.ts)): The mock adapter used for hermetic testing. It demonstrates handling turns, emitting lifecycle events, reading prompt headers, and creating mock files.
 - **`claude.ts`**, **`codex.ts`**, **`cursor.ts`**, **`antigravity.ts`**: Production adapters driving real CLIs.
 

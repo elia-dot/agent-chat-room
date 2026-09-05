@@ -17,7 +17,6 @@ const PermissionSchema = z.enum(PERMISSION_LEVELS as unknown as [Permission, ...
 export const RepoConfigSchema = z.object({
   /** Runtime ids. The first is the worker; the rest review. */
   agents: z.array(z.string().min(1)).optional(),
-  rounds: z.number().int().positive().max(50).optional(),
   worktree: z.boolean().optional(),
   timeoutSeconds: z.number().positive().optional(),
   /** Per-runtime model override, e.g. `{ "claude": "opus" }`. */
@@ -105,7 +104,6 @@ export function loadRepoConfig(repoRoot: string): LoadedRepoConfig {
 
 export interface RoomDefaults {
   agents: string[];
-  rounds: number;
   worktree: boolean;
   timeoutSeconds: number;
   models: Record<string, string>;
@@ -118,7 +116,6 @@ export interface RoomDefaults {
 
 export const BUILTIN_DEFAULTS: RoomDefaults = {
   agents: ['claude', 'codex'],
-  rounds: 4,
   worktree: true,
   timeoutSeconds: 1800,
   models: {},
@@ -129,7 +126,6 @@ export const BUILTIN_DEFAULTS: RoomDefaults = {
 /** Anything the caller passed explicitly on the command line. `undefined` means "not set". */
 export interface RoomOverrides {
   agents?: string[];
-  rounds?: number;
   worktree?: boolean;
   timeoutSeconds?: number;
   models?: Record<string, string>;
@@ -145,7 +141,6 @@ export function resolveRoomDefaults(
 ): RoomDefaults {
   return {
     agents: overrides.agents ?? config.agents ?? BUILTIN_DEFAULTS.agents,
-    rounds: overrides.rounds ?? config.rounds ?? BUILTIN_DEFAULTS.rounds,
     worktree: overrides.worktree ?? config.worktree ?? BUILTIN_DEFAULTS.worktree,
     timeoutSeconds:
       overrides.timeoutSeconds ?? config.timeoutSeconds ?? BUILTIN_DEFAULTS.timeoutSeconds,

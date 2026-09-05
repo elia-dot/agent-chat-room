@@ -68,7 +68,6 @@ Options for \`run\`:
   --agents <a,b,...>       Runtimes to use; the first is the worker, the rest review
                            (default: claude,codex, or "agents" from .acr.json).
   --cwd <path>             Repo to work in (default: the current directory).
-  --rounds <n>             Give up and ask you after this many rounds (default: 4).
   --mode <mode>            build-review (default) or brainstorm. A brainstorm is three
                            phases – everyone answers, everyone reacts, the last agent
                            writes the merged proposal – and nobody edits files.
@@ -93,7 +92,7 @@ Exit codes:
   0  the reviewers approved
   1  acr or a runtime failed
   2  bad usage
-  3  the reviewers did not approve (request-changes, question, no verdict block, or max rounds)
+  3  the reviewers did not approve (a question for you, or the run was stopped)
 
 The server binds 127.0.0.1 only, so nothing about a room ever leaves your machine. Rooms
 run inside the \`acr serve\` process: closing the browser tab does not stop them, Ctrl-C does.`;
@@ -250,7 +249,6 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
         agents: { type: 'string' },
         cwd: { type: 'string' },
         title: { type: 'string' },
-        rounds: { type: 'string' },
         mode: { type: 'string' },
         model: { type: 'string', multiple: true },
         room: { type: 'string' },
@@ -274,7 +272,6 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
   }
 
   const timeoutSeconds = positive(values.timeout, '--timeout');
-  const rounds = values.rounds === undefined ? undefined : integer(values.rounds, '--rounds');
 
   const agents = splitAgents(values.agents);
   if (agents && agents.length < 2) {
@@ -296,7 +293,6 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
     ...(models ? { models } : {}),
     ...(roomId ? { room: roomId } : {}),
     ...(values.title ? { title: values.title } : {}),
-    ...(rounds ? { maxRounds: rounds } : {}),
     ...(values['model-worker'] ? { modelWorker: values['model-worker'] } : {}),
     ...(values['model-reviewer'] ? { modelReviewer: values['model-reviewer'] } : {}),
     // `--no-worktree` arrives as `worktree: false`; leaving it unset keeps the default.

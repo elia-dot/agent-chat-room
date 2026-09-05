@@ -11,6 +11,7 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
+
 1. Run `acr ...`
 2. See error
 
@@ -18,10 +19,11 @@ Steps to reproduce the behavior:
 A clear and concise description of what you expected to happen.
 
 **Environment (please complete the following information):**
- - OS: [e.g. macOS, Linux, Windows]
- - Node version: [e.g. 20.19.0, 22.14.0]
- - Agent CLIs installed: [e.g. claude, codex, cursor, agy]
- - Output of `acr doctor`:
+
+- OS: [e.g. macOS, Linux, Windows]
+- Node version: [e.g. 20.19.0, 22.14.0]
+- Agent CLIs installed: [e.g. claude, codex, cursor, agy]
+- Output of `acr doctor`:
 
 **Additional context**
 Add any other context about the problem here.

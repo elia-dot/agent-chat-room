@@ -291,13 +291,15 @@ describe('RoomSupervisor', () => {
     const id = engine.room.id;
 
     // Simulate running
-    (s as unknown as { rooms: Map<string, { running?: Promise<unknown> }> })
-      .rooms.get(id)!.running = Promise.resolve();
+    (s as unknown as { rooms: Map<string, { running?: Promise<unknown> }> }).rooms.get(
+      id,
+    )!.running = Promise.resolve();
     await expect(s.purge(id)).rejects.toThrow(/is running/);
 
     // Clear running and purge
-    (s as unknown as { rooms: Map<string, { running?: Promise<unknown> }> })
-      .rooms.get(id)!.running = undefined;
+    (s as unknown as { rooms: Map<string, { running?: Promise<unknown> }> }).rooms.get(
+      id,
+    )!.running = undefined;
     const res = await s.purge(id);
     expect(res).toBeDefined();
     expect(store.findRoom(id)).toBeUndefined();

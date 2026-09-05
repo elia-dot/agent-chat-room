@@ -122,8 +122,8 @@ describe('PATCH /api/rooms/:id/participants/:participantId', () => {
       'echo:reviewer',
       'echo2:worker',
     ]);
-    // The same engine object sees it – this is the stale-`maxRounds` bug class that
-    // `patch()` exists to prevent, applied to the roster.
+    // The same engine object sees it – this is the stale-row bug class that `patch()`
+    // exists to prevent, applied to the roster.
     expect(live.participants.find((p) => p.role === 'worker')?.runtime).toBe('echo2');
   });
 
@@ -298,7 +298,7 @@ describe('POST /api/rooms/:id/pr', () => {
 });
 
 describe('POST /api/rooms/:id/promote', () => {
-  it('turns a finished brainstorm proposal into a build-review room', async () => {
+  it('turns a finished brainstorm proposal into a build-review room and starts it', async () => {
     writeEchoScript([
       { when: { round: 1 }, text: 'a' },
       { when: { round: 1 }, text: 'b' },
@@ -307,11 +307,18 @@ describe('POST /api/rooms/:id/promote', () => {
       { when: { round: 2 }, text: 'e' },
       { when: { round: 2 }, text: 'f' },
       { when: { round: 3 }, text: 'Proposed task: split the pricing module by tier.' },
+      { when: { role: 'worker', round: 1 }, text: 'Building it.', delayMs: 500 },
+      { when: { role: 'reviewer', round: 1, runtime: 'echo2' }, text: verdict('approve') },
+      { when: { role: 'reviewer', round: 1, runtime: 'echo3' }, text: verdict('approve') },
     ]);
 
+    const extra = mkdtempSync(join(tmpdir(), 'acr-extra-'));
+    repos.push(extra);
     const room = await createRoom({
       mode: 'brainstorm',
       agents: ['echo', 'echo2', 'echo3'],
+      models: { echo2: 'review-model' },
+      additionalDirs: [extra],
       start: true,
     });
     await waitFor(
@@ -329,9 +336,18 @@ describe('POST /api/rooms/:id/promote', () => {
     expect(body.room.mode).toBe('build-review');
     expect(body.room.task).toContain('split the pricing module by tier');
     expect(body.room.repoRoot).toBe(h.store.getRoom(room.id)?.repoRoot);
-    // The moderator wrote the proposal, so it is the one that builds it.
-    expect(body.participants[0]?.runtime).toBe('echo3');
+    expect(body.room.additionalDirs).toEqual(h.store.getRoom(room.id)?.additionalDirs);
+    // The roster order is stable across modes: the first selected runtime becomes worker.
+    expect(body.participants.map((participant) => participant.runtime)).toEqual([
+      'echo',
+      'echo2',
+      'echo3',
+    ]);
     expect(body.participants[0]?.role).toBe('worker');
+    expect(body.participants[1]?.model).toBe('review-model');
+    expect(h.supervisor.isRunning(body.room.id)).toBe(true);
+
+    await waitFor(() => !h.supervisor.isRunning(body.room.id), 'the promoted build to finish');
   });
 
   it('refuses to promote a build-review room, or a brainstorm with no proposal yet', async () => {

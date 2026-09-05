@@ -31,11 +31,46 @@ describe('parseVerdict', () => {
     expect(parsed.verdict.blocking).toEqual(['a.ts:1 nope']);
   });
 
+  it('uses a runtime structured result when the visible verdict JSON is malformed', () => {
+    const parsed = parseVerdict('```verdict\n{"decision":"approve}\n```', {
+      decision: 'request-changes',
+      blocking: ['a.ts:1 is still broken'],
+      nits: [],
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.verdict.decision).toBe('request-changes');
+    expect(parsed.verdict.blocking).toEqual(['a.ts:1 is still broken']);
+  });
+
+  it('falls back to the visible verdict when a runtime structured result is invalid', () => {
+    const parsed = parseVerdict('```verdict\n{"decision":"approve"}\n```', {
+      decision: 'maybe',
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.verdict.decision).toBe('approve');
+  });
+
   it('tolerates prose around the fence and whitespace after the language tag', () => {
     const parsed = parseVerdict('before\n```verdict  \n  {"decision":"question"}  \n```\nafter');
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.verdict.decision).toBe('question');
+  });
+
+  it('accepts a bare verdict object on the last line, which schema-constrained runtimes print', () => {
+    const parsed = parseVerdict(
+      'Reviewed the diff; nothing blocking.\n{"decision":"approve","blocking":[],"nits":[]}',
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.verdict.decision).toBe('approve');
+  });
+
+  it('does not treat a bare object with unknown keys, or one mid-message, as a verdict', () => {
+    expect(parseVerdict('{"decision":"approve","confidence":1}').ok).toBe(false);
+    expect(parseVerdict('{"decision":"approve"}\nbut actually I am not sure.').ok).toBe(false);
   });
 
   it('reports a missing block rather than guessing', () => {

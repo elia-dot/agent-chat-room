@@ -88,6 +88,21 @@ describe('ClaudeParser against a recorded run (claude 2.1.259)', () => {
     expect(done[0]?.text).toBe(result.text);
   });
 
+  it('captures a schema-validated structured output separately from the prose', () => {
+    const structured = { decision: 'approve', blocking: [], nits: [] };
+    const { result } = replay(new ClaudeParser(), [
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'The prose has malformed JSON.',
+        structured_output: structured,
+        session_id: 's',
+      }),
+    ]);
+    expect(result.structured).toEqual(structured);
+  });
+
   it('surfaces tool calls and their results', () => {
     const { events } = replay(new ClaudeParser(), lines);
     const tools = eventsOfType(events, 'tool');

@@ -63,7 +63,6 @@ describe.skipIf(!live)('live: claude works, codex reviews, the room commits', ()
             'Change nothing else.',
           cwd: dir,
           agents: ['claude', 'codex'],
-          maxRounds: 3,
           timeoutMs: 20 * 60 * 1000,
           store,
           renderer: new Renderer({ color: false, write: capture.write }),

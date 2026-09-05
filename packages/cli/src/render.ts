@@ -254,7 +254,7 @@ export class Renderer {
     const id = room.id.slice(0, 8);
     this.line(
       `${dot} ${this.bold(id)}  ${room.title}  ${this.dim(
-        `${room.state} · round ${room.round}/${room.maxRounds} · ${room.roomBranch}`,
+        `${room.state} · round ${room.round}${room.mode === 'brainstorm' ? `/${room.maxRounds}` : ''} · ${room.roomBranch}`,
       )}`,
     );
   }

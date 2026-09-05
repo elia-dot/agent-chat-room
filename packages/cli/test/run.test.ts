@@ -180,20 +180,21 @@ describe('acr run, driving the room engine', () => {
     expect(summary.reviews).toHaveLength(2);
   });
 
-  it('exits notApproved when the rounds run out, and does not commit', async () => {
+  it('exits notApproved when a reviewer asks you a question, and does not commit', async () => {
     const dir = repo();
-    const { capture, promise } = scriptedRun(
-      dir,
-      [
-        workerTurn(1, 'Attempt.', { 'math.js': HALF }),
-        reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
-      ],
-      { maxRounds: 1 },
-    );
+    const { capture, promise } = scriptedRun(dir, [
+      workerTurn(1, 'Attempt.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
+      // No round budget: request-changes simply runs another round. A question is what
+      // hands the room to the human.
+      workerTurn(2, 'Second attempt.', { 'math.js': HALF }),
+      reviewTurn(2, verdict('question', ['math.js:2 should add() validate its inputs?'])),
+    ]);
     const summary = await promise;
 
     expect(summary.exitCode).toBe(EXIT.notApproved);
     expect(summary.state).toBe('needs-you');
+    expect(summary.rounds).toBe(2);
     expect(summary.commit).toBeUndefined();
     expect(capture.text).toContain('REQUEST CHANGES');
     expect(capture.text).toContain('blocking: math.js:2 still wrong');
@@ -202,14 +203,16 @@ describe('acr run, driving the room engine', () => {
 
   it('refuses to approve when the reviewer forgot the verdict block, and shows the tail', async () => {
     const dir = repo();
-    const { capture, promise } = scriptedRun(
-      dir,
-      [workerTurn(1, 'did something', { 'math.js': FIXED }), reviewTurn(1, 'Looks good, ship it.')],
-      { maxRounds: 1 },
-    );
+    const { capture, promise } = scriptedRun(dir, [
+      workerTurn(1, 'did something', { 'math.js': FIXED }),
+      reviewTurn(1, 'Looks good, ship it.'),
+      workerTurn(2, 'nothing to change'),
+      reviewTurn(2, verdict('approve')),
+    ]);
     const summary = await promise;
-    expect(summary.exitCode).toBe(EXIT.notApproved);
-    expect(summary.verdict?.ok).toBe(false);
+    // Round 1 was counted as not approved, so it took a second round to get there.
+    expect(summary.exitCode).toBe(EXIT.ok);
+    expect(summary.rounds).toBe(2);
     expect(capture.text).toContain('did not end with a verdict block');
     expect(capture.text).toContain('Looks good, ship it.');
   });
@@ -261,16 +264,13 @@ describe('acr run, driving the room engine', () => {
     expect(summary.changedFiles).toContain('notes.txt');
   });
 
-  it('reads its roster and round count from .acr.json', async () => {
+  it('reads its roster from .acr.json', async () => {
     const dir = repo({
       'math.js': BROKEN,
-      '.acr.json': JSON.stringify({ agents: ['echo', 'echo'], rounds: 1 }),
+      '.acr.json': JSON.stringify({ agents: ['echo', 'echo'] }),
     });
     process.env.ACR_ECHO_SCRIPT = writeEchoScript({
-      turns: [
-        workerTurn(1, 'ok', { 'math.js': HALF }),
-        reviewTurn(1, verdict('request-changes', ['math.js:2 todo'])),
-      ],
+      turns: [workerTurn(1, 'ok', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))],
     });
     const summary = await run({
       task: 'fix add()',
@@ -279,9 +279,10 @@ describe('acr run, driving the room engine', () => {
       store,
       renderer: new Renderer({ color: false, write: () => undefined }),
     });
-    // `rounds: 1` from the file, so one round and then needs-you.
+    // No `agents` were passed, so the echo roster came from the file.
     expect(summary.rounds).toBe(1);
-    expect(summary.exitCode).toBe(EXIT.notApproved);
+    expect(summary.exitCode).toBe(EXIT.ok);
+    expect(summary.worker.runtime).toBe('echo');
   });
 
   it('warns about an unknown .acr.json key instead of refusing to run', async () => {
@@ -301,19 +302,14 @@ describe('acr run, driving the room engine', () => {
 
   it('resumes an existing room by id', async () => {
     const dir = repo();
-    const { promise } = scriptedRun(
-      dir,
-      [
-        workerTurn(1, 'Attempt.', { 'math.js': HALF }),
-        reviewTurn(1, verdict('request-changes', ['math.js:2 todo'])),
-      ],
-      { maxRounds: 1 },
-    );
+    const { promise } = scriptedRun(dir, [
+      workerTurn(1, 'Attempt.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('question', ['math.js:2 todo?'])),
+    ]);
     const first = await promise;
     expect(first.state).toBe('needs-you');
 
     // A second invocation picks the room up, keeping its worktree, branch and sessions.
-    store.updateRoom(first.roomId, { maxRounds: 2 });
     resetEchoAdapter();
     process.env.ACR_ECHO_SCRIPT = writeEchoScript({
       turns: [workerTurn(2, 'Fixed.', { 'math.js': FIXED }), reviewTurn(2, verdict('approve'))],

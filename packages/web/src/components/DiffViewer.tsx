@@ -28,35 +28,21 @@ export function DiffViewer({
   return (
     <div className="space-y-2">
       {files.map((file) => (
-        <FileDiff
-          key={`${file.oldPath}->${file.path}`}
-          file={file}
-          basePath={basePath}
-        />
+        <FileDiff key={`${file.oldPath}->${file.path}`} file={file} basePath={basePath} />
       ))}
     </div>
   );
 }
 
-function FileDiff({
-  file,
-  basePath,
-}: {
-  file: DiffFile;
-  basePath?: string;
-}): React.ReactElement {
+function FileDiff({ file, basePath }: { file: DiffFile; basePath?: string }): React.ReactElement {
   const [open, setOpen] = useState(true);
   const basePathClean = basePath ? basePath.replace(/\/+$/, '') : '';
-  const fullPath = basePathClean
-    ? `${basePathClean}/${file.path.replace(/^\/+/, '')}`
-    : file.path;
+  const fullPath = basePathClean ? `${basePathClean}/${file.path.replace(/^\/+/, '')}` : file.path;
   const absPathWithSlash = fullPath.startsWith('/') ? fullPath : `/${fullPath}`;
 
   return (
     <section className="overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
-      <div
-        className="flex w-full items-center gap-2 bg-zinc-50 px-2 py-1.5 text-left text-[11px] dark:bg-zinc-900"
-      >
+      <div className="flex w-full items-center gap-2 bg-zinc-50 px-2 py-1.5 text-left text-[11px] dark:bg-zinc-900">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -89,9 +75,7 @@ function FileDiff({
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-2"
         >
-          <span className="shrink-0 text-emerald-600 dark:text-emerald-400">
-            +{file.additions}
-          </span>
+          <span className="shrink-0 text-emerald-600 dark:text-emerald-400">+{file.additions}</span>
           <span className="shrink-0 text-rose-600 dark:text-rose-400">−{file.deletions}</span>
         </button>
       </div>
