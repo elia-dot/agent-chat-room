@@ -48,9 +48,9 @@ export function DisconnectedPanel({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
-      <div className="pointer-events-auto w-full max-w-xl overflow-hidden rounded-lg border border-changes-line bg-ground shadow-2xl">
-        <div className="border-b border-changes-line bg-changes-bg px-4 py-3">
-          <h2 className="font-mono text-[11px] tracking-[0.14em] text-changes">CONNECTION LOST</h2>
+      <div className="pointer-events-auto w-full max-w-xl overflow-hidden rounded-lg border border-error-line bg-ground shadow-2xl">
+        <div className="border-b border-error-line bg-error-bg px-4 py-3">
+          <h2 className="font-mono text-[11px] tracking-[0.14em] text-error">CONNECTION LOST</h2>
           <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">
             The acr server stopped responding. What you can see behind this panel is the last state
             received at {stale}. It is not live{context ? `, and ${context}` : ''}.

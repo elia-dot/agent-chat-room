@@ -64,7 +64,7 @@ export function VerdictCard({
           <Section title="Nits" items={verdict.nits} className="text-ink-dim" basePath={basePath} />
         </>
       ) : (
-        <p className="font-mono text-[11.5px] text-question">
+        <p className="font-mono text-[11.5px] text-error">
           verdict block could not be read — counted as not approved
         </p>
       )}

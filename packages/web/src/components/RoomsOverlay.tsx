@@ -196,7 +196,7 @@ export function EmptyState({
             <Legend dot="bg-approve" name="approved">
               every reviewer approved, and the round is committed
             </Legend>
-            <Legend dot="bg-changes" name="stopped">
+            <Legend dot="bg-error" name="stopped">
               halted, not committed
             </Legend>
             <Legend dot="bg-ink-faint" name="idle">

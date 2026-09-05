@@ -81,9 +81,9 @@ const BAND: Record<Kind, { wrap: string; label: string; rule: string }> = {
     rule: 'bg-changes-line',
   },
   failure: {
-    wrap: 'border-changes-line bg-changes-bg',
-    label: 'text-changes',
-    rule: 'bg-changes-line',
+    wrap: 'border-error-line bg-error-bg',
+    label: 'text-error',
+    rule: 'bg-error-line',
   },
   commit: {
     wrap: 'border-approve-line bg-approve-bg',

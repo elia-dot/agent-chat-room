@@ -23,7 +23,7 @@ export const STATE_TONE: Record<RoomState, { dot: string; pill: string; text: st
     pill: 'border-question-line bg-question-bg',
     text: 'text-question',
   },
-  stopped: { dot: 'bg-changes', pill: 'border-changes-line bg-changes-bg', text: 'text-changes' },
+  stopped: { dot: 'bg-error', pill: 'border-error-line bg-error-bg', text: 'text-error' },
 };
 
 export function isLive(state: RoomState): boolean {

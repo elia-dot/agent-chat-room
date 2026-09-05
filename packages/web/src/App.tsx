@@ -305,7 +305,7 @@ export function App(): React.ReactElement {
       )}
 
       {error && (
-        <Banner tone="changes" onDismiss={() => setError(null)}>
+        <Banner tone="error" onDismiss={() => setError(null)}>
           {error}
         </Banner>
       )}
@@ -497,13 +497,13 @@ function Banner({
   children,
   onDismiss,
 }: {
-  tone: 'changes' | 'question';
+  tone: 'error' | 'question';
   children: React.ReactNode;
   onDismiss: () => void;
 }): React.ReactElement {
   const style =
-    tone === 'changes'
-      ? 'border-changes-line bg-changes-bg text-changes'
+    tone === 'error'
+      ? 'border-error-line bg-error-bg text-error'
       : 'border-question-line bg-question-bg text-question';
   return (
     <div className={`flex shrink-0 items-center gap-3 border-b px-4 py-1.5 text-[12px] ${style}`}>

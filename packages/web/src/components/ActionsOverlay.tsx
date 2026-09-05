@@ -101,20 +101,20 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
       </div>
 
       <Divider label="DESTRUCTIVE" tone="danger" />
-      <div className="mt-2 flex flex-col gap-2 rounded-md border border-changes-line bg-changes-bg/40 p-3">
+      <div className="mt-2 flex flex-col gap-2 rounded-md border border-error-line bg-error-bg/40 p-3">
         <HoldToConfirm
           label={closed ? 'Room already closed' : 'Close room'}
           disabled={busy || closed}
           onConfirm={props.onCloseRoom}
         />
-        <span className="h-px bg-changes-line" />
+        <span className="h-px bg-error-line" />
         <TypeToConfirm
           label="Purge worktree & data"
           expect={room.title}
           disabled={busy || running}
           onConfirm={props.onPurgeRoom}
         />
-        <p className="font-mono text-[10.5px] leading-relaxed text-changes/80">
+        <p className="font-mono text-[10.5px] leading-relaxed text-error/80">
           Closing removes the worktree at {room.worktreePath ?? room.repoRoot} and keeps the branch.
           Purge also deletes the transcript, the stored diffs and the turn logs. Commits you have
           already pushed are unaffected.

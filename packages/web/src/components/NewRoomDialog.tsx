@@ -445,7 +445,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
           )}
 
           {error && (
-            <p className="mt-3 rounded border border-changes-line bg-changes-bg px-3 py-2 font-mono text-[11.5px] text-changes">
+            <p className="mt-3 rounded border border-error-line bg-error-bg px-3 py-2 font-mono text-[11.5px] text-error">
               {error}
             </p>
           )}

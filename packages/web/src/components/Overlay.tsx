@@ -82,7 +82,7 @@ export function Divider({
       <span className="h-px flex-1 bg-line" />
       <span
         className={`font-mono text-[10px] tracking-[0.12em] ${
-          tone === 'danger' ? 'text-changes' : 'text-ink-faint'
+          tone === 'danger' ? 'text-error' : 'text-ink-faint'
         }`}
       >
         {label}

@@ -55,8 +55,8 @@
   --color-agent-3: var(--acr-agent-3);
   --color-agent-4: var(--acr-agent-4);
 
-  --font-sans: 'Work Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
 }
 
 /* Light is the secondary theme (artboard 1h): the same structure on a paper ground. */
@@ -75,15 +75,15 @@
   --acr-approve: oklch(0.5 0.13 152);
   --acr-approve-bg: oklch(0.95 0.03 152);
   --acr-approve-line: oklch(0.82 0.07 152);
-  --acr-changes: oklch(0.48 0.16 27);
-  --acr-changes-bg: oklch(0.95 0.03 27);
-  --acr-changes-line: oklch(0.82 0.09 27);
+  --acr-changes: oklch(0.52 0.14 55);
+  --acr-changes-bg: oklch(0.95 0.04 60);
+  --acr-changes-line: oklch(0.82 0.1 60);
   --acr-question: oklch(0.5 0.12 75);
   --acr-question-bg: oklch(0.95 0.04 88);
   --acr-question-line: oklch(0.82 0.09 88);
-  --acr-error: oklch(0.47 0.15 315);
-  --acr-error-bg: oklch(0.95 0.035 315);
-  --acr-error-line: oklch(0.81 0.08 315);
+  --acr-error: oklch(0.48 0.16 27);
+  --acr-error-bg: oklch(0.95 0.03 27);
+  --acr-error-line: oklch(0.82 0.09 27);
 
   --acr-live: oklch(0.48 0.12 250);
   --acr-live-bg: oklch(0.95 0.03 250);
@@ -110,15 +110,15 @@
   --acr-approve: oklch(0.72 0.16 152);
   --acr-approve-bg: oklch(0.3 0.06 152);
   --acr-approve-line: oklch(0.45 0.09 152);
-  --acr-changes: oklch(0.66 0.19 27);
-  --acr-changes-bg: oklch(0.34 0.07 27);
-  --acr-changes-line: oklch(0.48 0.1 27);
+  --acr-changes: oklch(0.76 0.16 55);
+  --acr-changes-bg: oklch(0.34 0.07 55);
+  --acr-changes-line: oklch(0.49 0.11 55);
   --acr-question: oklch(0.8 0.15 88);
   --acr-question-bg: oklch(0.36 0.07 88);
   --acr-question-line: oklch(0.5 0.1 88);
-  --acr-error: oklch(0.75 0.16 315);
-  --acr-error-bg: oklch(0.32 0.065 315);
-  --acr-error-line: oklch(0.47 0.1 315);
+  --acr-error: oklch(0.66 0.19 27);
+  --acr-error-bg: oklch(0.34 0.07 27);
+  --acr-error-line: oklch(0.48 0.1 27);
 
   --acr-live: oklch(0.8 0.09 250);
   --acr-live-bg: oklch(0.28 0.03 250);
@@ -141,7 +141,15 @@ body {
   background: var(--acr-ground);
   color: var(--acr-ink);
   font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+code,
+pre,
+.font-mono {
+  font-variant-ligatures: none;
 }
 
 /*

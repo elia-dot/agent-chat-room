@@ -62,13 +62,13 @@ export function HoldToConfirm({
       onKeyUp={stop}
       className="relative flex w-full items-center gap-2.5 overflow-hidden rounded px-1 py-1.5 text-left disabled:opacity-50"
     >
-      <span className="text-[13.5px] text-changes">{label}</span>
+      <span className="text-[13.5px] text-error">{label}</span>
       <span className="flex-1" />
-      <span className="rounded border border-changes-line px-2 py-[3px] font-mono text-[10.5px] text-changes">
+      <span className="rounded border border-error-line px-2 py-[3px] font-mono text-[10.5px] text-error">
         {progress > 0 ? 'keep holding…' : hint}
       </span>
       <span
-        className="absolute bottom-0 left-0 h-0.5 bg-changes transition-none"
+        className="absolute bottom-0 left-0 h-0.5 bg-error transition-none"
         style={{ width: `${progress * 100}%` }}
       />
     </button>
@@ -104,9 +104,9 @@ export function TypeToConfirm({
         onClick={() => setOpen(true)}
         className="flex w-full items-center gap-2.5 rounded px-1 py-1.5 text-left disabled:opacity-50"
       >
-        <span className="text-[13.5px] text-changes">{label}</span>
+        <span className="text-[13.5px] text-error">{label}</span>
         <span className="flex-1" />
-        <span className="rounded border border-changes-line px-2 py-[3px] font-mono text-[10.5px] text-changes">
+        <span className="rounded border border-error-line px-2 py-[3px] font-mono text-[10.5px] text-error">
           type room name
         </span>
       </button>
@@ -116,7 +116,7 @@ export function TypeToConfirm({
   return (
     <div className="flex flex-col gap-2 px-1 py-1.5">
       <div className="flex items-center gap-2.5">
-        <span className="text-[13.5px] text-changes">{label}</span>
+        <span className="text-[13.5px] text-error">{label}</span>
         <span className="flex-1" />
         <button
           type="button"
@@ -136,7 +136,7 @@ export function TypeToConfirm({
           onChange={(e) => setTyped(e.target.value)}
           placeholder={expect}
           aria-label={`type ${expect} to confirm`}
-          className="min-w-0 flex-1 rounded border border-changes-line bg-ground px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:outline-none"
+          className="min-w-0 flex-1 rounded border border-error-line bg-ground px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:outline-none"
         />
         <button
           type="button"
@@ -146,7 +146,7 @@ export function TypeToConfirm({
             setOpen(false);
             setTyped('');
           }}
-          className="rounded bg-changes px-3 py-1 font-mono text-[11px] text-ground disabled:opacity-40"
+          className="rounded bg-error px-3 py-1 font-mono text-[11px] text-ground disabled:opacity-40"
         >
           purge
         </button>

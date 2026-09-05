@@ -45,9 +45,7 @@ export function CommandBar(props: CommandBarProps): React.ReactElement {
       <div className="flex shrink-0 items-center gap-2">
         <span
           title={connected ? 'connected' : props.connection}
-          className={`size-[9px] rounded-[2px] ${
-            connected ? 'bg-approve' : 'bg-changes acr-pulse'
-          }`}
+          className={`size-[9px] rounded-[2px] ${connected ? 'bg-approve' : 'bg-error acr-pulse'}`}
         />
         <span className="font-mono text-[12px] font-medium tracking-[0.16em]">ACR</span>
       </div>

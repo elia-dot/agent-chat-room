@@ -228,7 +228,7 @@ function Button({
   const style = primary
     ? 'bg-ink text-ground font-medium'
     : tone === 'danger'
-      ? 'border border-changes-line text-changes hover:bg-changes-bg'
+      ? 'border border-error-line text-error hover:bg-error-bg'
       : 'border border-line text-ink-dim hover:border-line-strong hover:text-ink';
   return (
     <button
