@@ -3,10 +3,9 @@ import { z } from 'zod';
 /**
  * Every reviewer message ends with a fenced ```verdict block (PLAN.md section 2).
  *
- * The fence – not a structured-output flag – is the source of truth, because it is the one
- * mechanism that works for every runtime including ones that have no schema support at all.
- * `--json-schema` / `--output-schema` are wired up as an optional extra, never as the path
- * the loop depends on.
+ * The fence works for every runtime. Runtimes that support schema-constrained output also
+ * return the same verdict separately; that validated value wins when prose escaping damages
+ * the visible JSON, while the fence remains the portable fallback.
  */
 export const VerdictSchema = z.object({
   decision: z.enum(['approve', 'request-changes', 'question']),
@@ -42,7 +41,14 @@ const FENCE_RE = /```[ \t]*verdict[ \t]*\r?\n([\s\S]*?)```/gi;
  * several blocks the last one wins, since an agent that reconsiders mid-message tends to
  * restate its conclusion at the end.
  */
-export function parseVerdict(text: string): ParsedVerdict {
+export function parseVerdict(text: string, structured?: unknown): ParsedVerdict {
+  if (structured !== undefined) {
+    const parsed = VerdictSchema.safeParse(structured);
+    if (parsed.success) {
+      return { ok: true, verdict: parsed.data, raw: JSON.stringify(parsed.data) };
+    }
+  }
+
   if (!text || text.trim().length === 0) {
     return { ok: false, reason: 'the reviewer produced no text at all' };
   }

@@ -18,7 +18,7 @@ import type { RoomStore } from '../store/rooms.js';
 import type { Message, Participant, Room, RoomMode, RoomState } from '../store/types.js';
 import type { AgentAdapter, Permission, TurnResult } from '../types.js';
 import type { ParsedVerdict, Verdict } from '../verdict.js';
-import { parseVerdict } from '../verdict.js';
+import { parseVerdict, verdictJsonSchema } from '../verdict.js';
 import {
   branchFor,
   createWorktree,
@@ -679,7 +679,10 @@ export class RoomEngine {
     if (turn.result.ok) {
       const captured = writes ? await git.diffSince(cwd, this.baseSha()) : null;
       if (writes) this.lastChangedFiles = await git.changedFiles(cwd, this.baseSha());
-      const verdict = participant.role === 'reviewer' ? parseVerdict(turn.result.text) : null;
+      const verdict =
+        participant.role === 'reviewer'
+          ? parseVerdict(turn.result.text, turn.result.structured)
+          : null;
       this.postTurnMessage(
         participant,
         turn,
@@ -1086,7 +1089,7 @@ export class RoomEngine {
           newMessages,
           watermark,
         });
-        const verdict = parseVerdict(turn.result.text);
+        const verdict = parseVerdict(turn.result.text, turn.result.structured);
         const message = this.postTurnMessage(
           reviewer,
           turn,
@@ -1278,6 +1281,9 @@ export class RoomEngine {
           round: ctx.round,
           ...(ctx.phase ? { phase: ctx.phase } : {}),
         }),
+        ...(role === 'reviewer' && adapter.capabilities.structuredOutput
+          ? { outputSchema: verdictJsonSchema }
+          : {}),
         ...(participant.sessionId ? { sessionId: participant.sessionId } : {}),
         ...(participant.model ? { model: participant.model } : {}),
       },

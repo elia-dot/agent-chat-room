@@ -277,11 +277,15 @@ function Usage({ turns }: { turns: TurnRecord[] }): React.ReactElement {
 
 function RoomActions(props: RightPanelProps): React.ReactElement {
   const { room, busy } = props;
-  const [rounds, setRounds] = useState(room.maxRounds + 2);
+  const [additionalRounds, setAdditionalRounds] = useState(2);
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
   const exhausted =
     room.mode !== 'brainstorm' && room.round >= room.maxRounds && room.state !== 'approved';
+  const canAddRounds =
+    Number.isInteger(additionalRounds) &&
+    additionalRounds >= 1 &&
+    room.maxRounds + additionalRounds <= 50;
   // The room ran in a worktree on `acr/<slug>`; with `--no-worktree` there is no room
   // branch to push, which is what makes the PR button meaningless there.
   const remote = room.roomBranch === room.baseBranch ? '' : 'origin';
@@ -293,6 +297,13 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
         {running ? (
           <Action onClick={props.onPause} disabled={busy}>
             Pause
+          </Action>
+        ) : exhausted ? (
+          <Action
+            onClick={() => props.onRaiseRounds(room.maxRounds + additionalRounds)}
+            disabled={busy || !canAddRounds}
+          >
+            Add {additionalRounds || ''} rounds &amp; continue
           </Action>
         ) : (
           <Action
@@ -310,18 +321,18 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
       </div>
 
       {exhausted && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-zinc-500">Add</span>
           <input
             type="number"
-            min={room.round + 1}
-            max={50}
-            value={rounds}
-            onChange={(e) => setRounds(Number(e.target.value))}
+            min={1}
+            max={50 - room.maxRounds}
+            value={additionalRounds}
+            aria-label="Additional rounds"
+            onChange={(e) => setAdditionalRounds(Number(e.target.value))}
             className="w-16 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
           />
-          <Action onClick={() => props.onRaiseRounds(rounds)} disabled={busy}>
-            Raise round limit
-          </Action>
+          <span className="text-zinc-500">more rounds, then continue automatically</span>
         </div>
       )}
 

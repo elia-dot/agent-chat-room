@@ -140,7 +140,10 @@ export class ClaudeParser implements TurnParser {
     this.captureSessionId(ev, emit);
     if (typeof ev.result === 'string') this.finalText = ev.result;
     if (isRecord(ev.usage)) this.usage = normaliseUsage(ev.usage);
-    if (ev.structured_result !== undefined) this.structured = ev.structured_result;
+    // Current Claude Code calls this `structured_output`; accept the older/internal name
+    // too so an adapter upgrade does not turn a valid schema result back into prose parsing.
+    if (ev.structured_output !== undefined) this.structured = ev.structured_output;
+    else if (ev.structured_result !== undefined) this.structured = ev.structured_result;
 
     if (ev.is_error === true || ev.subtype === 'error_during_execution') {
       this.errorMessage =

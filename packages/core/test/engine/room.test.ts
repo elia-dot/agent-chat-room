@@ -25,6 +25,7 @@ const requests: TurnRequest[] = [];
 /** The echo adapter, wrapped so a test can see what each turn was actually asked. */
 const spyEcho: AgentAdapter = {
   ...echoAdapter,
+  capabilities: { ...echoAdapter.capabilities, structuredOutput: true },
   run(req, sink) {
     requests.push(req);
     return echoAdapter.run(req, sink);
@@ -135,6 +136,12 @@ describe('RoomEngine, the build-review loop', () => {
     expect(room.state).toBe('approved');
     expect(store.listTurns(room.id)).toHaveLength(2);
     expect(store.unfinishedTurns(room.id)).toHaveLength(0);
+    expect(
+      requests.find((request) => request.prompt.includes('acting as WORKER'))?.outputSchema,
+    ).toBe(undefined);
+    expect(
+      requests.find((request) => request.prompt.includes('acting as REVIEWER'))?.outputSchema,
+    ).toBeDefined();
     expect(
       store.listMessages(room.id).some((m) => m.kind === 'system' && m.text.includes('committed')),
     ).toBe(true);
