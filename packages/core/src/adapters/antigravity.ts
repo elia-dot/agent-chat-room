@@ -97,6 +97,14 @@ export function buildAgyPrompt(req: TurnRequest): string {
         'builds, or package managers. Use list_dir and view_file for repository inspection, ' +
         'and always finish with a textual answer even if a read action is denied.',
     );
+  } else if (req.permission === 'edits') {
+    parts.push(
+      'Antigravity edit constraint: use write_to_file, replace_file_content, or ' +
+        'multi_replace_file_content for every project-file write. Do not write through ' +
+        'run_command, shell redirection, or heredocs; accept-edits may deny those commands. ' +
+        'Use run_command only for builds, tests, and read-only inspection. If any tool is ' +
+        'denied, continue with allowed tools and always finish with a textual summary.',
+    );
   }
   parts.push(req.prompt);
   return parts.join('\n\n');

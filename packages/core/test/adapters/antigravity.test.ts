@@ -143,7 +143,18 @@ describe('buildAgyStdin', () => {
     expect(prompt).toContain('Use list_dir and view_file');
     expect(prompt).toContain('always finish with a textual answer');
 
-    expect(buildAgyPrompt(baseReq)).toBe('do the thing');
+    expect(buildAgyPrompt({ ...baseReq, permission: 'full' })).toBe('do the thing');
+  });
+
+  it('keeps edit turns away from shell-based file writes, including on resume', () => {
+    const prompt = buildAgyPrompt({
+      ...baseReq,
+      permission: 'edits',
+      sessionId: 'conversation-1',
+    });
+    expect(prompt).toContain('use write_to_file');
+    expect(prompt).toContain('Do not write through run_command');
+    expect(prompt).toContain('always finish with a textual summary');
   });
 
   it('carries a prompt of any size, because it goes on stdin rather than in argv', () => {

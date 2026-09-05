@@ -401,6 +401,25 @@ describe('RoomEngine, the build-review loop', () => {
     expect(outcome.state).toBe('needs-you');
     expect(outcome.error).toContain('the runtime fell over');
     expect(store.listTurns(engine.room.id)).toHaveLength(1);
+    expect(outcome.round).toBe(0);
+  });
+
+  it('retries the same logical round after a worker failure', async () => {
+    const dir = repo();
+    script([
+      { when: { role: 'worker', round: 1 }, error: 'a command needed approval' },
+      workerTurn(1, 'Recovered and finished.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    expect((await engine.run()).state).toBe('needs-you');
+    expect(engine.room.round).toBe(0);
+
+    const retried = await engine.run();
+    expect(retried.state).toBe('approved');
+    expect(retried.round).toBe(1);
+    expect(store.listTurns(engine.room.id).map((turn) => turn.round)).toEqual([1, 1, 1]);
   });
 
   it('runs setup hooks on round 0 and testCommand gatekeeper between worker and reviewer', async () => {

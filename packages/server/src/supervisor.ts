@@ -288,10 +288,18 @@ export class RoomSupervisor {
       throw new ConflictError('this brainstorm has not produced a proposal yet');
     }
     const participants = entry.engine.participants;
-    // Preserve the selection order: brainstorm makes the last runtime the moderator while
-    // build-review makes the first runtime the worker. Reversing this roster unexpectedly
-    // promoted the moderator (often an edit-only runtime) into the build worker role.
-    const agents = opts.agents ?? participants.map((p) => p.runtime);
+    // The moderator owns the merged proposal, so promotion makes that runtime the worker.
+    // Keeping the brainstorm selection order would instead promote the first reviewer,
+    // which is surprising and can hand implementation to a runtime chosen only to critique.
+    const moderator = participants.find((participant) => participant.role === 'moderator');
+    const agents =
+      opts.agents ??
+      (moderator
+        ? [
+            moderator.runtime,
+            ...participants.filter((p) => p.id !== moderator.id).map((p) => p.runtime),
+          ]
+        : participants.map((p) => p.runtime));
     const models = Object.fromEntries(
       participants.flatMap((participant) =>
         participant.model ? [[participant.runtime, participant.model]] : [],

@@ -1081,7 +1081,15 @@ export class RoomEngine {
     if (!workerTurn.result.ok) {
       const error = workerTurn.result.error ?? 'the worker turn failed';
       this.system(`worker turn failed: ${error}`, round);
-      this.setState(this.stopping ? 'stopped' : 'needs-you');
+      if (this.stopping) {
+        this.setState('stopped');
+      } else {
+        // The attempt failed, not the logical round. Keep its diagnostic in the transcript
+        // but rewind the counter so Start retries this round with the same session and any
+        // partial worktree edits instead of silently skipping ahead.
+        this.roomRow = this.store.updateRoom(room.id, { round: round - 1 });
+        this.setState('needs-you');
+      }
       return { done: true, error };
     }
 
