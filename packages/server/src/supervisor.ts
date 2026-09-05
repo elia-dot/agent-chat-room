@@ -332,12 +332,17 @@ export class RoomSupervisor {
       entry.engine.room.mode === 'brainstorm' &&
       entry.engine.room.round >= entry.engine.room.maxRounds &&
       entry.engine.proposal() !== undefined;
+    const wasApproved = entry.engine.room.state === 'approved';
     const message = entry.engine.postUserMessage(text, opts);
+    // Asked the engine rather than re-deciding it here: naming someone in an approved room
+    // reopens it, and the engine owns that rule.
+    const reopened = wasApproved && entry.engine.room.state !== 'approved';
 
     // A completed brainstorm has no loop left to pause and no useful default action other
     // than revising its proposal. Sending feedback is therefore the confirmation: start the
-    // named participant (the moderator by default) immediately and stream the response.
-    if (completedBrainstorm && !wasRunning) await this.start(roomId);
+    // named participant (the moderator by default) immediately and stream the response. A
+    // reopened room is the same bargain: the mention is the confirmation.
+    if ((completedBrainstorm || reopened) && !wasRunning) await this.start(roomId);
     return message;
   }
 

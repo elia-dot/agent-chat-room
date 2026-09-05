@@ -275,6 +275,50 @@ describe('RoomEngine, the build-review loop', () => {
     expect(store.listTurns(engine.room.id).every((t) => t.round === 1)).toBe(true);
   });
 
+  it('reopens an approved room when the human names an agent, and runs again', async () => {
+    const dir = repo();
+    script([
+      workerTurn(1, 'Done.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+      workerTurn(2, 'Fixed the CI failure too.', { 'math.js': FIXED }),
+      reviewTurn(2, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    expect((await engine.run()).state).toBe('approved');
+
+    // Approved is terminal on its own: nothing runs, and no turn is spent.
+    const turnsWhenApproved = store.listTurns(engine.room.id).length;
+    expect((await engine.run()).state).toBe('approved');
+    expect(store.listTurns(engine.room.id)).toHaveLength(turnsWhenApproved);
+
+    // Naming an agent is the human asking for one more turn, so the room comes back.
+    engine.postUserMessage('CI failed on the PR, see why and fix it', { mention: 'echo' });
+    expect(engine.room.state).toBe('needs-you');
+    expect(
+      store
+        .listMessages(engine.room.id)
+        .some((m) => m.kind === 'system' && m.text.includes('reopened by you')),
+    ).toBe(true);
+
+    engine.resume();
+    const second = await engine.run();
+    expect(second.state).toBe('approved');
+    expect(second.round).toBe(2);
+    expect(store.listTurns(engine.room.id).length).toBeGreaterThan(turnsWhenApproved);
+  });
+
+  it('leaves an approved room finished when the message names nobody', async () => {
+    const dir = repo();
+    script([workerTurn(1, 'Done.', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))]);
+
+    const engine = await open(dir);
+    expect((await engine.run()).state).toBe('approved');
+
+    engine.postUserMessage('noting this for later');
+    expect(engine.room.state).toBe('approved');
+  });
+
   it('stops for the human when a reviewer turn fails, instead of starting another round', async () => {
     const dir = repo();
     script([

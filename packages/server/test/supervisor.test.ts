@@ -271,6 +271,39 @@ describe('RoomSupervisor', () => {
     expect(store.getRoom(id)?.round).toBe(3);
   });
 
+  it('reopens an approved room and starts the agent the human named', async () => {
+    writeEchoScript([
+      { when: { round: 1, role: 'worker' }, text: 'Fixed it.', writeFiles: { 'math.js': FIXED } },
+      { when: { round: 1, role: 'reviewer' }, text: verdict('approve') },
+      {
+        when: { round: 2, role: 'worker' },
+        text: 'Fixed CI too.',
+        writeFiles: { 'math.js': FIXED },
+      },
+      { when: { round: 2, role: 'reviewer' }, text: verdict('approve') },
+    ]);
+    const s = supervisor();
+    const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
+    const id = engine.room.id;
+
+    await s.start(id);
+    await waitFor(() => !s.isRunning(id), 'the first round to approve');
+    expect(store.getRoom(id)?.state).toBe('approved');
+
+    // A note with nobody named leaves the finished room alone.
+    await s.say(id, 'noting this for later');
+    expect(s.isRunning(id)).toBe(false);
+    expect(store.getRoom(id)?.state).toBe('approved');
+
+    // Naming an agent reopens it and runs straight away, the way brainstorm feedback does.
+    await s.say(id, 'CI failed on the PR, see why and fix it', { mention: 'echo' });
+    expect(s.isRunning(id)).toBe(true);
+    expect(store.getRoom(id)?.paused).toBe(false);
+
+    await waitFor(() => !s.isRunning(id), 'the reopened round to finish');
+    expect(store.getRoom(id)?.round).toBe(2);
+  });
+
   it('drops the engine when a room closes', async () => {
     const s = supervisor();
     const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });

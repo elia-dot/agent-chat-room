@@ -139,7 +139,9 @@ export function Composer({
               <>
                 {completedBrainstorm
                   ? 'Send feedback to revise via the moderator · '
-                  : 'Enter to send · '}
+                  : room.state === 'approved'
+                    ? 'This room is finished · @mention an agent to reopen it · '
+                    : 'Enter to send · '}
                 Shift+Enter for a newline
               </>
             )}

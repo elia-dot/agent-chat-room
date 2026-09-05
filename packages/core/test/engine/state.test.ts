@@ -19,6 +19,8 @@ const LEGAL: [RoomState, RoomState][] = [
   ['needs-you', 'running'],
   ['stopped', 'running'],
   ['approved', 'stopped'],
+  // An @mention is the one thing that reopens a finished room.
+  ['approved', 'needs-you'],
   // M2: pausing, and a single @mention turn, both come to rest in `idle`.
   ['running', 'idle'],
   ['waiting-reviews', 'idle'],
@@ -29,7 +31,6 @@ const ILLEGAL: [RoomState, RoomState][] = [
   ['idle', 'waiting-reviews'],
   ['running', 'approved'],
   ['approved', 'running'],
-  ['approved', 'needs-you'],
   ['needs-you', 'approved'],
   // Pausing added two edges into `idle` and no way back out of a finished room.
   ['approved', 'idle'],

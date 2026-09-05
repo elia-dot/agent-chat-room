@@ -32,8 +32,10 @@ const TRANSITIONS: Record<RoomState, readonly RoomState[]> = {
   running: ['waiting-reviews', 'needs-you', 'stopped', 'idle'],
   // Reviewers are running in parallel; the tally decides where this goes.
   'waiting-reviews': ['approved', 'needs-you', 'running', 'stopped', 'idle'],
-  // Terminal, except that closing a room stops it.
-  approved: ['stopped'],
+  // Terminal for the engine: it will never leave `approved` on its own. The human can,
+  // by naming an agent in a message – the CI that broke after the PR went up is the
+  // ordinary case – which reopens the room as `needs-you` and lets the loop run again.
+  approved: ['stopped', 'needs-you'],
   // The human is the next actor. Answering resumes the loop.
   'needs-you': ['running', 'stopped'],
   // Resumable: `acr rooms resume` picks a stopped room back up.
@@ -56,7 +58,12 @@ export function isTerminal(state: RoomState): boolean {
   return state === 'approved' || state === 'needs-you' || state === 'stopped';
 }
 
-/** True when a room can be picked up again by `RoomEngine.run()`. */
+/**
+ * True when a room can be picked up again by `RoomEngine.run()`.
+ *
+ * An approved room is not: `run()` refuses it. Reopening one is a deliberate human act
+ * (see `postUserMessage`), and it moves the room to `needs-you` first.
+ */
 export function isResumable(state: RoomState): boolean {
   return state !== 'approved';
 }

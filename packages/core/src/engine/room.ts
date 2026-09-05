@@ -636,6 +636,15 @@ export class RoomEngine {
     });
     this.emit({ type: 'message.done', roomId: this.roomRow.id, message });
 
+    // An approved room is finished as far as the engine is concerned, but naming an agent
+    // is a request for one more turn, and asking for one is the whole reason the human is
+    // typing. The mention reopens the room; a message with nobody named is a note, and
+    // leaves it finished.
+    if (this.roomRow.state === 'approved' && opts.mention) {
+      this.setState('needs-you');
+      this.system(`reopened by you: @${next} was asked for another turn.`, this.roomRow.round);
+    }
+
     // Interrupting means the human is steering, so the loop holds rather than racing them
     // to the next round. Continuing is one click, and it is theirs to make.
     this.roomRow = this.store.updateRoom(this.roomRow.id, { paused: true, nextSpeaker: next });
