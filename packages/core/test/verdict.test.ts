@@ -59,6 +59,20 @@ describe('parseVerdict', () => {
     expect(parsed.verdict.decision).toBe('question');
   });
 
+  it('accepts a bare verdict object on the last line, which schema-constrained runtimes print', () => {
+    const parsed = parseVerdict(
+      'Reviewed the diff; nothing blocking.\n{"decision":"approve","blocking":[],"nits":[]}',
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.verdict.decision).toBe('approve');
+  });
+
+  it('does not treat a bare object with unknown keys, or one mid-message, as a verdict', () => {
+    expect(parseVerdict('{"decision":"approve","confidence":1}').ok).toBe(false);
+    expect(parseVerdict('{"decision":"approve"}\nbut actually I am not sure.').ok).toBe(false);
+  });
+
   it('reports a missing block rather than guessing', () => {
     const parsed = parseVerdict('LGTM, ship it');
     expect(parsed).toEqual({

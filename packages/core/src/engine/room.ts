@@ -1113,8 +1113,18 @@ export class RoomEngine {
         round,
       );
     }
-    if (reviews.length > 0 && failed.length === reviews.length) {
-      const error = failed[0]?.result.error ?? 'every reviewer turn failed';
+    if (failed.length > 0) {
+      // Not something another worker round can fix: a reviewer that hit a usage limit or
+      // crashed will do the same next round, and without a round budget that loop never
+      // ends. Hand the room to the human, who can wait it out or change the roster.
+      const error = failed[0]?.result.error ?? 'a reviewer turn failed';
+      this.system(
+        `a failed review cannot be addressed by the worker, so the room is waiting for you. ` +
+          `Press Continue to run another round once ${failed
+            .map((r) => r.participant.runtime)
+            .join(' and ')} can review again, or change the roster.`,
+        round,
+      );
       this.setState('needs-you');
       return { done: true, error };
     }

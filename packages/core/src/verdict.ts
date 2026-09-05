@@ -55,6 +55,8 @@ export function parseVerdict(text: string, structured?: unknown): ParsedVerdict 
 
   const blocks = [...text.matchAll(FENCE_RE)].map((m) => m[1] ?? '');
   if (blocks.length === 0) {
+    const bare = bareVerdict(text);
+    if (bare) return bare;
     return {
       ok: false,
       reason: 'no ```verdict block found in the reviewer message',
@@ -85,6 +87,25 @@ export function parseVerdict(text: string, structured?: unknown): ParsedVerdict 
   }
 
   return { ok: true, verdict: result.data, raw };
+}
+
+/**
+ * A runtime with schema-constrained output sometimes prints the verdict object itself as
+ * the final line, with no fence around it. That is still a validated verdict, not a guess
+ * from prose: it has to be a lone JSON object on the last line, and it has to match the
+ * schema exactly, with no unknown keys.
+ */
+function bareVerdict(text: string): ParsedVerdict | undefined {
+  const lastLine = text.trim().split('\n').at(-1)?.trim() ?? '';
+  if (!lastLine.startsWith('{') || !lastLine.endsWith('}')) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lastLine);
+  } catch {
+    return undefined;
+  }
+  const result = VerdictSchema.strict().safeParse(parsed);
+  return result.success ? { ok: true, verdict: result.data, raw: lastLine } : undefined;
 }
 
 /** How the CLI and (later) the UI label a decision. */

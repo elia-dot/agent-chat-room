@@ -275,6 +275,31 @@ describe('RoomEngine, the build-review loop', () => {
     expect(store.listTurns(engine.room.id).every((t) => t.round === 1)).toBe(true);
   });
 
+  it('stops for the human when a reviewer turn fails, instead of starting another round', async () => {
+    const dir = repo();
+    script([
+      workerTurn(1, 'Done.', { 'math.js': FIXED }),
+      { when: { role: 'reviewer', round: 1 }, error: 'You have hit your usage limit' },
+      reviewTurn(1, verdict('approve')),
+      workerTurn(2, 'should never run', { 'math.js': BROKEN }),
+    ]);
+
+    const engine = await open(dir, 2);
+    const outcome = await engine.run();
+
+    // One approval and one failure is not an approval, and it is not a worker problem
+    // either: without a round budget, another round would just fail the same way.
+    expect(outcome.state).toBe('needs-you');
+    expect(outcome.error).toContain('usage limit');
+    expect(outcome.round).toBe(1);
+    expect(store.listTurns(engine.room.id).every((t) => t.round === 1)).toBe(true);
+    expect(
+      store
+        .listMessages(engine.room.id)
+        .some((m) => m.kind === 'system' && m.text.includes('waiting for you')),
+    ).toBe(true);
+  });
+
   it('reports a failed worker turn instead of reviewing nothing', async () => {
     const dir = repo();
     script([
