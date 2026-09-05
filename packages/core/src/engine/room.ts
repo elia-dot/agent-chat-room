@@ -145,10 +145,21 @@ const DEFAULT_TIMEOUT_MS = 1800_000;
 /**
  * Brainstorm mode is exactly three rounds (PLAN.md section 3): answer, react, merge. It is
  * a fixed shape, so `maxRounds` on a brainstorm room is this. A build-review room has no
- * round limit at all – it runs until every reviewer approves, someone asks you a question,
- * or you pause or stop it – and stores `0` there.
+ * fixed length – it runs until every reviewer approves, someone asks you a question, or you
+ * pause or stop it – and stores `0` there.
  */
 export const BRAINSTORM_ROUNDS = 3;
+
+/**
+ * How many build-review rounds one `run()` may spend before parking in `needs-you`.
+ *
+ * A build-review room has no natural end: two agents that disagree will happily trade
+ * rounds forever, and each one costs a worker turn plus a review of a diff that only grows.
+ * The budget is per run rather than per room, so pressing Continue buys another one – the
+ * human stays the one who decides to keep spending. `maxRounds` in `.acr.json` overrides
+ * it, and `0` there turns the cap off.
+ */
+export const DEFAULT_ROUND_BUDGET = 5;
 
 const BRAINSTORM_PHASES: Record<number, BrainstormPhase> = {
   1: 'answer',
@@ -393,7 +404,8 @@ export class RoomEngine {
       roomBranch,
       baseSha,
       worktreePath,
-      // A brainstorm is three fixed phases; a build loop has no budget at all.
+      // A brainstorm is three fixed phases. A build loop has no fixed length – it stores
+      // `0` here and is bounded per run by `roundBudget()` instead.
       maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : 0,
     });
 
@@ -514,6 +526,8 @@ export class RoomEngine {
 
     let lastError: string | undefined;
     let commit: string | undefined;
+    const budget = this.roundBudget();
+    let spent = 0;
 
     for (;;) {
       if (this.stopping) {
@@ -524,7 +538,19 @@ export class RoomEngine {
         // Checked at the top of a round rather than mid-turn: killing a running worker
         // would throw away the diff it is half way through writing, and `stop()` is
         // already there for the human who really means it.
+        // Checked before the budget, because a human who pressed Pause said something
+        // more specific than "that was enough rounds".
         this.settle();
+        break;
+      }
+      if (budget > 0 && spent >= budget) {
+        this.system(
+          `round budget spent: ${budget} round${budget === 1 ? '' : 's'} ran without an ` +
+            `approval, so the room is waiting for you rather than spending more. Press ` +
+            `Continue for another ${budget}, or change the roster or the task. Set ` +
+            `"maxRounds" in .acr.json to change the budget (0 turns it off).`,
+        );
+        this.setState('needs-you');
         break;
       }
       const round = this.roomRow.round + 1;
@@ -541,6 +567,7 @@ export class RoomEngine {
 
       let result: { done: boolean; error?: string; commit?: string };
       try {
+        spent += 1;
         result = await this.runRound(round);
       } finally {
         lock.release();
@@ -1073,6 +1100,7 @@ export class RoomEngine {
 
     // --- autonomous test runner gatekeeper ---------------------------------
     let testResults: string | undefined;
+    let testMessageId: string | undefined;
     const testCmd = this.repoConfig.config.testCommand;
     if (testCmd) {
       const startTime = Date.now();
@@ -1088,16 +1116,19 @@ export class RoomEngine {
       testResults = `Command: ${testCmd}\nExit code: ${exitCode}\nDuration: ${durationSec}s\n\n${output}`;
       const detail = output ? `:\n\`\`\`\n${output}\n\`\`\`` : '';
       const summary = `[test runner] \`${testCmd}\` finished with exit code ${exitCode} (${durationSec}s)`;
-      this.system(`${summary}${detail}`, round);
+      testMessageId = this.system(`${summary}${detail}`, round).id;
     }
 
     // --- reviewers, in parallel --------------------------------------------
     this.setState('waiting-reviews');
     const diffFile = this.spillDiffForReviewers(workerMessage.id, diff);
 
+    // The reviewer already gets the whole test run under `## Test Results`. Leaving the
+    // `[test runner]` system message in its unseen list would put the same output – up to
+    // 64 KB of it – in the same prompt twice, for every reviewer, every round.
     const reviewerRequests = reviewers.map((reviewer) => ({
       reviewer,
-      newMessages: this.unseenFor(reviewer),
+      newMessages: this.unseenFor(reviewer, testMessageId),
       watermark: this.store.latestMessageId(room.id),
     }));
 
@@ -1212,8 +1243,8 @@ export class RoomEngine {
       return { done: true, ...(commit ? { commit } : {}) };
     }
 
-    // No round budget: a request-changes round is followed by another round, for as long
-    // as it takes. The human has Pause and Stop for the case where it is taking too long.
+    // A request-changes round is followed by another round, until the run's round budget
+    // is spent and `runLocked` hands the room back. The human also has Pause and Stop.
     return { done: false };
   }
 
@@ -1426,10 +1457,15 @@ export class RoomEngine {
     );
   }
 
-  private unseenFor(participant: Participant): PromptMessage[] {
+  /** Rounds one run may spend. `0` means the human took the cap off. */
+  private roundBudget(): number {
+    return this.repoConfig.config.maxRounds ?? DEFAULT_ROUND_BUDGET;
+  }
+
+  private unseenFor(participant: Participant, skipMessageId?: string): PromptMessage[] {
     return this.store
       .messagesAfter(this.roomRow.id, participant.lastSeenMessageId)
-      .filter((m) => m.participantId !== participant.id)
+      .filter((m) => m.participantId !== participant.id && m.id !== skipMessageId)
       .map((m) => ({
         author: m.author,
         ...(m.role ? { role: m.role } : {}),

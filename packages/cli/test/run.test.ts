@@ -185,8 +185,8 @@ describe('acr run, driving the room engine', () => {
     const { capture, promise } = scriptedRun(dir, [
       workerTurn(1, 'Attempt.', { 'math.js': HALF }),
       reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
-      // No round budget: request-changes simply runs another round. A question is what
-      // hands the room to the human.
+      // Inside the round budget, request-changes simply runs another round. A question is
+      // what hands the room to the human.
       workerTurn(2, 'Second attempt.', { 'math.js': HALF }),
       reviewTurn(2, verdict('question', ['math.js:2 should add() validate its inputs?'])),
     ]);

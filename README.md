@@ -32,6 +32,9 @@ M4 brings complete production-readiness and the next-generation feature set:
   `testCommand` between worker and reviewer turns with test failure diagnostics fed directly to reviewers.
 - **Mechanical Goalpost Enforcement.** In Round 3+, reviewer citations are validated against modified hunks from
   the worker's diff; citations outside the diff are downgraded to non-blocking nits to prevent endless review loops.
+- **Round budget.** A build-review room spends at most `maxRounds` rounds (5 by default) per run and then
+  waits for you, so a room that will not converge cannot quietly burn a worker turn plus a full review of a
+  growing diff forever. Continue buys another budget; `"maxRounds": 0` turns the cap off.
 - **Brainstorm mode.** Three rounds instead of a build loop: everyone answers in parallel,
   everyone reacts to the others, and the moderator writes a merged proposal. Nobody edits.
   One button turns the proposal into a `build-review` room.
@@ -43,8 +46,8 @@ M4 brings complete production-readiness and the next-generation feature set:
   `acr rooms purge <id>` or the web UI.
 - **`acr doctor`** – which runtimes are installed, new enough and logged in.
 - **`acr run`** – a whole room: the worker builds, every reviewer reviews in parallel, and the loop
-  repeats until they all approve, someone asks you a question, or you pause or stop it. There is
-  no round limit.
+  repeats until they all approve, someone asks you a question, the round budget runs out, or you
+  pause or stop it.
 - **Git worktrees.** Every room runs in its own worktree on branch `acr/<slug>`, so your checkout is
   never touched and a room's diff is attributable to that room by construction.
 - **Auto-commit on approve.** The round everyone approved is committed on the room branch with the
@@ -54,7 +57,8 @@ M4 brings complete production-readiness and the next-generation feature set:
 - **Restart recovery.** A turn that died with its process is marked, its round is rolled back and
   re-run, and each agent keeps its own runtime session – so only the turn is repeated, not the
   conversation.
-- **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs`, `setup`, and `testCommand`.
+- **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs`, `setup`,
+  `testCommand`, and `maxRounds`.
 - **Governance & CI.** MIT License, Denly attribution `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
   and GitHub Actions CI across macOS and Linux.
 
@@ -207,6 +211,7 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
   "additional_dirs": ["/path/to/shared/lib"], // additional directories mounted into the agent's context
   "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
   "testCommand": "npm test", // run between worker and reviewer turns; results injected under ## Test Results
+  "maxRounds": 5, // rounds one run may spend before parking in needs-you; 0 turns the cap off
 }
 ```
 

@@ -110,4 +110,13 @@ describe('.acr.json', () => {
     expect(settings.setup).toEqual(['npm ci']);
     expect(settings.testCommand).toBe('npm test');
   });
+
+  it('accepts maxRounds, including 0 for "no cap", and rejects a negative one', () => {
+    expect(loadRepoConfig(repoWith({ maxRounds: 3 })).config.maxRounds).toBe(3);
+    expect(loadRepoConfig(repoWith({ maxRounds: 0 })).config.maxRounds).toBe(0);
+
+    const bad = loadRepoConfig(repoWith({ maxRounds: -1 }));
+    expect(bad.config.maxRounds).toBeUndefined();
+    expect(bad.warnings.length).toBeGreaterThan(0);
+  });
 });

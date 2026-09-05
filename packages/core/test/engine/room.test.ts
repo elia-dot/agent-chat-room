@@ -208,7 +208,7 @@ describe('RoomEngine, the build-review loop', () => {
     expect(tally[1]).toContain('2 of 2 approved');
   });
 
-  it('has no round budget: request-changes keeps the loop going until an approval', async () => {
+  it('request-changes keeps the loop going until an approval, inside the budget', async () => {
     const dir = repo();
     script([
       workerTurn(1, 'Attempt 1.', { 'math.js': HALF }),
@@ -222,17 +222,71 @@ describe('RoomEngine, the build-review loop', () => {
     const engine = await open(dir);
     const outcome = await engine.run();
 
-    // The room never parked itself: the only things that end a build loop are an
-    // approval, a question, a failure, or the human pausing or stopping it.
+    // Three rounds is under the default budget, so nothing parked the room: the things
+    // that end a build loop are an approval, a question, a failure, the budget, or the
+    // human pausing or stopping it.
     expect(outcome.state).toBe('approved');
     expect(outcome.round).toBe(3);
     expect(outcome.commit).toBeTruthy();
     expect(
       store
         .listMessages(engine.room.id)
-        .some((m) => m.kind === 'system' && m.text.includes('stopping after')),
+        .some((m) => m.kind === 'system' && m.text.includes('round budget spent')),
     ).toBe(false);
     expect(readFileSync(join(engine.room.worktreePath!, 'math.js'), 'utf8')).toBe(FIXED);
+  });
+
+  it('spends at most the round budget per run, then waits for you', async () => {
+    const dir = repo();
+    writeFileSync(join(dir, '.acr.json'), JSON.stringify({ maxRounds: 2 }));
+    script([
+      workerTurn(1, 'Attempt 1.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
+      workerTurn(2, 'Attempt 2.', { 'math.js': HALF }),
+      reviewTurn(2, verdict('request-changes', ['math.js:2 still still wrong'])),
+      workerTurn(3, 'Attempt 3.', { 'math.js': FIXED }),
+      reviewTurn(3, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    const outcome = await engine.run();
+
+    // Round 3 was never asked for: the run stopped at the budget rather than spending
+    // another worker turn plus a review of the whole diff again.
+    expect(outcome.state).toBe('needs-you');
+    expect(outcome.round).toBe(2);
+    expect(store.listTurns(engine.room.id)).toHaveLength(4);
+    expect(
+      store
+        .listMessages(engine.room.id)
+        .some((m) => m.kind === 'system' && m.text.includes('round budget spent: 2 rounds')),
+    ).toBe(true);
+
+    // Continue buys another budget rather than parking again straight away.
+    const second = await engine.run();
+    expect(second.state).toBe('approved');
+    expect(second.round).toBe(3);
+  });
+
+  it('takes the round budget off when .acr.json sets maxRounds to 0', async () => {
+    const dir = repo();
+    writeFileSync(join(dir, '.acr.json'), JSON.stringify({ maxRounds: 0 }));
+    script([
+      workerTurn(1, 'Attempt 1.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
+      workerTurn(2, 'Attempt 2.', { 'math.js': FIXED }),
+      reviewTurn(2, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    const outcome = await engine.run();
+
+    expect(outcome.state).toBe('approved');
+    expect(
+      store
+        .listMessages(engine.room.id)
+        .some((m) => m.kind === 'system' && m.text.includes('round budget spent')),
+    ).toBe(false);
   });
 
   it('never guesses an approval from a review with no verdict block', async () => {
@@ -343,6 +397,10 @@ describe('RoomEngine, the build-review loop', () => {
     expect(revReq).toBeDefined();
     expect(revReq!.prompt).toContain('## Test Results');
     expect(revReq!.prompt).toContain('gatekeeper tests passed');
+    // Once, not twice: the same output used to arrive again as the `[test runner]` system
+    // message in "New messages since your last turn".
+    expect(revReq!.prompt.split('gatekeeper tests passed')).toHaveLength(2);
+    expect(revReq!.prompt).not.toContain('[test runner]');
   });
 
   it('halts in needs-you when setup fails and does not mark setup completed', async () => {

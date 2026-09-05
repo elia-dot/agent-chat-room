@@ -33,6 +33,12 @@ export const RepoConfigSchema = z.object({
   setup: z.array(z.string()).optional(),
   /** Test command to run between worker and reviewer turns. */
   testCommand: z.string().optional(),
+  /**
+   * How many build-review rounds one run may spend before handing the room back to you.
+   * `0` means no cap – the old behaviour, where a room that never converges keeps burning
+   * a worker turn plus a review of a growing diff, round after round.
+   */
+  maxRounds: z.number().int().min(0).optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
