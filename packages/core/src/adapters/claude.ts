@@ -187,6 +187,7 @@ export const claudeAdapter: AgentAdapter = {
   id: 'claude',
   displayName: 'Claude Code',
   capabilities: {
+    systemAppendDelivery: 'every-turn',
     resume: true,
     readOnly: true,
     structuredOutput: true,

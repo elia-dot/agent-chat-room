@@ -92,6 +92,7 @@ export interface ModelOption {
 }
 
 export interface AdapterCapabilities {
+  systemAppendDelivery?: 'every-turn' | 'first-turn';
   resume: boolean;
   readOnly: boolean;
   structuredOutput: boolean;

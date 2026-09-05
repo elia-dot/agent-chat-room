@@ -18,6 +18,7 @@ export interface BuildTurnPromptInput {
   cwd: string;
   branch: string;
   task: string;
+  includeRoleInstructions?: boolean;
   newMessages?: PromptMessage[];
   diffStat?: string;
   diff?: string;
@@ -121,9 +122,11 @@ export function buildTurnPrompt(input: BuildTurnPromptInput): string {
     parts.push(input.roleChanged.trim());
   }
 
-  parts.push('');
-  parts.push('## Your job now');
-  parts.push(roleInstructions(input.role, input.phase ? { phase: input.phase } : {}).trim());
+  if (input.includeRoleInstructions !== false) {
+    parts.push('');
+    parts.push('## Your job now');
+    parts.push(roleInstructions(input.role, { round: input.round, phase: input.phase }).trim());
+  }
 
   return `${parts.join('\n').replace(/\n{3,}/g, '\n\n')}\n`;
 }

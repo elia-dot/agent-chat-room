@@ -4,6 +4,11 @@ import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { echoAdapter, resetEchoAdapter } from '../../src/adapters/echo.js';
+import { claudeAdapter, buildClaudeArgs } from '../../src/adapters/claude.js';
+import { codexAdapter, buildCodexPrompt } from '../../src/adapters/codex.js';
+import { cursorAdapter, buildCursorPrompt } from '../../src/adapters/cursor.js';
+import { antigravityAdapter, buildAgyPrompt } from '../../src/adapters/antigravity.js';
+import { roleInstructions } from '../../src/roles.js';
 import { RoomEngine } from '../../src/engine/room.js';
 import type { EngineEvent } from '../../src/engine/events.js';
 import { RoomStore } from '../../src/store/rooms.js';
@@ -90,6 +95,43 @@ afterEach(() => {
 });
 
 describe('RoomEngine, the build-review loop', () => {
+  it.each([
+    [claudeAdapter, (req: TurnRequest) => `${buildClaudeArgs(req).join('\n')}\n${req.prompt}`],
+    [codexAdapter, buildCodexPrompt],
+    [cursorAdapter, buildCursorPrompt],
+    [antigravityAdapter, buildAgyPrompt],
+    [echoAdapter, (req: TurnRequest) => req.prompt],
+  ] as const)(
+    'delivers current instructions once for $0.id on fresh and resumed turns',
+    async (adapter, render) => {
+      const dir = repo();
+      script([
+        workerTurn(1, 'First pass.', { 'math.js': HALF }),
+        reviewTurn(1, verdict('request-changes', ['math.js:2 drop the stray comment'])),
+        workerTurn(2, 'Dropped the comment.', { 'math.js': FIXED }),
+        reviewTurn(2, verdict('approve')),
+      ]);
+      const engine = await RoomEngine.create(
+        { task: 'Fix math.js.', cwd: dir, agents: ['echo', 'echo'] },
+        {
+          ...engineOptions(),
+          adapters: { echo: { ...spyEcho, capabilities: adapter.capabilities } },
+        },
+      );
+      expect((await engine.run()).state).toBe('approved');
+      expect(requests).toHaveLength(4);
+      for (const [index, request] of requests.entries()) {
+        const role = index % 2 === 0 ? 'worker' : 'reviewer';
+        const instructions = roleInstructions(role);
+        expect(render(request).split(instructions)).toHaveLength(2);
+        expect(request.prompt).toContain('Fix math.js.');
+        if (index < 2) expect(request.sessionId).toBeUndefined();
+        else expect(request.sessionId).toBeTruthy();
+      }
+      expect(requests[2]!.prompt).toContain('math.js:2 drop the stray comment');
+    },
+  );
+
   it('approves on round 1 and commits the round on the room branch', async () => {
     const dir = repo();
     script([

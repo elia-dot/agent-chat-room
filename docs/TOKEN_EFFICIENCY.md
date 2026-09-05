@@ -1,7 +1,22 @@
 # Token efficiency without limiting rounds
 
 This audit proposes token-saving improvements while preserving task quality, history
-access, and room scheduling. Recommendations are not implemented runtime features.
+access, and room scheduling. Except for instruction deduplication below, recommendations
+are not implemented runtime features.
+
+## Implemented: instruction deduplication
+
+Adapters declare `systemAppendDelivery` in their capabilities. The engine omits the
+inline role block only when the adapter delivers `systemAppend` in that same turn:
+Claude on every turn; Codex, Cursor, and Antigravity on fresh sessions only. Resumed
+sessions for those three still get current role, phase, and round-specific rules inline.
+Adapters without this capability retain the original inline behavior.
+
+`buildTurnPrompt` defaults to including instructions, so standalone callers remain safe.
+Role-change notices, task text, messages, diffs, test evidence, permissions, and round
+limits are unchanged. This removes one role block per eligible turn; it does not claim
+a measured provider-token or cost reduction. Prompt tests compare bytes, and engine
+tests cover fresh/resumed delivery through the real adapter prompt/argument builders.
 
 ## What already works
 
@@ -24,18 +39,16 @@ accumulated context free. Long-lived sessions still need context management.
    by section (task, instructions, messages, diff, test output), provider-reported input,
    cached input and output tokens, and test/review outcomes. Bytes are not tokens; missing
    usage is unknown, not zero. Compare total cost per completed task, not just per turn.
-2. **Remove provably redundant injection.** `buildTurnPrompt` repeats the task and role
-   instructions every turn (`packages/core/src/prompt.ts:126`); the engine also supplies
-   `systemAppend` (`packages/core/src/engine/room.ts:1334`). A possible
-   first code change is eliminating the same-turn duplicate while retaining the full role
-   contract once. Inspect each adapter's instruction precedence first. Claude resends
+2. **Remove provably redundant injection.** The initial same-turn role-block optimization
+   is implemented above in `packages/core/src/prompt.ts` and
+   `packages/core/src/engine/room.ts`. The task still repeats intentionally.
+   Inspect each adapter's instruction precedence before further changes. Claude resends
    `systemAppend` on resume (`packages/core/src/adapters/claude.ts:42`); Codex, Cursor,
    and Antigravity do not (`packages/core/src/adapters/codex.ts:110`,
    `packages/core/src/adapters/cursor.ts:107`, `packages/core/src/adapters/antigravity.ts:93`).
    Removing the prompt copy on every turn therefore needs adapter-aware handling, not
    a blanket deletion: resumed turns must still receive current role/phase instructions.
-   Keep role-change
-   notices and fresh-session bootstrap intact; do not deduplicate arbitrary owner messages
+   Keep role-change notices and fresh-session bootstrap intact; do not deduplicate owner messages
    just because their text matches an earlier message.
 3. **Avoid repeatedly inlining unchanged large artifacts.** Consider stable diff/test-log
    references with content hashes, plus changed-file summaries. Preserve access to full
@@ -91,8 +104,8 @@ by themselves establish which skill directories each runtime discovers.
 
 ## Recommended scope
 
-Start with prompt-section measurement and same-turn instruction deduplication, protected
-by adapter/prompt tests. Then evaluate artifact reuse and checkpointing on long-room
+Next, measure prompt sections and provider usage for the instruction deduplication,
+protected by adapter/prompt tests. Then evaluate artifact reuse and checkpointing on long-room
 fixtures against the unchanged baseline. Require preserved owner constraints, role
 permissions, test evidence, and review correctness before rollout. Keep model settings,
 round limits, and history retention unchanged during the initial evaluation.

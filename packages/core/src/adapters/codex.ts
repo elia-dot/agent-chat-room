@@ -237,6 +237,7 @@ export const codexAdapter: AgentAdapter = {
   id: 'codex',
   displayName: 'Codex CLI',
   capabilities: {
+    systemAppendDelivery: 'first-turn',
     resume: true,
     readOnly: true,
     structuredOutput: true,
