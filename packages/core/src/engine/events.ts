@@ -29,6 +29,8 @@ export type EngineEvent =
       round: number;
     }
   | { type: 'message.delta'; roomId: string; messageId: string; text: string }
+  /** A started message whose turn failed and therefore has no persisted Message row. */
+  | { type: 'message.failed'; roomId: string; messageId: string; error: string }
   | { type: 'message.done'; roomId: string; message: Message }
   | { type: 'turn.activity'; roomId: string; turnId: string; event: TurnEvent };
 

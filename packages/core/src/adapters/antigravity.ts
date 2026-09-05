@@ -89,8 +89,17 @@ export function buildAgyArgs(req: TurnRequest): string[] {
  * carries them.
  */
 export function buildAgyPrompt(req: TurnRequest): string {
-  if (!req.systemAppend || req.sessionId) return req.prompt;
-  return `${req.systemAppend.trim()}\n\n---\n\n${req.prompt}`;
+  const parts: string[] = [];
+  if (req.systemAppend && !req.sessionId) parts.push(req.systemAppend.trim(), '---');
+  if (req.permission === 'read-only') {
+    parts.push(
+      'Antigravity read-only constraint: do not call run_command, including for Git, tests, ' +
+        'builds, or package managers. Use list_dir and view_file for repository inspection, ' +
+        'and always finish with a textual answer even if a read action is denied.',
+    );
+  }
+  parts.push(req.prompt);
+  return parts.join('\n\n');
 }
 
 /**

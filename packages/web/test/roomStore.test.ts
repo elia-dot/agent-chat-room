@@ -121,6 +121,35 @@ describe('applyEvent', () => {
     expect(done.messages.map((m) => m.id)).toEqual(['m1']);
   });
 
+  it('removes a pending bubble when its turn fails', () => {
+    const streaming = fold([
+      snapshot(),
+      {
+        type: 'message.start',
+        roomId: ROOM_ID,
+        messageId: 'failed-message',
+        author: 'antigravity',
+        role: 'reviewer',
+        round: 1,
+      },
+      {
+        type: 'message.delta',
+        roomId: ROOM_ID,
+        messageId: 'failed-message',
+        text: 'unfinished',
+      },
+    ]);
+
+    const failed = applyEvent(streaming, {
+      type: 'message.failed',
+      roomId: ROOM_ID,
+      messageId: 'failed-message',
+      error: 'permission denied',
+    });
+    expect(failed.pending).toEqual([]);
+    expect(failed.messages).toEqual([]);
+  });
+
   it('keeps two reviewers apart while they stream in parallel', () => {
     const state = fold([
       snapshot(),

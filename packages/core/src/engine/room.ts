@@ -1289,6 +1289,14 @@ export class RoomEngine {
     if (watermark) {
       this.store.updateParticipant(participant.id, { lastSeenMessageId: watermark });
     }
+    if (!result.ok) {
+      this.emit({
+        type: 'message.failed',
+        roomId: room.id,
+        messageId,
+        error: result.error ?? 'turn failed',
+      });
+    }
 
     return { result, stream, messageId };
   }

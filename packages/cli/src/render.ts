@@ -191,6 +191,11 @@ export class Renderer {
       case 'message.done':
         this.messageDone(ev.message);
         return;
+      case 'message.failed':
+        // The engine follows this with a persisted system error. End any partial streamed
+        // line so that error is not glued to the runtime's unfinished response.
+        this.ensureLineStart();
+        return;
     }
   }
 

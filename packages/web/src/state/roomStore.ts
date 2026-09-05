@@ -154,6 +154,14 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
       return { ...state, messages, pending };
     }
 
+    case 'message.failed': {
+      if (!belongs(state, frame.roomId)) return state;
+      return {
+        ...state,
+        pending: state.pending.filter((message) => message.messageId !== frame.messageId),
+      };
+    }
+
     case 'turn.activity': {
       if (!belongs(state, frame.roomId)) return state;
       // Attributed to the one streaming turn, for the same reason the server's buffer does

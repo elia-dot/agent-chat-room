@@ -138,6 +138,32 @@ describe('RoomSupervisor', () => {
     expect(s.live(id)).toEqual([]);
   });
 
+  it('forgets a live message when its turn fails', async () => {
+    writeEchoScript([
+      {
+        when: { role: 'worker', round: 1 },
+        events: [{ type: 'text', text: 'unfinished' }],
+        error: 'permission denied',
+      },
+    ]);
+    const s = supervisor(50);
+    const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
+    const events: EngineEvent[] = [];
+    s.subscribe((event) => events.push(event));
+
+    await s.start(engine.room.id);
+    await waitFor(() => !s.isRunning(engine.room.id), 'the failed run to finish');
+
+    expect(s.live(engine.room.id)).toEqual([]);
+    const failed = events.find((event) => event.type === 'message.failed');
+    expect(failed?.type).toBe('message.failed');
+    if (failed?.type === 'message.failed') {
+      expect(failed.roomId).toBe(engine.room.id);
+      expect(failed.messageId).toBeTruthy();
+      expect(failed.error).toBe('permission denied');
+    }
+  });
+
   it('coalesces deltas into one frame per tick instead of one per token', async () => {
     const chunks = Array.from({ length: 40 }, (_, i) => ({ type: 'text' as const, text: `${i} ` }));
     writeEchoScript([

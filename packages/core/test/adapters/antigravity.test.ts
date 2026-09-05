@@ -117,7 +117,7 @@ describe('buildAgyStdin', () => {
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]!)).toEqual({
       event: 'user',
-      message: { role: 'user', content: 'do the thing' },
+      message: { role: 'user', content: buildAgyPrompt(baseReq) },
     });
   });
 
@@ -128,9 +128,22 @@ describe('buildAgyStdin', () => {
   });
 
   it('does not repeat them on a resumed turn', () => {
-    expect(
-      buildAgyPrompt({ ...baseReq, systemAppend: 'you are a reviewer', sessionId: 'conv-9' }),
-    ).toBe('do the thing');
+    const prompt = buildAgyPrompt({
+      ...baseReq,
+      systemAppend: 'you are a reviewer',
+      sessionId: 'conv-9',
+    });
+    expect(prompt).not.toContain('you are a reviewer');
+    expect(prompt).toContain('do the thing');
+  });
+
+  it('keeps read-only turns away from command tools that can erase the final answer', () => {
+    const prompt = buildAgyPrompt({ ...baseReq, permission: 'read-only' });
+    expect(prompt).toContain('do not call run_command');
+    expect(prompt).toContain('Use list_dir and view_file');
+    expect(prompt).toContain('always finish with a textual answer');
+
+    expect(buildAgyPrompt(baseReq)).toBe('do the thing');
   });
 
   it('carries a prompt of any size, because it goes on stdin rather than in argv', () => {
@@ -140,7 +153,7 @@ describe('buildAgyStdin', () => {
     const content = JSON.parse(buildAgyStdin({ ...baseReq, prompt: huge }).trim()) as {
       message: { content: string };
     };
-    expect(content.message.content).toHaveLength(huge.length);
+    expect(content.message.content.endsWith(huge)).toBe(true);
   });
 });
 

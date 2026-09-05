@@ -377,6 +377,10 @@ export class RoomSupervisor {
         this.flushDeltas(entry);
         entry.live.delete(event.message.id);
         break;
+      case 'message.failed':
+        this.flushDeltas(entry);
+        entry.live.delete(event.messageId);
+        break;
       case 'room.state':
         this.flushDeltas(entry);
         this.announce(entry, event.state);
