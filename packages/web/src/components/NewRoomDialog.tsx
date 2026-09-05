@@ -3,12 +3,13 @@ import { useEffect, useState } from 'react';
 
 import type { CreateRoomRequest } from '../api/client.js';
 import { api } from '../api/client.js';
-import { basename, dirname, relativeTime } from '../lib/format.js';
+import { agentTints, basename, dirname, initials, relativeTime, tintOf } from '../lib/format.js';
 import { byRuntime } from '../lib/models.js';
 import { filterRepos } from '../lib/repos.js';
 import { AdditionalDirsEditor } from './AdditionalDirsEditor.js';
 import { FolderPickerButton } from './FolderPickerButton.js';
 import { ModelSelect } from './ModelSelect.js';
+import { Divider } from './Overlay.js';
 
 /** Enough recents to cover a normal week of projects; past that, filter instead of scroll. */
 const RECENT_LIMIT = 8;
@@ -19,12 +20,12 @@ export interface NewRoomDialogProps {
 }
 
 /**
- * PLAN.md section 5.5: repo picker (recent + native chooser), task, mode, roster as toggle
- * cards in worker-first order with a model each, worktree.
+ * The new-room dialog, as the design's one-screen form.
  *
- * Order is the role: in a build-review room the first selected runtime is the worker and
- * every other one reviews; in a brainstorm the last one moderates. That is the same rule
- * `--agents` follows, so the dialog and the flag cannot disagree.
+ * The roster is a table with a role per row rather than checkboxes plus reorder arrows.
+ * Order is still what decides the role – the first runtime builds, the last one moderates –
+ * but nobody should have to know that: picking "worker" moves it to the front, and the
+ * access column shows what that choice actually grants the process.
  */
 export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.ReactElement {
   const [repos, setRepos] = useState<RepoRecord[]>([]);
@@ -38,6 +39,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
 
   const [cwd, setCwd] = useState('');
   const [additionalDirs, setAdditionalDirs] = useState<string[]>([]);
+  const [showFolders, setShowFolders] = useState(false);
   const [task, setTask] = useState('');
   const [title, setTitle] = useState('');
   const [agents, setAgents] = useState<string[]>([]);
@@ -74,20 +76,19 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
     })();
   }, []);
 
-  const toggle = (id: string): void => {
-    setAgents((current) =>
-      current.includes(id) ? current.filter((a) => a !== id) : [...current, id],
-    );
-  };
-
-  const move = (id: string, delta: number): void => {
+  /**
+   * Position is the role, so setting a role is a move.
+   *
+   * Build-review: the front of the list builds. Brainstorm: the back of it merges.
+   */
+  const setRole = (id: string, role: string): void => {
     setAgents((current) => {
-      const index = current.indexOf(id);
-      const target = index + delta;
-      if (index === -1 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      next.splice(target, 0, next.splice(index, 1)[0]!);
-      return next;
+      const without = current.filter((a) => a !== id);
+      if (role === 'off') return without;
+      const toFront =
+        (mode === 'build-review' && role === 'worker') ||
+        (mode === 'brainstorm' && role === 'participant');
+      return toFront ? [id, ...without] : [...without, id];
     });
   };
 
@@ -123,7 +124,10 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
     }
   };
 
+  const ready = cwd.trim() !== '' && task.trim() !== '' && agents.length >= 2;
+
   const submit = async (): Promise<void> => {
+    if (!ready || busy) return;
     setError(null);
     setBusy(true);
     try {
@@ -149,179 +153,220 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
     }
   };
 
-  const ready = cwd.trim() !== '' && task.trim() !== '' && agents.length >= 2;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose();
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void submit();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const shown = filterRepos(repos, repoQuery).slice(0, RECENT_LIMIT);
+  const tints = agentTints(agents);
+  const workers = mode === 'build-review' ? Math.min(agents.length, 1) : 0;
+  const rest = agents.length - workers;
+  const slug = title.trim() || task.trim().split('\n')[0] || 'room';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-6">
-      <div className="w-full max-w-2xl rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
-        <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          <h2 className="font-medium">New room</h2>
-          <button type="button" onClick={onClose} className="text-sm text-zinc-500 hover:underline">
-            cancel
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-6">
+      <div className="w-full max-w-3xl overflow-hidden rounded-lg border border-line bg-ground shadow-2xl">
+        <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
+          <h2 className="font-mono text-[11px] tracking-[0.14em] text-ink-dim">NEW ROOM</h2>
+          <div className="flex overflow-hidden rounded border border-line">
+            {(['build-review', 'brainstorm'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setMode(option)}
+                className={`px-2.5 py-1 font-mono text-[11px] ${
+                  mode === option ? 'bg-ink text-ground' : 'text-ink-dim hover:text-ink'
+                }`}
+              >
+                {option === 'build-review' ? 'build' : 'brainstorm'}
+              </button>
+            ))}
+          </div>
+          <span className="font-mono text-[11px] text-ink-faint">
+            {mode === 'build-review'
+              ? 'one builds, the others review, repeat'
+              : 'everyone answers, everyone reacts, the last one merges'}
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-line px-2 py-0.5 font-mono text-[10px] text-ink-faint hover:border-line-strong hover:text-ink"
+          >
+            esc
           </button>
         </header>
 
-        <div className="space-y-4 p-4">
-          <Field label="Repo">
-            <div className="flex gap-2">
-              <input
-                value={cwd}
-                onChange={(e) => {
-                  setCwd(e.target.value);
-                  setRepoHint(null);
-                }}
-                placeholder="/Users/you/code/your-repo"
-                className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        <div className="max-h-[70vh] overflow-y-auto px-4 pb-4">
+          <Divider label="REPO" />
+          <div className="mt-2 flex gap-2">
+            <input
+              value={cwd}
+              onChange={(e) => {
+                setCwd(e.target.value);
+                setRepoHint(null);
+              }}
+              placeholder="/Users/you/code/your-repo"
+              className="min-w-0 flex-1 rounded border border-line bg-surface px-2.5 py-1.5 font-mono text-[12.5px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            />
+            {nativePicker && (
+              <FolderPickerButton
+                onClick={() => void openNativePicker()}
+                disabled={picking}
+                picking={picking}
+                label="Choose repository folder"
               />
-              {nativePicker && (
-                <FolderPickerButton
-                  onClick={() => void openNativePicker()}
-                  disabled={picking}
-                  picking={picking}
-                  label="Choose repository folder"
-                />
-              )}
-            </div>
+            )}
+          </div>
 
-            {repoHint && (
-              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                {repoHint.text}
-                {repoHint.useRoot && (
+          {repoHint && (
+            <p className="mt-1.5 font-mono text-[11px] text-question">
+              {repoHint.text}
+              {repoHint.useRoot && (
+                <button
+                  type="button"
+                  onClick={() => choose(repoHint.useRoot!)}
+                  className="ml-1.5 underline"
+                >
+                  use the repo root
+                </button>
+              )}
+            </p>
+          )}
+
+          <div className="mt-2.5 flex items-center justify-between">
+            <span className="font-mono text-[10px] tracking-[0.12em] text-ink-faint">RECENT</span>
+            {repos.length > RECENT_LIMIT && (
+              <input
+                value={repoQuery}
+                onChange={(e) => setRepoQuery(e.target.value)}
+                placeholder="filter"
+                aria-label="filter recent projects"
+                className="w-32 rounded border border-line bg-surface px-1.5 py-px font-mono text-[11px]"
+              />
+            )}
+          </div>
+          {shown.length === 0 ? (
+            <p className="mt-1.5 font-mono text-[11px] text-ink-faint">
+              {repos.length === 0
+                ? 'nothing yet – the folders you open rooms on show up here'
+                : 'no recent project matches that'}
+            </p>
+          ) : (
+            <ul className="mt-1.5 overflow-hidden rounded border border-line">
+              {shown.map((repo) => (
+                <li key={repo.path} className="border-b border-line last:border-b-0">
                   <button
                     type="button"
-                    onClick={() => choose(repoHint.useRoot!)}
-                    className="ml-1 underline"
+                    onClick={() => choose(repo.path)}
+                    title={repo.path}
+                    className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left ${
+                      repo.path === cwd.trim() ? 'bg-live-bg' : 'hover:bg-surface'
+                    }`}
                   >
-                    use the repo root
+                    <span className="truncate text-[13px] text-ink">{basename(repo.path)}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint">
+                      {dirname(repo.path)}
+                    </span>
+                    <span className="shrink-0 font-mono text-[11px] text-ink-faint">
+                      {relativeTime(repo.lastUsedAt)}
+                    </span>
                   </button>
-                )}
-              </p>
-            )}
-
-            <div className="mt-3">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-xs font-medium text-zinc-500">Recent projects</span>
-                {repos.length > RECENT_LIMIT && (
-                  <input
-                    value={repoQuery}
-                    onChange={(e) => setRepoQuery(e.target.value)}
-                    placeholder="filter"
-                    aria-label="filter recent projects"
-                    className="w-28 rounded border border-zinc-300 bg-white px-1.5 py-px text-[11px] dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                )}
-              </div>
-              {shown.length === 0 ? (
-                <p className="text-[11px] text-zinc-500">
-                  {repos.length === 0
-                    ? 'Nothing yet – the folders you open rooms on show up here.'
-                    : 'No recent project matches that.'}
-                </p>
-              ) : (
-                <ul className="divide-y divide-zinc-100 overflow-hidden rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-                  {shown.map((repo) => (
-                    <li key={repo.path}>
-                      <button
-                        type="button"
-                        onClick={() => choose(repo.path)}
-                        title={repo.path}
-                        className={`flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                          repo.path === cwd.trim() ? 'bg-sky-500/10' : ''
-                        }`}
-                      >
-                        <span className="truncate text-sm font-medium">{basename(repo.path)}</span>
-                        <span className="flex-1 truncate font-mono text-[11px] text-zinc-500">
-                          {dirname(repo.path)}
-                        </span>
-                        <span className="shrink-0 text-[11px] text-zinc-400">
-                          {relativeTime(repo.lastUsedAt)}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </Field>
-
-          <Field label="Additional folders (optional)">
-            <AdditionalDirsEditor value={additionalDirs} onChange={setAdditionalDirs} />
-            <p className="mt-1 text-[11px] text-zinc-500">
-              Every agent can access these folders in addition to the repository.
-            </p>
-          </Field>
-
-          <Field label="Task">
-            <textarea
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              rows={4}
-              placeholder="The login test is flaky. Find out why and fix it."
-              className="w-full resize-y rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-            />
-          </Field>
-
-          <Field label="Mode">
-            <div className="flex gap-2">
-              {(['build-review', 'brainstorm'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setMode(option)}
-                  className={`flex-1 rounded-md border px-3 py-2 text-left text-sm ${
-                    mode === option
-                      ? 'border-sky-500 bg-sky-500/5'
-                      : 'border-zinc-200 dark:border-zinc-800'
-                  }`}
-                >
-                  <span className="block font-medium">{option}</span>
-                  <span className="block text-[11px] text-zinc-500">
-                    {option === 'build-review'
-                      ? 'one builds, the others review, repeat'
-                      : 'everyone answers, everyone reacts, the last one merges'}
-                  </span>
-                </button>
+                </li>
               ))}
-            </div>
-          </Field>
+            </ul>
+          )}
 
-          <Field
-            label={
-              mode === 'brainstorm'
-                ? 'Roster – the last one moderates, nobody edits files'
-                : 'Roster – the first one builds, the rest review'
-            }
-          >
-            <ul className="space-y-1.5">
+          <Divider label="TASK" />
+          <textarea
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            rows={4}
+            placeholder="The login test is flaky. Find out why and fix it."
+            className="mt-2 w-full resize-y rounded border border-line bg-surface px-2.5 py-2 text-[14px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          />
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[11px] text-ink-faint">markdown ok</span>
+            <span className="flex-1" />
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="title (optional)"
+              aria-label="room title"
+              className="w-56 rounded border border-line bg-surface px-2 py-1 font-mono text-[11.5px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            />
+          </div>
+
+          <Divider label="ROSTER" />
+          <p className="mt-1.5 font-mono text-[11px] text-ink-faint">
+            {mode === 'build-review'
+              ? 'worker first · reviewers vote each round'
+              : 'the moderator merges · nobody edits files'}
+          </p>
+
+          <table className="mt-2 w-full">
+            <thead>
+              <tr className="font-mono text-[10px] tracking-[0.12em] text-ink-faint">
+                <th className="px-2 py-1 text-left font-normal">AGENT</th>
+                <th className="px-2 py-1 text-left font-normal">ROLE</th>
+                <th className="px-2 py-1 text-left font-normal">MODEL</th>
+                <th className="px-2 py-1 text-left font-normal">ACCESS</th>
+              </tr>
+            </thead>
+            <tbody>
               {runtimes.map((runtime) => {
                 const index = agents.indexOf(runtime.id);
                 const on = index !== -1;
+                const role = on ? roleFor(mode, index, agents.length) : 'off';
+                const tone = tintOf(tints[runtime.id]);
                 return (
-                  <li
-                    key={runtime.id}
-                    className={`flex items-center gap-2 rounded-md border px-2 py-1.5 ${
-                      on
-                        ? 'border-sky-500 bg-sky-500/5'
-                        : 'border-zinc-200 opacity-70 dark:border-zinc-800'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      disabled={!runtime.usable && !on}
-                      onChange={() => toggle(runtime.id)}
-                    />
-                    <span className="flex-1 text-sm">
-                      {runtime.displayName}
-                      <span className="ml-2 text-[11px] text-zinc-500">
-                        {runtime.installed
-                          ? `v${runtime.version ?? '?'}${runtime.loggedIn === false ? ' · not logged in' : ''}`
-                          : 'not installed'}
-                      </span>
-                    </span>
-                    {on && (
-                      <>
+                  <tr key={runtime.id} className={`border-t border-line ${on ? '' : 'opacity-55'}`}>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`flex size-6 items-center justify-center rounded-[5px] border bg-raised font-mono text-[9px] ${
+                            on ? `${tone.border} ${tone.text}` : 'border-line text-ink-faint'
+                          }`}
+                        >
+                          {initials(runtime.id)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-mono text-[12px] text-ink">
+                            {runtime.displayName}
+                          </span>
+                          <span className="block truncate font-mono text-[10.5px] text-ink-faint">
+                            {runtime.installed
+                              ? `v${runtime.version ?? '?'}${runtime.loggedIn === false ? ' · not logged in' : ''}`
+                              : 'not installed'}
+                          </span>
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <select
+                        value={role}
+                        disabled={!runtime.usable && !on}
+                        aria-label={`${runtime.id} role`}
+                        onChange={(e) => setRole(runtime.id, e.target.value)}
+                        className="rounded border border-line bg-surface px-1.5 py-1 font-mono text-[11px] uppercase disabled:opacity-50"
+                      >
+                        {rolesFor(mode).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-2">
+                      {on ? (
                         <ModelSelect
                           runtime={runtime.id}
                           value={models[runtime.id] ?? ''}
@@ -329,79 +374,101 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                           className="w-44"
                           onChange={(value) => setModels((m) => ({ ...m, [runtime.id]: value }))}
                         />
-                        <span className="rounded bg-zinc-200 px-1.5 py-px text-[10px] dark:bg-zinc-800">
-                          {roleFor(mode, index, agents.length)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => move(runtime.id, -1)}
-                          disabled={index === 0}
-                          className="px-1 text-xs disabled:opacity-30"
-                          aria-label={`move ${runtime.id} up`}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => move(runtime.id, 1)}
-                          disabled={index === agents.length - 1}
-                          className="px-1 text-xs disabled:opacity-30"
-                          aria-label={`move ${runtime.id} down`}
-                        >
-                          ↓
-                        </button>
-                      </>
-                    )}
-                  </li>
+                      ) : (
+                        <span className="font-mono text-[11px] text-ink-faint">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2">
+                      <span
+                        className={`rounded px-1.5 py-px font-mono text-[10px] tracking-[0.08em] ${
+                          role === 'worker'
+                            ? 'bg-question-bg text-question'
+                            : on
+                              ? 'bg-raised text-ink-dim'
+                              : 'text-ink-faint'
+                        }`}
+                      >
+                        {access(mode, role)}
+                      </span>
+                    </td>
+                  </tr>
                 );
               })}
-            </ul>
-            {agents.length < 2 && (
-              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                {mode === 'brainstorm'
-                  ? 'A brainstorm needs at least two participants.'
-                  : 'A room needs a worker and at least one reviewer.'}
+            </tbody>
+          </table>
+
+          {agents.length < 2 && (
+            <p className="mt-2 font-mono text-[11px] text-question">
+              {mode === 'brainstorm'
+                ? 'a brainstorm needs at least two participants'
+                : 'a room needs a worker and at least one reviewer'}
+            </p>
+          )}
+
+          <Divider label="WORKSPACE" />
+          <label className="mt-2 flex items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={worktree}
+              onChange={(e) => setWorktree(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-[13.5px] text-ink">Work in an isolated git worktree</span>
+              <span className="block font-mono text-[11px] text-ink-faint">
+                {worktree
+                  ? `a fresh checkout on branch acr/${slugify(slug)} · your working tree is never touched`
+                  : 'the agents edit your checkout directly'}
+              </span>
+            </span>
+          </label>
+
+          <button
+            type="button"
+            onClick={() => setShowFolders((v) => !v)}
+            className="mt-2.5 font-mono text-[11px] text-ink-faint hover:text-ink"
+          >
+            {showFolders ? '▾' : '+'} grant additional folders
+            <span className="ml-1.5">
+              {additionalDirs.length > 0 ? `(${additionalDirs.length})` : ''}
+            </span>
+          </button>
+          {showFolders && (
+            <div className="mt-2">
+              <AdditionalDirsEditor value={additionalDirs} onChange={setAdditionalDirs} />
+              <p className="mt-1 font-mono text-[11px] text-ink-faint">
+                read-only paths outside the repo, granted to every agent in the room
               </p>
-            )}
-          </Field>
+            </div>
+          )}
 
-          <div className="flex flex-wrap items-end gap-4">
-            <Field label="Title (optional)">
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="the first line of the task"
-                className="w-56 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              />
-            </Field>
-            <label className="flex items-center gap-2 pb-1.5 text-sm">
-              <input
-                type="checkbox"
-                checked={worktree}
-                onChange={(e) => setWorktree(e.target.checked)}
-              />
-              run in a git worktree
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+          {error && (
+            <p className="mt-3 rounded border border-changes-line bg-changes-bg px-3 py-2 font-mono text-[11.5px] text-changes">
+              {error}
+            </p>
+          )}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <footer className="flex items-center gap-2 border-t border-line bg-surface px-4 py-3">
+          <span className="min-w-0 flex-1 font-mono text-[11px] text-ink-faint">
+            {mode === 'build-review'
+              ? `${workers} worker · ${rest} reviewer${rest === 1 ? '' : 's'} · unanimous approval commits the round`
+              : `${agents.length} participants · three phases · the last one merges`}
+          </span>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
+            className="rounded border border-line px-3 py-1.5 font-mono text-[11.5px] text-ink-dim hover:border-line-strong hover:text-ink"
           >
-            Cancel
+            cancel
           </button>
           <button
             type="button"
             onClick={() => void submit()}
             disabled={!ready || busy}
-            className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+            className="rounded bg-ink px-3.5 py-1.5 font-mono text-[11.5px] text-ground disabled:opacity-40"
           >
-            {busy ? 'Opening…' : 'Open room'}
+            {busy ? 'opening…' : 'create & run'} <span className="opacity-60">⌘↵</span>
           </button>
         </footer>
       </div>
@@ -409,23 +476,31 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   );
 }
 
-/** The role a card gets from its position, which is the only thing that decides it. */
+/** The role a row gets from its position, which is the only thing that decides it. */
 function roleFor(mode: RoomMode, index: number, total: number): string {
   if (mode === 'brainstorm') return index === total - 1 ? 'moderator' : 'participant';
   return index === 0 ? 'worker' : 'reviewer';
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): React.ReactElement {
+function rolesFor(mode: RoomMode): string[] {
+  return mode === 'brainstorm'
+    ? ['participant', 'moderator', 'off']
+    : ['worker', 'reviewer', 'off'];
+}
+
+/** What the role actually grants the spawned process – the thing worth showing. */
+function access(mode: RoomMode, role: string): string {
+  if (role === 'off') return '—';
+  if (mode === 'brainstorm') return 'READ';
+  return role === 'worker' ? 'EDITS' : 'READ';
+}
+
+function slugify(text: string): string {
   return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-zinc-500">{label}</label>
-      {children}
-    </div>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'room'
   );
 }

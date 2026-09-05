@@ -88,6 +88,7 @@ export function Composer({
   const closed = room.closedAt !== null;
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
   const approved = room.state === 'approved';
+  const moderator = participants.find((p) => p.role === 'moderator')?.runtime;
   const needsYou = room.state === 'needs-you' && !completedBrainstorm;
   const locked = closed || offline;
 
@@ -105,7 +106,7 @@ export function Composer({
           </div>
         )}
 
-        {approved && (
+        {approved && !completedBrainstorm && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-approve-line bg-approve-bg px-3 py-2">
             <span className="font-mono text-[11px] tracking-[0.1em] text-approve">FINISHED</span>
             <span className="h-3.5 w-px bg-approve-line" />
@@ -179,7 +180,7 @@ export function Composer({
             ) : offline ? (
               'the room keeps working — this browser is what lost the connection'
             ) : completedBrainstorm ? (
-              'send feedback to revise via the moderator'
+              `reply, or @${moderator ?? 'the moderator'} to re-merge with your decision`
             ) : running ? (
               'interject any time — the room keeps working'
             ) : (

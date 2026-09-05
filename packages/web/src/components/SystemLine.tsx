@@ -137,14 +137,17 @@ export function SystemLine({ text, at }: { text: string; at?: string }): React.R
 export function RoundDivider({
   round,
   summary,
+  unit = 'round',
 }: {
   round: number;
   summary?: string;
+  /** A brainstorm counts phases, not rounds, and calling them rounds implies a loop. */
+  unit?: 'round' | 'phase';
 }): React.ReactElement {
   return (
     <div id={`round-${round}`} className="flex scroll-mt-4 items-center gap-2.5">
       <span className="rounded border border-line-strong bg-raised px-2.5 py-1 font-mono text-[10px] tracking-[0.14em] text-ink">
-        ROUND {round}
+        {unit.toUpperCase()} {round}
       </span>
       {summary && <span className="font-mono text-[11px] text-ink-faint">{summary}</span>}
       <span className="h-px flex-1 bg-line" />

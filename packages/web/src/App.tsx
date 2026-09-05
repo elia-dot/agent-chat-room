@@ -13,6 +13,8 @@ import { DisconnectedPanel } from './components/DisconnectedPanel.js';
 import { DoctorPage } from './components/DoctorPage.js';
 import { NewRoomDialog } from './components/NewRoomDialog.js';
 import { RoomOverlay } from './components/RoomOverlay.js';
+import { PhaseStrip, phasesOf } from './components/PhaseStrip.js';
+import { ProposalCard } from './components/ProposalCard.js';
 import { EmptyState, RoomsOverlay } from './components/RoomsOverlay.js';
 import { RoundStrip } from './components/RoundStrip.js';
 import { Transcript } from './components/Transcript.js';
@@ -233,6 +235,18 @@ export function App(): React.ReactElement {
     [view.messages, room?.round, view.running, live],
   );
 
+  const brainstorm = room?.mode === 'brainstorm';
+  // A brainstorm's output is the moderator's last message, which is what the engine's own
+  // `proposal()` picks; deriving it here keeps the card in step with a streaming re-merge.
+  const moderator = view.participants.find((p) => p.role === 'moderator');
+  const proposal = brainstorm
+    ? [...view.messages]
+        .reverse()
+        .find((m) => m.kind === 'agent' && m.author === moderator?.runtime)
+    : undefined;
+  const answers = view.messages.filter((m) => m.kind === 'agent' && m.round === 1).length;
+  const reactions = view.messages.filter((m) => m.kind === 'agent' && m.round === 2).length;
+
   const reviewers = view.participants.filter((p) => p.role === 'reviewer').length;
   const pending = view.pending[0];
   const liveTurn: LiveTurn | null = pending
@@ -259,7 +273,20 @@ export function App(): React.ReactElement {
         onToggleTheme={() => setDark((d) => !d)}
       />
 
-      {room && !showDoctor && rounds.length > 0 && (
+      {room && !showDoctor && brainstorm && (
+        <PhaseStrip
+          phases={phasesOf(view.messages, room.round, view.running || live)}
+          moderator={moderator?.runtime ?? null}
+          age={duration(now - Date.parse(room.createdAt))}
+          participants={view.participants.length}
+          hasProposal={proposal !== undefined}
+          onJumpToProposal={() =>
+            document.getElementById('acr-proposal')?.scrollIntoView({ block: 'start' })
+          }
+        />
+      )}
+
+      {room && !showDoctor && !brainstorm && rounds.length > 0 && (
         <RoundStrip
           rounds={rounds}
           current={room.round}
@@ -297,6 +324,36 @@ export function App(): React.ReactElement {
               view={view}
               tints={tints}
               collapsed={collapsed}
+              unit={brainstorm ? 'phase' : 'round'}
+              {...(proposal ? { proposalId: proposal.id } : {})}
+              renderProposal={(message) => (
+                <ProposalCard
+                  message={message}
+                  {...(tints[message.author] ? { tint: tints[message.author] } : {})}
+                  answers={answers}
+                  reactions={reactions}
+                  basePath={room.worktreePath ?? room.repoRoot}
+                  busy={busy}
+                  canPromote={!view.running && room.closedAt === null}
+                  exportHref={api.exportUrl(room.id)}
+                  onPromote={() =>
+                    void act(async () => {
+                      const created = await api.promote(room.id);
+                      await refreshRooms();
+                      selectRoom(created.room.id);
+                    })
+                  }
+                  onAnotherRound={() =>
+                    void act(() =>
+                      api.say(
+                        room.id,
+                        'Another round of reactions, then re-merge the proposal.',
+                        moderator?.runtime,
+                      ),
+                    )
+                  }
+                />
+              )}
               onToggleRound={(round) =>
                 setCollapsed((current) => {
                   const next = new Set(current);

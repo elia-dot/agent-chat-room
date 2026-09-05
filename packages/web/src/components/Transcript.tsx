@@ -13,6 +13,11 @@ export interface TranscriptProps {
   tints: Record<string, AgentTint>;
   /** Rounds the human has folded away. */
   collapsed: ReadonlySet<number>;
+  /** A brainstorm counts phases; the divider says so. */
+  unit?: 'round' | 'phase';
+  /** The moderator's merged proposal, rendered as the room's output rather than a message. */
+  proposalId?: string;
+  renderProposal?: (message: Message) => React.ReactNode;
   onToggleRound: (round: number) => void;
   onOpenDiff: (messageId: string) => void;
 }
@@ -28,6 +33,9 @@ export function Transcript({
   view,
   tints,
   collapsed,
+  unit = 'round',
+  proposalId,
+  renderProposal,
   onToggleRound,
   onOpenDiff,
 }: TranscriptProps): React.ReactElement {
@@ -66,7 +74,11 @@ export function Transcript({
             <section key={group.round} className="flex flex-col gap-5">
               {group.round > 0 && (
                 <button type="button" onClick={() => onToggleRound(group.round)} className="w-full">
-                  <RoundDivider round={group.round} summary={folded ? summarise(group) : ''} />
+                  <RoundDivider
+                    round={group.round}
+                    unit={unit}
+                    summary={folded ? summarise(group) : ''}
+                  />
                 </button>
               )}
 
@@ -81,7 +93,9 @@ export function Transcript({
                       />
                     ))
                 : group.messages.map((message) =>
-                    message.kind === 'system' ? (
+                    message.id === proposalId && renderProposal ? (
+                      <div key={message.id}>{renderProposal(message)}</div>
+                    ) : message.kind === 'system' ? (
                       <SystemLine key={message.id} text={message.text} />
                     ) : (
                       <PersistedMessage
