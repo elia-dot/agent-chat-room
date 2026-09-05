@@ -1,12 +1,13 @@
 import type { ModelCatalog, RepoRecord, RoomMode, RuntimeReportEntry } from '@agent-chat-room/core';
 import { useEffect, useState } from 'react';
 
-import type { BrowseResult, CreateRoomRequest } from '../api/client.js';
+import type { CreateRoomRequest } from '../api/client.js';
 import { api } from '../api/client.js';
 import { basename, dirname, relativeTime } from '../lib/format.js';
 import { byRuntime } from '../lib/models.js';
 import { filterRepos } from '../lib/repos.js';
 import { AdditionalDirsEditor } from './AdditionalDirsEditor.js';
+import { FolderPickerButton } from './FolderPickerButton.js';
 import { ModelSelect } from './ModelSelect.js';
 
 /** Enough recents to cover a normal week of projects; past that, filter instead of scroll. */
@@ -18,8 +19,8 @@ export interface NewRoomDialogProps {
 }
 
 /**
- * PLAN.md section 5.5: repo picker (recent + browse), task, mode, roster as toggle cards in
- * worker-first order with a model each, max rounds, worktree.
+ * PLAN.md section 5.5: repo picker (recent + native chooser), task, mode, roster as toggle
+ * cards in worker-first order with a model each, max rounds, worktree.
  *
  * Order is the role: in a build-review room the first selected runtime is the worker and
  * every other one reviews; in a brainstorm the last one moderates. That is the same rule
@@ -29,8 +30,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [repos, setRepos] = useState<RepoRecord[]>([]);
   const [runtimes, setRuntimes] = useState<RuntimeReportEntry[]>([]);
   const [catalogs, setCatalogs] = useState<Record<string, ModelCatalog>>({});
-  const [browse, setBrowse] = useState<BrowseResult | null>(null);
-  const [browsing, setBrowsing] = useState(false);
   const [nativePicker, setNativePicker] = useState(false);
   const [picking, setPicking] = useState(false);
   const [repoQuery, setRepoQuery] = useState('');
@@ -54,7 +53,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
       const [recent, detected, picker, catalog] = await Promise.all([
         api.repos(20).catch(() => []),
         api.runtimes().catch(() => ({ node: '', runtimes: [] })),
-        // An older server, or a headless one, simply keeps the in-app browser.
+        // An older server, or a headless one, keeps manual entry and recent projects.
         api.pickerStatus().catch(() => ({ available: false, tool: null })),
         // Listing models can reach the network, so it is the call most likely to fail –
         // and the least allowed to stop the dialog opening. No catalog means the picker
@@ -91,15 +90,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
       next.splice(target, 0, next.splice(index, 1)[0]!);
       return next;
     });
-  };
-
-  const openBrowse = async (path?: string): Promise<void> => {
-    setBrowsing(true);
-    try {
-      setBrowse(await api.browse(path));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
   };
 
   const choose = (path: string): void => {
@@ -188,22 +178,13 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
               {nativePicker && (
-                <button
-                  type="button"
+                <FolderPickerButton
                   onClick={() => void openNativePicker()}
                   disabled={picking}
-                  className="rounded-md border border-sky-500 px-3 text-sm text-sky-600 hover:bg-sky-500/10 disabled:opacity-40 dark:text-sky-400"
-                >
-                  {picking ? 'Choosing…' : 'Choose folder…'}
-                </button>
+                  picking={picking}
+                  label="Choose repository folder"
+                />
               )}
-              <button
-                type="button"
-                onClick={() => void openBrowse(cwd || undefined)}
-                className="rounded-md border border-zinc-300 px-3 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                browse
-              </button>
             </div>
 
             {repoHint && (
@@ -219,55 +200,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                   </button>
                 )}
               </p>
-            )}
-
-            {browsing && browse && (
-              <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800">
-                <div className="flex items-center justify-between border-b border-zinc-200 px-2 py-1 text-[11px] dark:border-zinc-800">
-                  <span className="truncate font-mono">{browse.path}</span>
-                  <span className="flex gap-2">
-                    {browse.parent && (
-                      <button
-                        type="button"
-                        onClick={() => void openBrowse(browse.parent ?? undefined)}
-                        className="text-zinc-500 hover:underline"
-                      >
-                        up
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setBrowsing(false)}
-                      className="text-zinc-500 hover:underline"
-                    >
-                      done
-                    </button>
-                  </span>
-                </div>
-                <ul>
-                  {browse.entries.map((entry) => (
-                    <li key={entry.path}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (entry.isRepo) {
-                            setCwd(entry.path);
-                            setBrowsing(false);
-                          } else {
-                            void openBrowse(entry.path);
-                          }
-                        }}
-                        className="flex w-full items-center gap-2 px-2 py-1 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      >
-                        <span className={entry.isRepo ? 'text-emerald-500' : 'text-zinc-400'}>
-                          {entry.isRepo ? '◆' : '▸'}
-                        </span>
-                        <span className="truncate">{entry.name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
             )}
 
             <div className="mt-3">

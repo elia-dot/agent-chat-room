@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { api } from '../api/client.js';
+import { FolderPickerButton } from './FolderPickerButton.js';
 
 export interface AdditionalDirsEditorProps {
   value: string[];
@@ -96,14 +97,12 @@ export function AdditionalDirsEditor({
           Add
         </button>
         {nativePicker && (
-          <button
-            type="button"
+          <FolderPickerButton
             disabled={disabled || picking}
             onClick={() => void choose()}
-            className="rounded border border-zinc-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-zinc-700"
-          >
-            {picking ? 'Choosing…' : 'Choose…'}
-          </button>
+            picking={picking}
+            label="Choose additional folder"
+          />
         )}
       </div>
       {error && <p className="text-[11px] text-rose-600 dark:text-rose-400">{error}</p>}
