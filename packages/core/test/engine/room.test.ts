@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -279,6 +279,64 @@ describe('RoomEngine, the build-review loop', () => {
     expect(outcome.state).toBe('needs-you');
     expect(outcome.error).toContain('the runtime fell over');
     expect(store.listTurns(engine.room.id)).toHaveLength(1);
+  });
+
+  it('runs setup hooks on round 0 and testCommand gatekeeper between worker and reviewer', async () => {
+    const dir = repo();
+    writeFileSync(
+      join(dir, '.acr.json'),
+      JSON.stringify({
+        setup: ['node -e "process.stdout.write(\'setup ok\')"'],
+        testCommand: 'node -e "process.stdout.write(\'gatekeeper tests passed\')"',
+      }),
+    );
+    script([
+      workerTurn(1, 'Swapped operator.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    const outcome = await engine.run();
+
+    expect(outcome.approved).toBe(true);
+    const msgs = store.listMessages(engine.room.id);
+    expect(
+      msgs.some((m) => m.kind === 'system' && m.text.includes('[setup] completed all steps')),
+    ).toBe(true);
+    expect(msgs.some((m) => m.kind === 'system' && m.text.includes('[test runner]'))).toBe(true);
+
+    const revReq = requests.find((r) => r.role === 'reviewer');
+    expect(revReq).toBeDefined();
+    expect(revReq!.prompt).toContain('## Test Results');
+    expect(revReq!.prompt).toContain('gatekeeper tests passed');
+  });
+
+  it('halts in needs-you when setup fails and does not mark setup completed', async () => {
+    const dir = repo();
+    writeFileSync(
+      join(dir, '.acr.json'),
+      JSON.stringify({
+        setup: ['node -e "process.exit(1)"'],
+      }),
+    );
+    script([
+      workerTurn(1, 'Swapped operator.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+
+    const engine = await open(dir);
+    const outcome = await engine.run();
+
+    expect(outcome.state).toBe('needs-you');
+    expect(outcome.approved).toBe(false);
+    const msgs = store.listMessages(engine.room.id);
+    expect(
+      msgs.some((m) => m.kind === 'system' && m.text.includes('[setup] completed all steps')),
+    ).toBe(false);
+    expect(
+      msgs.some((m) => m.kind === 'system' && m.text.includes('failed with exit code 1')),
+    ).toBe(true);
+    expect(requests).toHaveLength(0);
   });
 
   it('refuses a roster where a reviewer could write', async () => {

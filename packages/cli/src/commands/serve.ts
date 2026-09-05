@@ -33,11 +33,12 @@ export async function serve(opts: ServeOptions = {}): Promise<ExitCode> {
     ...(opts.port === undefined ? {} : { port: opts.port, portAttempts: 0 }),
   });
 
-  r.info(`agent chat room is on ${server.url}`);
+  const displayUrl = server.urlWithToken ?? server.url;
+  r.info(`agent chat room is on ${displayUrl}`);
   r.info('nothing listens on the network: the server is bound to 127.0.0.1 only.');
   r.info('Ctrl-C to stop. Rooms keep running as long as this process does.');
 
-  if (opts.open !== false) (opts.openBrowser ?? openBrowser)(server.url);
+  if (opts.open !== false) (opts.openBrowser ?? openBrowser)(displayUrl);
   if (opts.detach) return EXIT.ok;
 
   await waitForSignal(server, r);

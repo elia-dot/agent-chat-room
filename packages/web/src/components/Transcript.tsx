@@ -29,6 +29,8 @@ export function Transcript({ view, onOpenDiff }: TranscriptProps): React.ReactEl
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
+  const basePath = view.room?.worktreePath ?? view.room?.repoRoot;
+
   return (
     <div ref={container} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl divide-y divide-zinc-100 dark:divide-zinc-900">
@@ -39,6 +41,7 @@ export function Transcript({ view, onOpenDiff }: TranscriptProps): React.ReactEl
             <PersistedMessage
               key={message.id}
               message={message}
+              basePath={basePath}
               onOpenDiff={() => onOpenDiff(message.id)}
             />
           ),
@@ -52,6 +55,7 @@ export function Transcript({ view, onOpenDiff }: TranscriptProps): React.ReactEl
             round={pending.round}
             text={pending.text}
             activity={pending.activity}
+            basePath={basePath}
             streaming
           />
         ))}

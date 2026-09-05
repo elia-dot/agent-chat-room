@@ -1,0 +1,6 @@
+agent-chat-room
+Copyright (c) 2026 agent-chat-room contributors
+
+This project includes ideas, architecture patterns, and CLI adapter designs
+clean-ported from Denly, reimagined as a pure TypeScript, local-first
+multi-agent coordination room.

@@ -93,4 +93,23 @@ describe('.acr.json', () => {
     expect(loaded.config.permissions).toBeUndefined();
     expect(loaded.warnings.length).toBeGreaterThan(0);
   });
+
+  it('accepts additional_dirs, setup, and testCommand', () => {
+    const loaded = loadRepoConfig(
+      repoWith({
+        additional_dirs: ['/extra/path'],
+        setup: ['npm ci'],
+        testCommand: 'npm test',
+      }),
+    );
+    expect(loaded.warnings).toEqual([]);
+    expect(loaded.config.additional_dirs).toEqual(['/extra/path']);
+    expect(loaded.config.setup).toEqual(['npm ci']);
+    expect(loaded.config.testCommand).toBe('npm test');
+
+    const settings = resolveRoomDefaults(loaded.config);
+    expect(settings.additional_dirs).toEqual(['/extra/path']);
+    expect(settings.setup).toEqual(['npm ci']);
+    expect(settings.testCommand).toBe('npm test');
+  });
 });

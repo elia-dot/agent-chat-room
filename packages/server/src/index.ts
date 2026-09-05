@@ -16,6 +16,13 @@ export type {
   PickResult,
 } from './picker.js';
 export { NotFoundError } from './errors.js';
-export { isLocalOrigin, isLoopbackHost, isAllowed } from './security.js';
+export {
+  isLocalOrigin,
+  isLoopbackHost,
+  isAllowed,
+  validateCapabilityToken,
+  extractToken,
+  getOrCreateServerToken,
+} from './security.js';
 export type { ClientFrame, ServerFrame } from './ws.js';
 export type { BrowseEntry, BrowseResult, PickResponse } from './routes/repos.js';

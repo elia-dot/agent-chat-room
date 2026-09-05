@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
+import { which } from '../detect.js';
 import { TurnLog } from '../turnLog.js';
 import type { EventSink, TurnHandle, TurnParser, TurnResult } from '../types.js';
 import { LineSplitter } from './lines.js';
@@ -77,10 +78,13 @@ export function runTurn(opts: RunTurnOptions): TurnHandle {
     throw new TypeError('runTurn: argv must contain at least the binary name');
   }
 
-  const child = spawn(bin, args, {
+  const resolvedBin = which(bin, opts.env ?? process.env) ?? bin;
+
+  const child = spawn(resolvedBin, args, {
     cwd: opts.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
+    detached: true,
     env: opts.env ?? process.env,
     windowsHide: true,
   });
@@ -94,11 +98,7 @@ export function runTurn(opts: RunTurnOptions): TurnHandle {
 
   const hardKill = (): void => {
     killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // Already gone.
-      }
+      killProcessTree(child, 'SIGKILL');
     }, exitGraceMs);
     killTimer.unref?.();
   };
@@ -107,11 +107,7 @@ export function runTurn(opts: RunTurnOptions): TurnHandle {
     if (settled) return;
     if (reason === 'timeout') timedOut = true;
     else cancelled = true;
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      // Already gone.
-    }
+    killProcessTree(child, 'SIGTERM');
     hardKill();
   };
 
@@ -168,11 +164,7 @@ export function runTurn(opts: RunTurnOptions): TurnHandle {
     if (settled) return;
     settled = true;
     clearTimers();
-    try {
-      child.kill();
-    } catch {
-      // Already gone; kill() here is the belt to the `close` handler's braces.
-    }
+    killProcessTree(child, 'SIGKILL');
     try {
       opts.cleanup?.();
     } catch {
@@ -220,6 +212,48 @@ export function runTurn(opts: RunTurnOptions): TurnHandle {
     },
     done,
   };
+}
+
+export function killProcessTree(
+  target:
+    | { pid?: number; killed?: boolean; kill?: (signal?: NodeJS.Signals) => boolean }
+    | number
+    | undefined,
+  signal: NodeJS.Signals = 'SIGTERM',
+): void {
+  if (!target) return;
+  const pid = typeof target === 'number' ? target : target.pid;
+  const isKilled = typeof target === 'object' && target.killed;
+  if (!pid || isKilled) return;
+
+  const fallbackKill = () => {
+    try {
+      if (typeof target === 'object' && typeof target.kill === 'function') {
+        target.kill(signal);
+      } else {
+        process.kill(pid, signal);
+      }
+    } catch {
+      // Already gone.
+    }
+  };
+
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } catch {
+      fallbackKill();
+    }
+  } else {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      fallbackKill();
+    }
+  }
 }
 
 function errText(err: unknown): string {

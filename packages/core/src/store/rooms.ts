@@ -192,12 +192,18 @@ export class RoomStore {
       where.push('repo_root = ?');
       params.push(opts.repoRoot);
     }
-    if (opts.open) where.push('closed_at IS NULL');
+    if (opts.open !== undefined) {
+      where.push(opts.open ? 'closed_at IS NULL' : 'closed_at IS NOT NULL');
+    }
     const sql =
       `SELECT * FROM rooms${where.length ? ` WHERE ${where.join(' AND ')}` : ''}` +
       ` ORDER BY updated_at DESC${opts.limit ? ' LIMIT ?' : ''}`;
     if (opts.limit) params.push(opts.limit);
     return (this.db.prepare(sql).all(...params) as Row[]).map(toRoom);
+  }
+
+  purgeRoom(id: string): void {
+    this.deleteRoom(id);
   }
 
   updateRoom(

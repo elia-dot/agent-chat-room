@@ -1,7 +1,17 @@
 #!/usr/bin/env node
-import { main } from './main.js';
+import { register } from 'node:module';
 
-main(process.argv.slice(2))
+try {
+  register(new URL('./loader.js', import.meta.url), import.meta.url);
+} catch (err) {
+  if (process.env.DEBUG || process.env.ACR_DEBUG) {
+    process.stderr.write(`acr: warning: failed to register module loader: ${String(err)}\n`);
+  }
+}
+
+const { main } = await import('./main.js');
+
+void main(process.argv.slice(2))
   .then((code) => {
     process.exitCode = code;
   })

@@ -22,6 +22,11 @@ export function turnLogPath(turnId: string): string {
   return join(turnsDir(), `${turnId}.jsonl`);
 }
 
+/** Capability token for server authentication. Mode 0600. */
+export function serverTokenPath(): string {
+  return join(configDir(), 'server.token');
+}
+
 /** The single SQLite file that holds every room. Migrated forward only. */
 export function dbPath(): string {
   return join(configDir(), 'acr.db');

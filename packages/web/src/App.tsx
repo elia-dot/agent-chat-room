@@ -266,6 +266,13 @@ export function App(): React.ReactElement {
           onContinue={() => void act(() => api.start(room.id))}
           onStop={() => void act(() => api.stop(room.id))}
           onCloseRoom={() => void act(() => api.close(room.id))}
+          onPurgeRoom={() =>
+            void act(async () => {
+              await api.purgeRoom(room.id);
+              await refreshRooms();
+              setSelected(null);
+            })
+          }
           onRaiseRounds={(rounds) =>
             void act(async () => {
               await api.patchRoom(room.id, { maxRounds: rounds });

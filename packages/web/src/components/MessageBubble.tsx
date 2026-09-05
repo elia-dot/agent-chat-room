@@ -13,6 +13,7 @@ export interface BubbleProps {
   text: string;
   activity: TurnEvent[];
   verdict?: Verdict | null;
+  basePath?: string;
   /** Set when the message has a diff to open in the right panel. */
   onOpenDiff?: () => void;
   diffLabel?: string;
@@ -26,7 +27,7 @@ export interface BubbleProps {
  * so the decision is stated once, next to the blocking items and nits it explains.
  */
 export function MessageBubble(props: BubbleProps): React.ReactElement {
-  const { author, role, round, text, activity, verdict, streaming } = props;
+  const { author, role, round, text, activity, verdict, basePath, streaming } = props;
   // The reviewer's ```verdict block is lifted out of the prose and rendered as a card:
   // as markdown it is a sideways-scrolling box repeating what the pill already says.
   const display = verdictForDisplay({ text, role, verdict });
@@ -51,7 +52,7 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
         </header>
 
         {display.body ? (
-          <Markdown text={display.body} />
+          <Markdown text={display.body} basePath={basePath} />
         ) : (
           // A review whose whole reply is the fence has no prose – the card stands alone.
           !display.verdict && streaming && <p className="text-sm text-zinc-500">…</p>
@@ -61,6 +62,7 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
           verdict={display.verdict}
           rawBlocks={display.rawBlocks}
           unreadable={display.unreadable}
+          basePath={basePath}
         />
 
         <div className="mt-1.5 flex flex-wrap items-center gap-3">
@@ -83,9 +85,11 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
 /** Same message, but from a persisted row rather than a streaming buffer. */
 export function PersistedMessage({
   message,
+  basePath,
   onOpenDiff,
 }: {
   message: Message;
+  basePath?: string;
   onOpenDiff?: () => void;
 }): React.ReactElement {
   const hasDiff = message.diff !== null || message.diffPath !== null;
@@ -97,6 +101,7 @@ export function PersistedMessage({
       text={message.text}
       activity={message.activity}
       verdict={message.verdict}
+      basePath={basePath}
       {...(hasDiff && onOpenDiff ? { onOpenDiff } : {})}
     />
   );

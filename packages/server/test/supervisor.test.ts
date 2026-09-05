@@ -284,4 +284,22 @@ describe('RoomSupervisor', () => {
     expect(await s.open(id)).not.toBe(engine);
     await expect(s.start(id)).rejects.toThrow(/is closed/);
   });
+
+  it('purges a room and refuses to purge a running room', async () => {
+    const s = supervisor();
+    const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
+    const id = engine.room.id;
+
+    // Simulate running
+    (s as unknown as { rooms: Map<string, { running?: Promise<unknown> }> })
+      .rooms.get(id)!.running = Promise.resolve();
+    await expect(s.purge(id)).rejects.toThrow(/is running/);
+
+    // Clear running and purge
+    (s as unknown as { rooms: Map<string, { running?: Promise<unknown> }> })
+      .rooms.get(id)!.running = undefined;
+    const res = await s.purge(id);
+    expect(res).toBeDefined();
+    expect(store.findRoom(id)).toBeUndefined();
+  });
 });

@@ -40,6 +40,8 @@ export interface BuildTurnPromptInput {
   roleChanged?: string;
   /** Brainstorm phase, passed through to `roleInstructions`. */
   phase?: BrainstormPhase;
+  /** Test runner output to inject into reviewer prompts. */
+  testResults?: string;
 }
 
 export const DEFAULT_MAX_INLINE_DIFF_BYTES = 60 * 1024;
@@ -105,6 +107,12 @@ export function buildTurnPrompt(input: BuildTurnPromptInput): string {
         );
       }
     }
+  }
+
+  if (input.testResults?.trim()) {
+    parts.push('');
+    parts.push('## Test Results');
+    parts.push(input.testResults.trim());
   }
 
   if (input.roleChanged?.trim()) {
