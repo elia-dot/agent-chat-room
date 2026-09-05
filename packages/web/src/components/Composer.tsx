@@ -8,6 +8,8 @@ export interface ComposerProps {
   participants: Participant[];
   running: boolean;
   busy: boolean;
+  /** Set when the socket is down: the room cannot be driven, and the composer says so. */
+  offline?: boolean;
   onSend: (text: string, mention: string | null) => void;
   onPause: () => void;
   onContinue: () => void;
@@ -15,15 +17,19 @@ export interface ComposerProps {
 }
 
 /**
- * PLAN.md section 5.3: a textarea, `@runtime` autocomplete, Enter to send, and the
- * pause/continue/stop buttons. Sending holds the loop and routes the next turn to the
- * mention – the engine does that part; this only has to say who was named.
+ * The composer, and the one band above it that says what the room wants.
+ *
+ * A room parked in `needs-you` used to look exactly like a room sitting idle: same grey
+ * hint, same enabled buttons. The design gives that state an amber band naming the three
+ * real choices, because "the room is waiting for you" is the only message on this screen
+ * that is addressed to the human rather than about the agents.
  */
 export function Composer({
   room,
   participants,
   running,
   busy,
+  offline = false,
   onSend,
   onPause,
   onContinue,
@@ -81,89 +87,123 @@ export function Composer({
 
   const closed = room.closedAt !== null;
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
+  const approved = room.state === 'approved';
+  const needsYou = room.state === 'needs-you' && !completedBrainstorm;
+  const locked = closed || offline;
 
   return (
-    <div className="border-t border-zinc-200 dark:border-zinc-800">
-      <div className="relative mx-auto max-w-3xl p-3">
-        {suggestions.length > 0 && (
-          <ul className="absolute bottom-full left-3 mb-1 min-w-40 overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            {suggestions.map((runtime, i) => (
-              <li key={runtime}>
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    complete(runtime);
-                  }}
-                  className={`block w-full px-3 py-1.5 text-left text-sm ${
-                    i === highlight % suggestions.length
-                      ? 'bg-zinc-100 dark:bg-zinc-800'
-                      : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                  }`}
-                >
-                  @{runtime}
-                </button>
-              </li>
-            ))}
-          </ul>
+    <div className="shrink-0 border-t border-line bg-surface">
+      <div className="mx-auto flex w-full max-w-[940px] flex-col gap-2.5 px-5 py-3">
+        {needsYou && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-question-line bg-question-bg px-3 py-2">
+            <span className="font-mono text-[11px] tracking-[0.1em] text-question">NEEDS YOU</span>
+            <span className="h-3.5 w-px bg-question-line" />
+            <span className="text-[13px] text-ink-soft">
+              The room stopped and is waiting. Answer below, continue as it stands, or stop the
+              room.
+            </span>
+          </div>
         )}
 
-        <textarea
-          ref={input}
-          value={value}
-          rows={2}
-          disabled={closed}
-          placeholder={
-            closed
-              ? 'This room is closed.'
-              : `Message the room…  ${runtimes.map((r) => `@${r}`).join(' ')}`
-          }
-          onChange={(e) => {
-            setValue(e.target.value);
-            setCaret(e.target.selectionStart);
-            setHighlight(0);
-          }}
-          onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
-          onClick={(e) => setCaret(e.currentTarget.selectionStart)}
-          onKeyDown={onKeyDown}
-          className="w-full resize-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
-        />
+        {approved && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-approve-line bg-approve-bg px-3 py-2">
+            <span className="font-mono text-[11px] tracking-[0.1em] text-approve">FINISHED</span>
+            <span className="h-3.5 w-px bg-approve-line" />
+            <span className="text-[13px] text-ink-soft">
+              Every reviewer approved and the round is committed. Name an agent with @ to reopen the
+              room and ask for one more turn.
+            </span>
+          </div>
+        )}
 
-        <div className="mt-2 flex items-center gap-2">
-          <div className="flex-1 text-xs text-zinc-500">
+        <div className="relative">
+          {suggestions.length > 0 && (
+            <ul className="absolute bottom-full left-0 mb-1.5 min-w-44 overflow-hidden rounded-md border border-line bg-ground shadow-xl">
+              {suggestions.map((runtime, i) => (
+                <li key={runtime}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      complete(runtime);
+                    }}
+                    className={`block w-full px-3 py-1.5 text-left font-mono text-[12px] ${
+                      i === highlight % suggestions.length
+                        ? 'bg-raised text-ink'
+                        : 'text-ink-dim hover:bg-raised'
+                    }`}
+                  >
+                    @{runtime}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex items-start gap-2.5 rounded-md border border-line bg-ground px-3 py-2.5 focus-within:border-line-strong">
+            <span className="pt-0.5 font-mono text-[13px] text-ink-faint">›</span>
+            <textarea
+              ref={input}
+              value={value}
+              rows={2}
+              disabled={locked}
+              placeholder={
+                closed
+                  ? 'This room is closed.'
+                  : offline
+                    ? 'Disconnected — reconnect to send.'
+                    : `Message the room…  ${runtimes.map((r) => `@${r}`).join(' ')}`
+              }
+              onChange={(e) => {
+                setValue(e.target.value);
+                setCaret(e.target.selectionStart);
+                setHighlight(0);
+              }}
+              onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+              onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+              onKeyDown={onKeyDown}
+              className="min-w-0 flex-1 resize-none bg-transparent text-[14px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
+            />
+            <span className="shrink-0 pt-0.5 font-mono text-[11px] text-ink-faint">
+              ↵ send · ⇧↵ newline
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint">
             {parsed.mention ? (
               <>
-                next turn: <b>{parsed.mention}</b>
+                next turn: <span className="text-ink">{parsed.mention}</span>
               </>
+            ) : offline ? (
+              'the room keeps working — this browser is what lost the connection'
+            ) : completedBrainstorm ? (
+              'send feedback to revise via the moderator'
+            ) : running ? (
+              'interject any time — the room keeps working'
             ) : (
-              <>
-                {completedBrainstorm
-                  ? 'Send feedback to revise via the moderator · '
-                  : room.state === 'approved'
-                    ? 'This room is finished · @mention an agent to reopen it · '
-                    : 'Enter to send · '}
-                Shift+Enter for a newline
-              </>
+              'interject any time — the room keeps working'
             )}
-          </div>
+          </span>
 
           {running ? (
-            <Button onClick={onPause} disabled={busy}>
-              Pause
+            <Button onClick={onPause} disabled={busy || offline}>
+              pause
             </Button>
           ) : (
             <Button
               onClick={onContinue}
-              disabled={busy || closed || room.state === 'approved' || completedBrainstorm}
+              disabled={busy || locked || approved || completedBrainstorm}
             >
-              {room.paused || room.state === 'idle' ? 'Continue' : 'Start'}
+              {room.paused || room.state === 'idle' ? 'continue' : 'start'}
             </Button>
           )}
-          <Button onClick={onStop} disabled={busy || !running}>
-            Stop
+          <Button onClick={onStop} disabled={busy || !running || offline} tone="danger">
+            stop
           </Button>
-          <Button primary onClick={send} disabled={busy || closed || !parsed.text}>
-            Send
+          <Button primary onClick={send} disabled={busy || locked || !parsed.text}>
+            send
           </Button>
         </div>
       </div>
@@ -176,22 +216,25 @@ function Button({
   onClick,
   disabled,
   primary,
+  tone,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   primary?: boolean;
+  tone?: 'danger';
 }): React.ReactElement {
+  const style = primary
+    ? 'bg-ink text-ground font-medium'
+    : tone === 'danger'
+      ? 'border border-changes-line text-changes hover:bg-changes-bg'
+      : 'border border-line text-ink-dim hover:border-line-strong hover:text-ink';
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-        primary
-          ? 'bg-sky-600 text-white hover:bg-sky-500'
-          : 'border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800'
-      }`}
+      className={`shrink-0 rounded px-3 py-1.5 font-mono text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40 ${style}`}
     >
       {children}
     </button>

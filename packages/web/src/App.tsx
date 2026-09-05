@@ -3,17 +3,22 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 
 import type { ChangedFiles, CreateRoomRequest } from './api/client.js';
 import { api } from './api/client.js';
-import type { ConnectionState } from './api/socket.js';
+import type { ConnectionState, SocketDiagnostics } from './api/socket.js';
 import { RoomSocket } from './api/socket.js';
+import { ActionsOverlay } from './components/ActionsOverlay.js';
+import type { LiveTurn } from './components/CommandBar.js';
+import { CommandBar } from './components/CommandBar.js';
 import { Composer } from './components/Composer.js';
+import { DisconnectedPanel } from './components/DisconnectedPanel.js';
 import { DoctorPage } from './components/DoctorPage.js';
 import { NewRoomDialog } from './components/NewRoomDialog.js';
-import { RightPanel } from './components/RightPanel.js';
-import { RoomsSidebar } from './components/RoomsSidebar.js';
-import { StatusDot } from './components/StatusDot.js';
+import { RoomOverlay } from './components/RoomOverlay.js';
+import { EmptyState, RoomsOverlay } from './components/RoomsOverlay.js';
+import { RoundStrip } from './components/RoundStrip.js';
 import { Transcript } from './components/Transcript.js';
-import { stateLabel } from './lib/format.js';
+import { agentTints, duration } from './lib/format.js';
 import { byRuntime } from './lib/models.js';
+import { reviewsIn, summariseRounds } from './lib/rounds.js';
 import type { IncomingFrame } from './state/roomStore.js';
 import { RoomStoreClient } from './state/roomStore.js';
 
@@ -23,6 +28,8 @@ interface DiffState {
   loading: boolean;
 }
 
+type Sheet = 'rooms' | 'room' | 'actions' | null;
+
 export function App(): React.ReactElement {
   const store = useMemo(() => new RoomStoreClient(), []);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -31,17 +38,22 @@ export function App(): React.ReactElement {
   const [selected, setSelected] = useState<string | null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [connection, setConnection] = useState<ConnectionState>('connecting');
+  const [diagnostics, setDiagnostics] = useState<SocketDiagnostics | null>(null);
   const [files, setFiles] = useState<ChangedFiles | null>(null);
   const [gh, setGh] = useState<Detection | null>(null);
   const [catalogs, setCatalogs] = useState<Record<string, ModelCatalog>>({});
   const [diff, setDiff] = useState<DiffState | null>(null);
+  const [sheet, setSheet] = useState<Sheet>(null);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [showDoctor, setShowDoctor] = useState(false);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Things worth saying that are not failures – an unrecognised model, so far. */
   const [notice, setNotice] = useState<string | null>(null);
   const [dark, setDark] = useState(prefersDark);
+  /** Ticks once a second, only to keep the live turn's elapsed clock honest. */
+  const [now, setNow] = useState(() => Date.now());
 
   const socketRef = useRef<RoomSocket | null>(null);
   const onFrameRef = useRef<(frame: IncomingFrame) => void>(() => undefined);
@@ -63,8 +75,7 @@ export function App(): React.ReactElement {
     onFrameRef.current = (frame) => {
       store.apply(frame);
       if (frame.type !== 'message.done' && frame.type !== 'room.state') return;
-      // The sidebar reads the room list, and a finished turn changes a room's state, its
-      // round and its place in "most recently updated".
+      // The rooms list and the round strip both move when a turn lands.
       void refreshRooms();
       if (frame.type === 'message.done' && frame.roomId !== selected) {
         setUnread((u) => ({ ...u, [frame.roomId]: (u[frame.roomId] ?? 0) + 1 }));
@@ -77,6 +88,7 @@ export function App(): React.ReactElement {
   useEffect(() => {
     const socket = new RoomSocket({
       onState: setConnection,
+      onDiagnostics: setDiagnostics,
       onFrame: (frame) => onFrameRef.current(frame),
       onReconnect: (roomId) => onReconnectRef.current(roomId),
     });
@@ -118,6 +130,19 @@ export function App(): React.ReactElement {
     document.title = waiting > 0 ? `(${waiting}) agent chat room` : 'agent chat room';
   }, [rooms]);
 
+  const room = view.room;
+  const live = view.pending.length > 0;
+  const offline = connection !== 'open';
+
+  // One clock for the whole app, held in state so nothing reads the wall clock while
+  // rendering. It only needs to be accurate to the second while a turn is streaming; the
+  // room's age moves slowly enough for half a minute.
+  useEffect(() => {
+    const counting = live || offline;
+    const id = setInterval(() => setNow(Date.now()), counting ? 1000 : 30_000);
+    return () => clearInterval(id);
+  }, [live, offline]);
+
   /**
    * Selecting a room is an event, not a synchronisation: clearing the old room's diff and
    * files belongs here rather than in an effect keyed on `selected`.
@@ -128,6 +153,7 @@ export function App(): React.ReactElement {
       setSelected(id);
       setDiff(null);
       setFiles(null);
+      setCollapsed(new Set());
       setUnread((u) => ({ ...u, [id]: 0 }));
       store.reset();
       socketRef.current?.subscribe(id);
@@ -136,7 +162,31 @@ export function App(): React.ReactElement {
     [store, refreshFiles],
   );
 
-  const room = view.room;
+  // The shortcuts the command bar advertises. A bar that prints ⌘K and does nothing when
+  // you press it is worse than a bar with no hint at all.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const typing =
+        event.target instanceof HTMLElement &&
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName);
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setSheet((s) => (s === 'rooms' ? null : 'rooms'));
+        return;
+      }
+      if (!event.altKey || typing) return;
+      const key = event.key.toLowerCase();
+      if (key === 'r' && room) {
+        event.preventDefault();
+        setSheet((s) => (s === 'room' ? null : 'room'));
+      } else if (key === 'a' && room) {
+        event.preventDefault();
+        setSheet((s) => (s === 'actions' ? null : 'actions'));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [room]);
 
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true);
@@ -173,69 +223,96 @@ export function App(): React.ReactElement {
     selectRoom(created.room.id);
   };
 
+  const tints = useMemo(
+    () => agentTints(view.participants.map((p) => p.runtime)),
+    [view.participants],
+  );
+
+  const rounds = useMemo(
+    () => summariseRounds(view.messages, room?.round ?? 0, view.running || live),
+    [view.messages, room?.round, view.running, live],
+  );
+
+  const reviewers = view.participants.filter((p) => p.role === 'reviewer').length;
+  const pending = view.pending[0];
+  const liveTurn: LiveTurn | null = pending
+    ? {
+        author: pending.author,
+        action: pending.role === 'reviewer' ? 'reviewing' : 'writing',
+        elapsed: elapsedOf(view.turns, pending.author, now),
+      }
+    : null;
+
   return (
-    <div className="flex h-full bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
-      <RoomsSidebar
-        rooms={rooms}
-        selectedId={selected}
-        unread={unread}
+    <div className="flex h-full flex-col bg-ground text-ink">
+      <CommandBar
+        room={showDoctor ? null : room}
+        participants={showDoctor ? [] : view.participants}
+        tints={tints}
+        roomCount={rooms.filter((r) => !r.closedAt).length}
         connection={connection}
-        onSelect={selectRoom}
-        onNewRoom={() => setShowNewRoom(true)}
-        onDoctor={() => setShowDoctor(true)}
+        live={liveTurn}
+        dark={dark}
+        onRooms={() => setSheet((s) => (s === 'rooms' ? null : 'rooms'))}
+        onRoomOverlay={() => setSheet((s) => (s === 'room' ? null : 'room'))}
+        onActions={() => setSheet((s) => (s === 'actions' ? null : 'actions'))}
+        onToggleTheme={() => setDark((d) => !d)}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
-          {room && !showDoctor ? (
-            <>
-              <StatusDot state={room.state} paused={room.paused} />
-              <h2 className="min-w-0 flex-1 truncate font-medium"># {room.title}</h2>
-              <span className="text-xs text-zinc-500">
-                {stateLabel(room.state, room.paused, room.mode)} · round {room.round}
-                {room.mode === 'brainstorm' ? `/${room.maxRounds}` : ''}
-              </span>
-            </>
-          ) : (
-            <h2 className="flex-1 font-medium">{showDoctor ? 'Doctor' : 'agent chat room'}</h2>
-          )}
-          <button
-            type="button"
-            onClick={() => setDark((d) => !d)}
-            className="text-xs text-zinc-500 hover:underline"
-          >
-            {dark ? 'light' : 'dark'}
-          </button>
-        </header>
+      {room && !showDoctor && rounds.length > 0 && (
+        <RoundStrip
+          rounds={rounds}
+          current={room.round}
+          progress={reviewsIn(rounds, room.round, reviewers)}
+          age={duration(now - Date.parse(room.createdAt))}
+          collapsed={collapsed.size > 0}
+          onJump={(round) =>
+            document.getElementById(`round-${round}`)?.scrollIntoView({ block: 'start' })
+          }
+          onToggleCollapse={() =>
+            setCollapsed((current) =>
+              current.size > 0 ? new Set() : new Set(rounds.map((r) => r.round)),
+            )
+          }
+        />
+      )}
 
-        {error && (
-          <div className="flex items-center gap-2 bg-rose-500/10 px-4 py-1.5 text-xs text-rose-700 dark:text-rose-400">
-            <span className="flex-1">{error}</span>
-            <button type="button" onClick={() => setError(null)} className="hover:underline">
-              dismiss
-            </button>
-          </div>
-        )}
+      {error && (
+        <Banner tone="changes" onDismiss={() => setError(null)}>
+          {error}
+        </Banner>
+      )}
+      {notice && (
+        <Banner tone="question" onDismiss={() => setNotice(null)}>
+          {notice}
+        </Banner>
+      )}
 
-        {notice && (
-          <div className="flex items-center gap-2 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-            <span className="flex-1">{notice}</span>
-            <button type="button" onClick={() => setNotice(null)} className="hover:underline">
-              dismiss
-            </button>
-          </div>
-        )}
-
+      <div className="relative flex min-h-0 flex-1 flex-col">
         {showDoctor ? (
           <DoctorPage onClose={() => setShowDoctor(false)} />
         ) : room ? (
           <>
-            <Transcript view={view} onOpenDiff={openDiff} />
+            <Transcript
+              view={view}
+              tints={tints}
+              collapsed={collapsed}
+              onToggleRound={(round) =>
+                setCollapsed((current) => {
+                  const next = new Set(current);
+                  if (next.has(round)) next.delete(round);
+                  else next.add(round);
+                  return next;
+                })
+              }
+              onOpenDiff={openDiff}
+            />
             <Composer
               room={room}
               participants={view.participants}
               running={view.running}
               busy={busy}
+              offline={offline}
               // Posting holds the loop on purpose (PLAN.md section 3: "You can interrupt any
               // time"), so continuing is a separate, deliberate click.
               onSend={(text, mention) =>
@@ -247,32 +324,48 @@ export function App(): React.ReactElement {
             />
           </>
         ) : (
-          <Empty onNewRoom={() => setShowNewRoom(true)} />
+          <EmptyState
+            onNewRoom={() => setShowNewRoom(true)}
+            onRooms={() => setSheet('rooms')}
+            hasRooms={rooms.length > 0}
+          />
         )}
-      </main>
 
-      {room && !showDoctor && (
-        <RightPanel
+        {/* The transcript stays visible behind this: the last state received is still true. */}
+        {offline && diagnostics && (
+          <DisconnectedPanel
+            diagnostics={diagnostics}
+            now={now}
+            {...(liveTurn ? { context: `${liveTurn.author}'s turn may still be running` } : {})}
+            onRetry={() => socketRef.current?.retryNow()}
+          />
+        )}
+      </div>
+
+      {sheet === 'rooms' && (
+        <RoomsOverlay
+          rooms={rooms}
+          selectedId={selected}
+          unread={unread}
+          onSelect={selectRoom}
+          onNewRoom={() => setShowNewRoom(true)}
+          onDoctor={() => setShowDoctor(true)}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {room && (sheet === 'room' || diff) && (
+        <RoomOverlay
           room={room}
           participants={view.participants}
+          tints={tints}
           turns={view.turns}
           files={files}
           diff={diff}
           busy={busy}
-          gh={gh}
           catalogs={catalogs}
+          onClose={() => setSheet(null)}
           onCloseDiff={() => setDiff(null)}
-          onPause={() => void act(() => api.pause(room.id))}
-          onContinue={() => void act(() => api.start(room.id))}
-          onStop={() => void act(() => api.stop(room.id))}
-          onCloseRoom={() => void act(() => api.close(room.id))}
-          onPurgeRoom={() =>
-            void act(async () => {
-              await api.purgeRoom(room.id);
-              await refreshRooms();
-              setSelected(null);
-            })
-          }
           onSetAdditionalDirs={(additionalDirs) =>
             void act(async () => {
               const { room: updated } = await api.patchRoom(room.id, { additionalDirs });
@@ -287,6 +380,18 @@ export function App(): React.ReactElement {
               store.merge({ participants });
             })
           }
+        />
+      )}
+
+      {room && sheet === 'actions' && (
+        <ActionsOverlay
+          room={room}
+          busy={busy}
+          gh={gh}
+          onClose={() => setSheet(null)}
+          onPause={() => void act(() => api.pause(room.id))}
+          onContinue={() => void act(() => api.start(room.id))}
+          onStop={() => void act(() => api.stop(room.id))}
           onCommit={() => void act(() => api.commit(room.id))}
           onOpenPr={(remote) =>
             void act(async () => {
@@ -308,6 +413,20 @@ export function App(): React.ReactElement {
               selectRoom(created.room.id);
             })
           }
+          onCloseRoom={() =>
+            void act(async () => {
+              await api.close(room.id);
+              setSheet(null);
+            })
+          }
+          onPurgeRoom={() =>
+            void act(async () => {
+              await api.purgeRoom(room.id);
+              await refreshRooms();
+              setSelected(null);
+              setSheet(null);
+            })
+          }
         />
       )}
 
@@ -316,22 +435,40 @@ export function App(): React.ReactElement {
   );
 }
 
-function Empty({ onNewRoom }: { onNewRoom: () => void }): React.ReactElement {
+function Banner({
+  tone,
+  children,
+  onDismiss,
+}: {
+  tone: 'changes' | 'question';
+  children: React.ReactNode;
+  onDismiss: () => void;
+}): React.ReactElement {
+  const style =
+    tone === 'changes'
+      ? 'border-changes-line bg-changes-bg text-changes'
+      : 'border-question-line bg-question-bg text-question';
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <p className="max-w-sm text-sm text-zinc-500">
-        Pick a room on the left, or open a new one: you post a task, one agent builds, the others
-        review, and they iterate until they agree or you step in.
-      </p>
-      <button
-        type="button"
-        onClick={onNewRoom}
-        className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
-      >
-        New room
+    <div className={`flex shrink-0 items-center gap-3 border-b px-4 py-1.5 text-[12px] ${style}`}>
+      <span className="min-w-0 flex-1">{children}</span>
+      <button type="button" onClick={onDismiss} className="font-mono text-[11px] hover:underline">
+        dismiss
       </button>
     </div>
   );
+}
+
+/** `m:ss` since the named runtime's newest unfinished turn started. */
+function elapsedOf(
+  turns: { participantId: string; startedAt: string; endedAt: string | null }[],
+  _author: string,
+  now: number,
+): string {
+  const open = turns.filter((t) => !t.endedAt);
+  const started = open.length > 0 ? Date.parse(open[open.length - 1]!.startedAt) : NaN;
+  if (Number.isNaN(started)) return '0:00';
+  const seconds = Math.max(0, Math.round((now - started) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 function describe(err: unknown): string {

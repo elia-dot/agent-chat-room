@@ -51,6 +51,18 @@ export function splitVerdictBlocks(text: string): VerdictSplit {
   }
   body += text.slice(cursor);
 
+  // Some runtimes print the verdict object itself as the final line, with no fence around
+  // it. `parseVerdict` in core accepts that, so the body has to give it up here as well –
+  // otherwise the message shows the raw JSON and then repeats it as a card underneath.
+  if (blocks.length === 0) {
+    const lines = body.trimEnd().split('\n');
+    const last = lines[lines.length - 1]?.trim() ?? '';
+    if (last.startsWith('{') && last.endsWith('}') && readVerdict(last)) {
+      blocks.push(last);
+      body = lines.slice(0, -1).join('\n');
+    }
+  }
+
   const open = OPEN_FENCE_RE.exec(body);
   // Only when nothing else opened a fence after it – otherwise the tail belongs to some
   // other code block and is none of our business.

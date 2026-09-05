@@ -16,6 +16,12 @@ export interface VerdictCardProps {
 /**
  * A reviewer's verdict, rendered for a human rather than as the JSON it arrived as.
  *
+ * The design asks for a size difference, not just a colour one: an approval with nothing
+ * blocking digests to a single line, because it is good news that needs no action, while a
+ * verdict that asks something of you keeps the full pill and its blocking list. In a room
+ * where three reviewers approve every round, that is the difference between a transcript
+ * you can skim and three identical green cards per round.
+ *
  * Items go through `Markdown` because reviewers are told to cite `file:line` in backticks,
  * and a plain `<li>` would print the backticks. The raw block stays one click away: the
  * verdict is a contract, and being able to read the literal bytes is worth a collapsed row.
@@ -29,51 +35,80 @@ export function VerdictCard({
   const [open, setOpen] = useState(false);
   if (!verdict && !unreadable) return null;
 
+  const digest =
+    verdict?.decision === 'approve' && verdict.blocking.length === 0 && verdict.nits.length === 0;
+
+  if (digest) {
+    return (
+      <div className="mt-2 flex items-center gap-3">
+        <VerdictPill decision="approve" size="digest" />
+        {rawBlocks.length > 0 && <RawToggle open={open} onToggle={() => setOpen((v) => !v)} />}
+        {open && <Raw blocks={rawBlocks} />}
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-2 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+    <div className="mt-2.5 rounded-md border border-line bg-surface p-3">
       {verdict ? (
         <>
-          <VerdictPill decision={verdict.decision} />
+          <div className="flex">
+            <VerdictPill decision={verdict.decision} />
+          </div>
           <Section
             title="Blocking"
             items={verdict.blocking}
-            className="text-amber-700 dark:text-amber-400"
+            className="text-changes"
             basePath={basePath}
           />
-          <Section
-            title="Nits"
-            items={verdict.nits}
-            className="text-zinc-500 dark:text-zinc-400"
-            basePath={basePath}
-          />
+          <Section title="Nits" items={verdict.nits} className="text-ink-dim" basePath={basePath} />
         </>
       ) : (
-        <p className="text-xs text-amber-700 dark:text-amber-400">
-          verdict block could not be read
+        <p className="font-mono text-[11.5px] text-question">
+          verdict block could not be read — counted as not approved
         </p>
       )}
 
       {rawBlocks.length > 0 && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="text-xs text-zinc-500 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100"
-          >
-            {open ? '▾' : '▸'} raw
-          </button>
-          {open &&
-            rawBlocks.map((raw, i) => (
-              <pre
-                key={i}
-                className="mt-1 overflow-x-auto rounded bg-zinc-100 p-2 font-mono text-[11px] leading-snug dark:bg-zinc-900"
-              >
-                {pretty(raw)}
-              </pre>
-            ))}
+        <div className="mt-2.5">
+          <RawToggle open={open} onToggle={() => setOpen((v) => !v)} />
+          {open && <Raw blocks={rawBlocks} />}
         </div>
       )}
     </div>
+  );
+}
+
+function RawToggle({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="font-mono text-[11px] text-ink-faint hover:text-ink"
+    >
+      {open ? '▾' : '+'} raw
+    </button>
+  );
+}
+
+function Raw({ blocks }: { blocks: string[] }): React.ReactElement {
+  return (
+    <>
+      {blocks.map((raw, i) => (
+        <pre
+          key={i}
+          className="mt-1.5 overflow-x-auto rounded border border-line bg-raised p-2.5 font-mono text-[11px] leading-snug text-ink-soft"
+        >
+          {pretty(raw)}
+        </pre>
+      ))}
+    </>
   );
 }
 
@@ -90,13 +125,17 @@ function Section({
 }): React.ReactElement | null {
   if (items.length === 0) return null;
   return (
-    <div className="mt-2">
-      <h4 className={`text-[10px] font-semibold tracking-wide uppercase ${className}`}>{title}</h4>
-      <ul className="mt-1 space-y-1">
+    <div className="mt-2.5">
+      <h4 className={`font-mono text-[10px] font-medium tracking-[0.12em] uppercase ${className}`}>
+        {title}
+      </h4>
+      <ul className="mt-1.5 space-y-1.5">
         {items.map((item, i) => (
-          <li key={i} className={`flex gap-1.5 text-sm ${className}`}>
-            <span aria-hidden="true">•</span>
-            <div className="min-w-0 flex-1">
+          <li key={i} className="flex gap-2 text-[13.5px]">
+            <span aria-hidden="true" className={`select-none ${className}`}>
+              •
+            </span>
+            <div className="min-w-0 flex-1 text-ink-soft">
               <Markdown text={item} basePath={basePath} />
             </div>
           </li>

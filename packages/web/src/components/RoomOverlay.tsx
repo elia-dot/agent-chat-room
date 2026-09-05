@@ -1,0 +1,290 @@
+import type { ModelCatalog, Participant, Role, Room, TurnRecord } from '@agent-chat-room/core';
+import { useState } from 'react';
+
+import type { ChangedFiles } from '../api/client.js';
+import type { AgentTint } from '../lib/format.js';
+import { basename, duration, initials, stateLabel, tintOf } from '../lib/format.js';
+import { AdditionalDirsEditor } from './AdditionalDirsEditor.js';
+import { DiffViewer } from './DiffViewer.js';
+import { ModelSelect } from './ModelSelect.js';
+import { Divider, Fact, Overlay } from './Overlay.js';
+
+export interface RoomOverlayProps {
+  room: Room;
+  participants: Participant[];
+  tints: Record<string, AgentTint>;
+  turns: TurnRecord[];
+  files: ChangedFiles | null;
+  diff: { messageId: string; text: string; loading: boolean } | null;
+  busy: boolean;
+  catalogs: Record<string, ModelCatalog>;
+  onClose: () => void;
+  onCloseDiff: () => void;
+  onSetAdditionalDirs: (paths: string[]) => void;
+  onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
+}
+
+/**
+ * The reading half of the old right panel: what this room is, who is in it, what changed.
+ *
+ * The design's rule is that reading and pressing are different activities and should not
+ * share a surface. Nothing in here does anything to the room except the two roster
+ * controls, which are edits to who the room is rather than commands to it.
+ */
+export function RoomOverlay(props: RoomOverlayProps): React.ReactElement {
+  const { room, participants, turns, files, diff } = props;
+
+  if (diff) {
+    return (
+      <Overlay title="Diff" onClose={props.onCloseDiff}>
+        <DiffViewer
+          diff={diff.text}
+          loading={diff.loading}
+          basePath={room.worktreePath ?? room.repoRoot}
+        />
+      </Overlay>
+    );
+  }
+
+  return (
+    <Overlay title="Room" hint="⌥R" onClose={props.onClose}>
+      <section>
+        <Fact label="repo" mono>
+          {room.repoRoot}
+        </Fact>
+        <Fact label="branch" mono>
+          {room.roomBranch}
+        </Fact>
+        {room.worktreePath && (
+          <Fact label="worktree" mono>
+            {room.worktreePath}
+          </Fact>
+        )}
+        <Fact label="base" mono>
+          {room.baseSha?.slice(0, 8) ?? '–'}
+        </Fact>
+        <Fact label="mode">{room.mode}</Fact>
+        <Fact label="round">
+          {room.mode === 'brainstorm' ? `${room.round} of ${room.maxRounds}` : room.round}
+        </Fact>
+        <Fact label="state">{stateLabel(room.state, room.paused, room.mode)}</Fact>
+        {room.prUrl && (
+          <Fact label="pr">
+            <a
+              href={room.prUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-live hover:underline"
+            >
+              {room.prUrl}
+            </a>
+          </Fact>
+        )}
+      </section>
+
+      <Divider label="ROSTER" />
+      <ul className="mt-2 space-y-2.5">
+        {participants.map((participant) => (
+          <ParticipantRow
+            key={participant.id}
+            participant={participant}
+            tint={props.tints[participant.runtime]}
+            room={room}
+            busy={props.busy}
+            catalog={props.catalogs[participant.runtime]}
+            onSet={props.onSetParticipant}
+          />
+        ))}
+        <li className="flex items-center gap-2 text-[12px]">
+          <span className="flex size-6 items-center justify-center rounded-[5px] border border-line-strong bg-raised font-mono text-[9px] text-ink-dim">
+            YO
+          </span>
+          <span className="flex-1">you</span>
+          <Tag>owner</Tag>
+        </li>
+      </ul>
+
+      <Divider label="FOLDER ACCESS" />
+      <AdditionalFolders
+        key={`${room.id}:${room.additionalDirs.join('\0')}`}
+        room={room}
+        busy={props.busy}
+        onSave={props.onSetAdditionalDirs}
+      />
+
+      <Divider label="CHANGED FILES" />
+      <div className="mt-2">
+        {files === null ? (
+          <p className="font-mono text-[11px] text-ink-faint">loading…</p>
+        ) : files.changed.length === 0 ? (
+          <p className="font-mono text-[11px] text-ink-faint">Nothing changed yet.</p>
+        ) : (
+          <ul className="space-y-0.5">
+            {files.changed.map((path) => (
+              <li key={path} className="truncate font-mono text-[11px]" title={path}>
+                <span className="text-ink-soft">{basename(path)}</span>{' '}
+                <span className="text-ink-faint">
+                  {path.slice(0, path.length - basename(path).length)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Divider label="USAGE" />
+      <div className="mt-2">
+        <Usage turns={turns} />
+      </div>
+    </Overlay>
+  );
+}
+
+function Usage({ turns }: { turns: TurnRecord[] }): React.ReactElement {
+  const finished = turns.filter((t) => t.endedAt);
+  const wall = finished.reduce(
+    (ms, t) => ms + (Date.parse(t.endedAt ?? '') - Date.parse(t.startedAt) || 0),
+    0,
+  );
+  const tokens = turns.reduce((sum, t) => sum + (t.usage?.totalTokens ?? 0), 0);
+  return (
+    <>
+      <Fact label="turns" mono>
+        {turns.length}
+      </Fact>
+      <Fact label="wall time" mono>
+        {duration(wall)}
+      </Fact>
+      {/* Not every runtime reports usage, so a zero here means "not reported", not "free". */}
+      <Fact label="tokens" mono>
+        {tokens > 0 ? tokens.toLocaleString() : 'not reported'}
+      </Fact>
+    </>
+  );
+}
+
+function AdditionalFolders({
+  room,
+  busy,
+  onSave,
+}: {
+  room: Room;
+  busy: boolean;
+  onSave: (paths: string[]) => void;
+}): React.ReactElement {
+  const [paths, setPaths] = useState(room.additionalDirs);
+
+  const running = room.state === 'running' || room.state === 'waiting-reviews';
+  const locked = busy || running || room.closedAt !== null;
+  const changed =
+    paths.length !== room.additionalDirs.length ||
+    paths.some((path, index) => path !== room.additionalDirs[index]);
+
+  return (
+    <div className="mt-2">
+      <AdditionalDirsEditor value={paths} onChange={setPaths} disabled={locked} />
+      {paths.length === 0 && (
+        <p className="mt-1 font-mono text-[11px] text-ink-faint">
+          Only the room repository is accessible.
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={locked || !changed}
+        onClick={() => onSave(paths)}
+        className="mt-2 rounded border border-line px-2 py-1 font-mono text-[11px] text-ink-dim hover:border-line-strong disabled:opacity-40"
+      >
+        save folder access
+      </button>
+    </div>
+  );
+}
+
+const ROLES_FOR: Record<Room['mode'], Role[]> = {
+  'build-review': ['worker', 'reviewer'],
+  brainstorm: ['reviewer', 'moderator'],
+};
+
+/**
+ * One roster row, editable.
+ *
+ * Both controls are disabled while a turn is in flight: the permission a child was spawned
+ * with is baked into that process, so the engine refuses a swap mid-round and the UI should
+ * say so before the request rather than after.
+ */
+function ParticipantRow({
+  participant,
+  tint,
+  room,
+  busy,
+  catalog,
+  onSet,
+}: {
+  participant: Participant;
+  tint: AgentTint | undefined;
+  room: Room;
+  busy: boolean;
+  catalog: ModelCatalog | undefined;
+  onSet: (runtime: string, patch: { role?: Role; model?: string }) => void;
+}): React.ReactElement {
+  const [model, setModel] = useState(participant.model ?? '');
+  const running = room.state === 'running' || room.state === 'waiting-reviews';
+  const locked = busy || running || room.closedAt !== null;
+  const tone = tintOf(tint);
+
+  return (
+    <li className="space-y-1.5">
+      <div className="flex items-center gap-2 text-[12px]">
+        <span
+          className={`flex size-6 items-center justify-center rounded-[5px] border bg-raised font-mono text-[9px] ${tone.border} ${tone.text}`}
+        >
+          {initials(participant.runtime)}
+        </span>
+        <span className={`flex-1 truncate font-mono text-[12px] ${tone.text}`}>
+          {participant.runtime}
+        </span>
+        <select
+          value={participant.role}
+          disabled={locked}
+          aria-label={`${participant.runtime} role`}
+          onChange={(e) => onSet(participant.runtime, { role: e.target.value as Role })}
+          className="rounded border border-line bg-surface px-1 py-px font-mono text-[10px] disabled:opacity-50"
+        >
+          {roleOptions(room.mode, participant.role).map((role) => (
+            <option key={role} value={role}>
+              {role}
+            </option>
+          ))}
+        </select>
+        <Tag>{participant.permission}</Tag>
+      </div>
+      <div className="pl-8">
+        <ModelSelect
+          runtime={participant.runtime}
+          value={model}
+          catalog={catalog}
+          disabled={locked}
+          className="w-full"
+          onChange={setModel}
+          onCommit={(next) => {
+            if (next !== (participant.model ?? '')) onSet(participant.runtime, { model: next });
+          }}
+        />
+      </div>
+    </li>
+  );
+}
+
+/** The current role is always offered, even when the mode would not normally allow it. */
+function roleOptions(mode: Room['mode'], current: Role): Role[] {
+  const allowed = ROLES_FOR[mode] ?? ['worker', 'reviewer'];
+  return allowed.includes(current) ? allowed : [current, ...allowed];
+}
+
+function Tag({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <span className="rounded bg-raised px-1.5 py-px font-mono text-[10px] text-ink-faint">
+      {children}
+    </span>
+  );
+}

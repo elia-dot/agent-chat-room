@@ -93,6 +93,27 @@ describe('readVerdict', () => {
   });
 });
 
+describe('a verdict printed without a fence', () => {
+  it('is lifted out of the body, so the message does not repeat its own card', () => {
+    const display = verdictForDisplay({
+      text: 'Reviewed the diff; nothing blocking.\n{"decision":"approve","blocking":[],"nits":[]}',
+      role: 'reviewer',
+    });
+    expect(display.body).toBe('Reviewed the diff; nothing blocking.');
+    expect(display.verdict?.decision).toBe('approve');
+    expect(display.unreadable).toBe(false);
+  });
+
+  it('leaves prose alone when the trailing braces are not a verdict', () => {
+    const display = verdictForDisplay({
+      text: 'The config ends up as {"retries":3}',
+      role: 'reviewer',
+    });
+    expect(display.body).toBe('The config ends up as {"retries":3}');
+    expect(display.verdict).toBeNull();
+  });
+});
+
 describe('verdictForDisplay', () => {
   it('trusts the server verdict over a contradicting block', () => {
     const display = verdictForDisplay({

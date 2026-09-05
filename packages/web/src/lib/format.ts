@@ -1,21 +1,65 @@
 import type { RoomMode, RoomState } from '@agent-chat-room/core';
 
 /** The runtime palette from PLAN.md section 5.2. Anything unknown gets the neutral chip. */
-export function runtimeClasses(author: string): string {
-  switch (author) {
-    case 'claude':
-      return 'bg-claude/15 text-claude ring-claude/30';
-    case 'codex':
-      return 'bg-codex/15 text-codex ring-codex/30';
-    case 'cursor':
-      return 'bg-cursor/15 text-cursor ring-cursor/30';
-    case 'antigravity':
-      return 'bg-antigravity/15 text-antigravity ring-antigravity/30';
-    case 'you':
-      return 'bg-zinc-500/15 text-zinc-700 ring-zinc-500/30 dark:text-zinc-300';
-    default:
-      return 'bg-zinc-500/15 text-zinc-600 ring-zinc-500/30 dark:text-zinc-400';
-  }
+/**
+ * Agent identity, per the design.
+ *
+ * Four tints at chroma 0.055 – sand, green, blue, violet – carried by the initials, a
+ * border and the gutter hairline. They are deliberately near-grey: a verdict, a commit or
+ * a failure is the only thing on screen allowed to be saturated, and four loud agent
+ * colours would drown those out.
+ *
+ * The tint follows roster position rather than the runtime's name, because a room can hold
+ * any four runtimes and `gemini` deserves an identity as much as `claude` does. Anyone not
+ * in the roster (the human, a runtime that has since left) falls back to neutral.
+ */
+export type AgentTint = 1 | 2 | 3 | 4;
+
+export function agentTints(runtimes: string[]): Record<string, AgentTint> {
+  const tints: Record<string, AgentTint> = {};
+  runtimes.forEach((runtime, index) => {
+    tints[runtime] = ((index % 4) + 1) as AgentTint;
+  });
+  return tints;
+}
+
+/** Static class strings, because Tailwind cannot see a name it has to compute. */
+const TINTS: Record<AgentTint, { text: string; border: string; rule: string; chip: string }> = {
+  1: {
+    text: 'text-agent-1',
+    border: 'border-agent-1',
+    rule: 'bg-agent-1/40',
+    chip: 'bg-agent-1/20 text-agent-1',
+  },
+  2: {
+    text: 'text-agent-2',
+    border: 'border-agent-2',
+    rule: 'bg-agent-2/40',
+    chip: 'bg-agent-2/20 text-agent-2',
+  },
+  3: {
+    text: 'text-agent-3',
+    border: 'border-agent-3',
+    rule: 'bg-agent-3/40',
+    chip: 'bg-agent-3/20 text-agent-3',
+  },
+  4: {
+    text: 'text-agent-4',
+    border: 'border-agent-4',
+    rule: 'bg-agent-4/40',
+    chip: 'bg-agent-4/20 text-agent-4',
+  },
+};
+
+const NEUTRAL = {
+  text: 'text-ink-dim',
+  border: 'border-line-strong',
+  rule: 'bg-line',
+  chip: 'bg-ink-faint/20 text-ink-dim',
+};
+
+export function tintOf(tint: AgentTint | undefined): typeof NEUTRAL {
+  return tint ? TINTS[tint] : NEUTRAL;
 }
 
 export function initials(author: string): string {
@@ -58,7 +102,8 @@ export function duration(ms: number): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 export function relativeTime(iso: string): string {

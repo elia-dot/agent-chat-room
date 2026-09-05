@@ -6,13 +6,119 @@
  */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * The design's token system (ACR.dc.html).
+ *
+ * Every neutral sits on hue 255 at chroma <= 0.014, so the whole shell reads as one cool
+ * slate rather than a pile of greys. Saturation is a signal here, not decoration: it is
+ * spent only on verdicts, commits, failures and liveness. Agent identity is carried at
+ * chroma 0.055, which is enough to tell four agents apart and not enough to compete with
+ * a verdict.
+ *
+ * `@theme` maps each Tailwind colour name onto a variable that flips below, so `bg-raised`
+ * means the same thing in both themes and there is no `dark:` twin to keep in sync.
+ */
 @theme {
-  /* One colour per runtime, per PLAN.md section 5.2. The avatar is the only place a
-     runtime's identity shows, so it has to be legible in both themes. */
-  --color-claude: oklch(0.68 0.17 45);
-  --color-codex: oklch(0.66 0.15 155);
-  --color-cursor: oklch(0.62 0.16 255);
-  --color-antigravity: oklch(0.65 0.17 305);
+  --color-ground: var(--acr-ground);
+  --color-surface: var(--acr-surface);
+  --color-raised: var(--acr-raised);
+  --color-sunken: var(--acr-sunken);
+  --color-line: var(--acr-line);
+  --color-line-strong: var(--acr-line-strong);
+  --color-ink: var(--acr-ink);
+  --color-ink-soft: var(--acr-ink-soft);
+  --color-ink-dim: var(--acr-ink-dim);
+  --color-ink-faint: var(--acr-ink-faint);
+
+  /* Verdicts and outcomes. These three must never be confusable. */
+  --color-approve: var(--acr-approve);
+  --color-approve-bg: var(--acr-approve-bg);
+  --color-approve-line: var(--acr-approve-line);
+  --color-changes: var(--acr-changes);
+  --color-changes-bg: var(--acr-changes-bg);
+  --color-changes-line: var(--acr-changes-line);
+  --color-question: var(--acr-question);
+  --color-question-bg: var(--acr-question-bg);
+  --color-question-line: var(--acr-question-line);
+
+  /* Liveness, which is a state rather than an outcome, so it gets its own hue. */
+  --color-live: var(--acr-live);
+  --color-live-bg: var(--acr-live-bg);
+  --color-live-line: var(--acr-live-line);
+
+  /* Agent identity at chroma 0.055: sand, green, blue, violet. */
+  --color-agent-1: var(--acr-agent-1);
+  --color-agent-2: var(--acr-agent-2);
+  --color-agent-3: var(--acr-agent-3);
+  --color-agent-4: var(--acr-agent-4);
+
+  --font-sans: 'Work Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Light is the secondary theme (artboard 1h): the same structure on a paper ground. */
+:root {
+  --acr-ground: oklch(0.965 0.004 255);
+  --acr-surface: oklch(1 0 0);
+  --acr-raised: oklch(0.975 0.003 255);
+  --acr-sunken: oklch(0.945 0.004 255);
+  --acr-line: oklch(0.88 0.007 255);
+  --acr-line-strong: oklch(0.82 0.008 255);
+  --acr-ink: oklch(0.24 0.012 255);
+  --acr-ink-soft: oklch(0.38 0.012 255);
+  --acr-ink-dim: oklch(0.52 0.012 255);
+  --acr-ink-faint: oklch(0.6 0.012 255);
+
+  --acr-approve: oklch(0.5 0.13 152);
+  --acr-approve-bg: oklch(0.95 0.03 152);
+  --acr-approve-line: oklch(0.82 0.07 152);
+  --acr-changes: oklch(0.48 0.16 27);
+  --acr-changes-bg: oklch(0.95 0.03 27);
+  --acr-changes-line: oklch(0.82 0.09 27);
+  --acr-question: oklch(0.5 0.12 75);
+  --acr-question-bg: oklch(0.95 0.04 88);
+  --acr-question-line: oklch(0.82 0.09 88);
+
+  --acr-live: oklch(0.48 0.12 250);
+  --acr-live-bg: oklch(0.95 0.03 250);
+  --acr-live-line: oklch(0.82 0.07 250);
+
+  --acr-agent-1: oklch(0.52 0.07 65);
+  --acr-agent-2: oklch(0.5 0.07 160);
+  --acr-agent-3: oklch(0.5 0.07 250);
+  --acr-agent-4: oklch(0.52 0.07 310);
+}
+
+.dark {
+  --acr-ground: oklch(0.165 0.012 255);
+  --acr-surface: oklch(0.2 0.013 255);
+  --acr-raised: oklch(0.245 0.014 255);
+  --acr-sunken: oklch(0.185 0.012 255);
+  --acr-line: oklch(0.31 0.013 255);
+  --acr-line-strong: oklch(0.4 0.014 255);
+  --acr-ink: oklch(0.94 0.006 255);
+  --acr-ink-soft: oklch(0.88 0.008 255);
+  --acr-ink-dim: oklch(0.7 0.011 255);
+  --acr-ink-faint: oklch(0.545 0.013 255);
+
+  --acr-approve: oklch(0.72 0.16 152);
+  --acr-approve-bg: oklch(0.3 0.06 152);
+  --acr-approve-line: oklch(0.45 0.09 152);
+  --acr-changes: oklch(0.66 0.19 27);
+  --acr-changes-bg: oklch(0.34 0.07 27);
+  --acr-changes-line: oklch(0.48 0.1 27);
+  --acr-question: oklch(0.8 0.15 88);
+  --acr-question-bg: oklch(0.36 0.07 88);
+  --acr-question-line: oklch(0.5 0.1 88);
+
+  --acr-live: oklch(0.8 0.09 250);
+  --acr-live-bg: oklch(0.28 0.03 250);
+  --acr-live-line: oklch(0.42 0.05 250);
+
+  --acr-agent-1: oklch(0.74 0.055 65);
+  --acr-agent-2: oklch(0.74 0.055 160);
+  --acr-agent-3: oklch(0.74 0.055 250);
+  --acr-agent-4: oklch(0.74 0.055 310);
 }
 
 html,
@@ -23,27 +129,24 @@ body,
 
 body {
   margin: 0;
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    sans-serif;
+  background: var(--acr-ground);
+  color: var(--acr-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* The running dot in the sidebar. `animate-pulse` fades the whole element; this keeps the
-   dot visible and only breathes the halo, which reads better at 8px. */
+/*
+ * Liveness animations. Three states the eye reads without labels: something is alive
+ * (pulse), something is being written right now (caret), and a turn is in flight with no
+ * knowable duration (bar).
+ */
 @keyframes acr-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 currentColor;
     opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 3px transparent;
-    opacity: 0.55;
+    opacity: 0.35;
   }
 }
 
@@ -51,7 +154,43 @@ body {
   animation: acr-pulse 1.4s ease-in-out infinite;
 }
 
-/* Markdown inside a bubble. Tailwind's preflight strips list markers and heading sizes,
+@keyframes acr-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.acr-caret {
+  animation: acr-caret 1s step-end infinite;
+}
+
+@keyframes acr-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.acr-bar {
+  animation: acr-bar 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acr-pulse,
+  .acr-caret,
+  .acr-bar {
+    animation: none;
+  }
+}
+
+/* Markdown inside a message. Tailwind's preflight strips list markers and heading sizes,
    and an agent's answer is markdown, so they have to come back – scoped here rather than
    pulling in the typography plugin for six rules. */
 .acr-md > :first-child {
@@ -76,24 +215,31 @@ body {
   list-style: decimal;
   padding-left: 1.25rem;
 }
+.acr-md li {
+  margin: 0.15rem 0;
+}
 .acr-md h1,
 .acr-md h2,
 .acr-md h3,
 .acr-md h4 {
-  font-weight: 600;
-  margin: 0.75rem 0 0.25rem;
-}
-.acr-md h1 {
-  font-size: 1.15rem;
-}
-.acr-md h2 {
-  font-size: 1.05rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--acr-ink-faint);
+  margin: 0.9rem 0 0.35rem;
 }
 .acr-md a {
-  text-decoration: underline;
+  color: var(--acr-live);
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in oklch, var(--acr-live) 60%, transparent);
+}
+.acr-md a:hover {
+  border-bottom-style: solid;
 }
 .acr-md code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
   background: color-mix(in oklch, currentColor 10%, transparent);
   padding: 0.1em 0.3em;
