@@ -175,6 +175,8 @@ export const api = {
   /** A plain link, so the browser downloads it rather than the app buffering it. */
   exportUrl: (id: string) => `/api/rooms/${id}/export.md`,
 
+  purgeRoom: (id: string) => post<{ ok: boolean; purged: string }>(`/api/rooms/${id}/purge`),
+
   files: (id: string) => request<ChangedFiles>(`/api/rooms/${id}/files`),
 
   /** Text, not JSON: a diff is a document, and it may be megabytes. */

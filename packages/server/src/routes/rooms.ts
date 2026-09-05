@@ -284,6 +284,16 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       }),
     };
   });
+
+  app.post('/api/rooms/:id/purge', async (request, reply) => {
+    const room = requireRoom(supervisor, request.params);
+    if (supervisor.isRunning(room.id)) {
+      await reply.status(409).send({ error: `room ${room.id.slice(0, 8)} is running` });
+      return;
+    }
+    const result = await supervisor.purge(room.id);
+    return { ok: true, purged: room.id, ...result };
+  });
 }
 
 /**

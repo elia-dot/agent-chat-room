@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import * as git from './git.js';
-import { roomWorktreePath } from './paths.js';
+import { diffPath, roomWorktreePath, turnLogPath } from './paths.js';
+import type { RoomStore } from './store/rooms.js';
+import type { Room } from './store/types.js';
 
 /**
  * Every room runs in its own git worktree (PLAN.md section 7, decided 2026-09-03).
@@ -109,4 +111,59 @@ export async function removeWorktree(repoRoot: string, path: string): Promise<vo
   // room is being closed either way, so make sure the directory really goes.
   rmSync(path, { recursive: true, force: true });
   await git.worktreePrune(repoRoot);
+}
+
+/**
+ * Purge all data associated with a room: worktree directory, overflow diffs, turn logs,
+ * and SQLite rows.
+ */
+export async function purgeRoomData(
+  room: Room,
+  store: RoomStore,
+): Promise<{ worktreeRemoved: boolean; diffsRemoved: number; turnsRemoved: number }> {
+  let worktreeRemoved = false;
+  const wtPath = room.worktreePath || roomWorktreePath(room.id);
+  if (existsSync(wtPath)) {
+    try {
+      await removeWorktree(room.repoRoot, wtPath);
+    } catch {
+      rmSync(wtPath, { recursive: true, force: true });
+    }
+    worktreeRemoved = true;
+  }
+
+  const messages = store.listMessages(room.id);
+  let diffsRemoved = 0;
+  for (const m of messages) {
+    const pathsToCheck = new Set<string>();
+    pathsToCheck.add(diffPath(m.id));
+    if (m.diffPath) pathsToCheck.add(m.diffPath);
+    for (const dp of pathsToCheck) {
+      if (existsSync(dp)) {
+        try {
+          rmSync(dp, { force: true });
+          diffsRemoved += 1;
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  const turns = store.listTurns(room.id);
+  let turnsRemoved = 0;
+  for (const t of turns) {
+    const tp = turnLogPath(t.id);
+    if (existsSync(tp)) {
+      try {
+        rmSync(tp, { force: true });
+        turnsRemoved += 1;
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  store.purgeRoom(room.id);
+  return { worktreeRemoved, diffsRemoved, turnsRemoved };
 }

@@ -127,4 +127,56 @@ describe('startServer', () => {
     const api = await fetch(`${server.url}/api/nope`);
     expect(api.status).toBe(404);
   });
+
+  it('generates a capability token, redeems via cookie, and guards mutating endpoints', async () => {
+    const server = await startServer({
+      store: h.store,
+      webRoot: false,
+      port: 0,
+      token: 'test-token-123',
+    });
+    started.push(server);
+
+    // 1. GET /?token=test-token-123 redeems cookie and redirects
+    const redeemRes = await fetch(`${server.url}/?token=test-token-123`, { redirect: 'manual' });
+    expect([301, 302, 303, 307, 308]).toContain(redeemRes.status);
+    const setCookie = redeemRes.headers.get('set-cookie');
+    expect(setCookie).toContain('acr_token=test-token-123');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Strict');
+    expect(setCookie).toContain('Max-Age=2592000');
+
+    // 2. Mutating API call without token is rejected with 401
+    const unauthPost = await fetch(`${server.url}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: 'foo', cwd: '/', agents: ['echo', 'echo2'] }),
+    });
+    expect(unauthPost.status).toBe(401);
+    const unauthBody = (await unauthPost.json()) as { error?: string };
+    expect(unauthBody.error).toContain('unauthorized');
+
+    // 3. Mutating API call with token via header succeeds past auth
+    // (can hit validation or 400, not 401)
+    const authHeaderPost = await fetch(`${server.url}/api/rooms`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-token-123',
+      },
+      body: JSON.stringify({ task: 'foo', cwd: '/', agents: ['echo', 'echo2'] }),
+    });
+    expect(authHeaderPost.status).not.toBe(401);
+
+    // 4. Mutating API call with cookie succeeds past auth
+    const authCookiePost = await fetch(`${server.url}/api/rooms`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: 'acr_token=test-token-123',
+      },
+      body: JSON.stringify({ task: 'foo', cwd: '/', agents: ['echo', 'echo2'] }),
+    });
+    expect(authCookiePost.status).not.toBe(401);
+  });
 });

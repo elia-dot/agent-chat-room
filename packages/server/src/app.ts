@@ -11,7 +11,7 @@ import type { FolderPicker } from './picker.js';
 import { repoRoutes } from './routes/repos.js';
 import { roomRoutes } from './routes/rooms.js';
 import { runtimeRoutes } from './routes/runtimes.js';
-import { isAllowed, isLocalOrigin } from './security.js';
+import { isAllowed, isLocalOrigin, validateCapabilityToken } from './security.js';
 import { ConflictError, type RoomSupervisor } from './supervisor.js';
 import { websocketRoute } from './ws.js';
 
@@ -29,6 +29,8 @@ export interface CreateAppOptions {
   /** The native folder dialog. Injected by tests, so no suite opens a window. */
   picker?: FolderPicker;
   logger?: boolean;
+  /** Capability token for loopback authorization. */
+  token?: string;
 }
 
 /**
@@ -51,10 +53,38 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
   // with an ordinary 403 body leaves a socket that neither Node nor Fastify owns, and
   // `close()` then waits for it forever.
   app.addHook('onRequest', async (request, reply) => {
-    const path = request.url.split('?')[0] ?? '';
+    const [path = '', query] = request.url.split('?');
+    const searchParams = new URLSearchParams(query ?? '');
+    const queryToken = searchParams.get('token');
+
+    // Token redemption via redirect with HttpOnly cookie
+    if (opts.token && queryToken && queryToken === opts.token) {
+      searchParams.delete('token');
+      const cleanQuery = searchParams.toString();
+      const target = (path || '/') + (cleanQuery ? `?${cleanQuery}` : '');
+      await reply
+        .header(
+          'Set-Cookie',
+          `acr_token=${opts.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`,
+        )
+        .redirect(target);
+      return;
+    }
+
     if (path === WS_PATH) return;
     if (path.startsWith('/api/') && !isAllowed(request)) {
       await reply.status(403).send({ error: 'cross-origin request refused' });
+      return;
+    }
+
+    const mutatingMethods = ['POST', 'PATCH', 'PUT', 'DELETE'];
+    if (opts.token && path.startsWith('/api/') && mutatingMethods.includes(request.method)) {
+      if (!validateCapabilityToken(request.headers, opts.token)) {
+        await reply
+          .status(401)
+          .send({ error: 'unauthorized: missing or invalid capability token' });
+        return;
+      }
     }
   });
 
@@ -86,8 +116,19 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
 
   await app.register(websocket, {
     options: {
-      verifyClient: ({ origin }: { origin?: string }, next: VerifyNext) => {
-        next(isLocalOrigin(origin || undefined), 403, 'cross-origin websocket refused');
+      verifyClient: (
+        info: { origin?: string; req: { headers: Record<string, string | string[] | undefined> } },
+        next: VerifyNext,
+      ) => {
+        if (!isLocalOrigin(info.origin || undefined)) {
+          next(false, 403, 'cross-origin websocket refused');
+          return;
+        }
+        if (opts.token && !validateCapabilityToken(info.req.headers, opts.token)) {
+          next(false, 401, 'unauthorized: missing or invalid capability token');
+          return;
+        }
+        next(true);
       },
     },
   });

@@ -1,4 +1,33 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { serverTokenPath } from '@agent-chat-room/core';
 import type { FastifyRequest } from 'fastify';
+
+/**
+ * Generate or read the capability token at ~/.config/agent-chat-room/server.token with mode 0600.
+ */
+export function getOrCreateServerToken(token?: string): string {
+  if (token && token.trim()) return token.trim();
+  const path = serverTokenPath();
+  try {
+    if (existsSync(path)) {
+      const existing = readFileSync(path, 'utf8').trim();
+      if (existing.length >= 32) return existing;
+    }
+  } catch {
+    // If read fails, generate a new token
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  const generated = randomBytes(32).toString('hex');
+  writeFileSync(path, generated + '\n', { mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // Windows does not support 0600 chmod
+  }
+  return generated;
+}
 
 /**
  * Localhost is not a security boundary on its own.
@@ -38,4 +67,45 @@ export function isLoopbackHost(hostname: string): boolean {
 export function isAllowed(request: Pick<FastifyRequest, 'headers'>): boolean {
   const origin = request.headers.origin;
   return isLocalOrigin(typeof origin === 'string' ? origin : undefined);
+}
+
+export function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  if (!cookieHeader) return {};
+  const cookies: Record<string, string> = {};
+  for (const pair of cookieHeader.split(';')) {
+    const idx = pair.indexOf('=');
+    if (idx === -1) continue;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    cookies[key] = decodeURIComponent(val);
+  }
+  return cookies;
+}
+
+export function extractToken(
+  headers: Record<string, string | string[] | undefined>,
+): string | undefined {
+  const auth = headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    return auth.slice(7).trim();
+  }
+  const xToken = headers['x-acr-token'];
+  if (typeof xToken === 'string') {
+    return xToken.trim();
+  }
+  const cookie = typeof headers.cookie === 'string' ? headers.cookie : undefined;
+  const parsed = parseCookies(cookie);
+  if (parsed.acr_token) {
+    return parsed.acr_token;
+  }
+  return undefined;
+}
+
+export function validateCapabilityToken(
+  headers: Record<string, string | string[] | undefined>,
+  expectedToken: string | undefined,
+): boolean {
+  if (!expectedToken) return true;
+  const provided = extractToken(headers);
+  return Boolean(provided && provided === expectedToken);
 }

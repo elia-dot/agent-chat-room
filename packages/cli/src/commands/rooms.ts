@@ -1,7 +1,13 @@
 import { writeFileSync } from 'node:fs';
 
 import type { Message, Room, RoomStore as RoomStoreType } from '@agent-chat-room/core';
-import { RoomEngine, RoomStore, decisionLabel, roomToMarkdown } from '@agent-chat-room/core';
+import {
+  RoomEngine,
+  RoomStore,
+  decisionLabel,
+  purgeRoomData,
+  roomToMarkdown,
+} from '@agent-chat-room/core';
 
 import { EXIT, type ExitCode } from '../exit.js';
 import { Renderer } from '../render.js';
@@ -21,7 +27,7 @@ export interface RoomsOptions {
 }
 
 /**
- * `acr rooms ls | show | resume | close` – the terminal view of the store (PLAN.md
+ * `acr rooms ls | show | resume | close | purge` – the terminal view of the store (PLAN.md
  * section 5). M2 puts the same data behind REST; this is what makes M1's persistence
  * usable before then.
  */
@@ -43,9 +49,11 @@ export async function rooms(opts: RoomsOptions): Promise<ExitCode> {
         return await resumeRoom(store, r, opts);
       case 'export':
         return exportRoom(store, r, opts);
+      case 'purge':
+        return await purgeRooms(store, r, opts);
       default:
         throw new UsageError(
-          `unknown rooms subcommand "${opts.subcommand}". Try: ls, show, export, resume, close.`,
+          `unknown rooms subcommand "${opts.subcommand}". Try: ls, show, export, resume, close, purge.`,
         );
     }
   } finally {
@@ -143,6 +151,45 @@ function exportRoom(store: RoomStoreType, r: Renderer, opts: RoomsOptions): Exit
     return EXIT.ok;
   }
   process.stdout.write(markdown);
+  return EXIT.ok;
+}
+
+async function purgeRooms(
+  store: RoomStoreType,
+  r: Renderer,
+  opts: RoomsOptions,
+): Promise<ExitCode> {
+  if (opts.id) {
+    const room = requireRoom(store, opts.id);
+    if (!room.closedAt) {
+      r.error(
+        `room ${room.id.slice(0, 8)} is still open. ` +
+          `Close it with \`acr rooms close ${room.id.slice(0, 8)}\` before purging.`,
+      );
+      return EXIT.usage;
+    }
+    const result = await purgeRoomData(room, store);
+    const wtMsg = result.worktreeRemoved ? '' : ' (none)';
+    r.info(
+      `purged room ${room.id.slice(0, 8)}: removed worktree${wtMsg}, ` +
+        `${result.diffsRemoved} diffs, ${result.turnsRemoved} turn logs.`,
+    );
+    return EXIT.ok;
+  }
+
+  const all = store.listRooms({ open: false }).filter((room) => room.closedAt !== null);
+  if (all.length === 0) {
+    r.info('no closed rooms to purge.');
+    return EXIT.ok;
+  }
+  for (const room of all) {
+    const result = await purgeRoomData(room, store);
+    const wtMsg = result.worktreeRemoved ? '' : ' (none)';
+    r.info(
+      `purged room ${room.id.slice(0, 8)}: removed worktree${wtMsg}, ` +
+        `${result.diffsRemoved} diffs, ${result.turnsRemoved} turn logs.`,
+    );
+  }
   return EXIT.ok;
 }
 

@@ -10,6 +10,7 @@ export interface VerdictCardProps {
   rawBlocks: string[];
   /** A block was found but could not be read. */
   unreadable: boolean;
+  basePath?: string;
 }
 
 /**
@@ -23,6 +24,7 @@ export function VerdictCard({
   verdict,
   rawBlocks,
   unreadable,
+  basePath,
 }: VerdictCardProps): React.ReactElement | null {
   const [open, setOpen] = useState(false);
   if (!verdict && !unreadable) return null;
@@ -36,8 +38,14 @@ export function VerdictCard({
             title="Blocking"
             items={verdict.blocking}
             className="text-amber-700 dark:text-amber-400"
+            basePath={basePath}
           />
-          <Section title="Nits" items={verdict.nits} className="text-zinc-500 dark:text-zinc-400" />
+          <Section
+            title="Nits"
+            items={verdict.nits}
+            className="text-zinc-500 dark:text-zinc-400"
+            basePath={basePath}
+          />
         </>
       ) : (
         <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -58,7 +66,7 @@ export function VerdictCard({
             rawBlocks.map((raw, i) => (
               <pre
                 key={i}
-                className="mt-1 rounded bg-zinc-100 p-2 font-mono text-[11px] break-words whitespace-pre-wrap text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400"
+                className="mt-1 overflow-x-auto rounded bg-zinc-100 p-2 font-mono text-[11px] leading-snug dark:bg-zinc-900"
               >
                 {pretty(raw)}
               </pre>
@@ -73,10 +81,12 @@ function Section({
   title,
   items,
   className,
+  basePath,
 }: {
   title: string;
   items: string[];
   className: string;
+  basePath?: string;
 }): React.ReactElement | null {
   if (items.length === 0) return null;
   return (
@@ -87,7 +97,7 @@ function Section({
           <li key={i} className={`flex gap-1.5 text-sm ${className}`}>
             <span aria-hidden="true">•</span>
             <div className="min-w-0 flex-1">
-              <Markdown text={item} />
+              <Markdown text={item} basePath={basePath} />
             </div>
           </li>
         ))}

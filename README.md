@@ -10,22 +10,28 @@ a credentials file exists, and lets each CLI find its own login the way it norma
 
 The full design lives in [`docs/PLAN.md`](docs/PLAN.md).
 
-## Status: milestone M3
+## Status: milestone M4 (Production-Ready)
 
-M3 is "more runtimes and modes": a third adapter, a discussion mode, an editable roster, and
-somewhere for a finished room to go. What works today:
+M4 brings complete production-readiness and the next-generation feature set:
 
 - **`acr`** – with no arguments, starts the server on `http://127.0.0.1:4321` and opens the browser.
   Rooms list, live transcript, composer with `@mentions` and pause/continue, right panel with
-  participants, changed files and a diff viewer, a new-room dialog and a doctor page.
-- **Nothing listens on the network.** The server binds `127.0.0.1` only, _and_ refuses any request
-  whose `Origin` is not a localhost one – otherwise any page open in your browser could drive it.
+  participants, changed files and a diff viewer with deep-linking to Cursor and VS Code, a new-room dialog and a doctor page.
+- **Strict localhost & capability boundary.** The server binds `127.0.0.1` only, validates localhost `Origin`,
+  and requires a capability token (`~/.config/agent-chat-room/server.token`, mode `0600`) via session cookie
+  (`GET /?token=...`) or `Authorization: Bearer <token>` for all mutating requests and WebSocket upgrades.
+- **Robust Subprocess Management.** Spawns detached process groups and cleanly terminates entire process trees
+  (`process.kill(-pid)` on POSIX, `taskkill` on Windows) with Windows `PATHEXT` binary resolution.
 - **Interrupt any time.** Posting a message holds the loop and points the next turn at whoever you
   `@mention`; Continue picks the round loop back up.
 - **macOS notifications** when a room reaches `approved` or `needs-you` (`ACR_NO_NOTIFY=1` to skip).
 - **Adapters** for Claude Code, Codex CLI, Cursor Agent and Antigravity: `detect()`, argv
   building, streaming `run()`, session resume, and a permission model with exactly three levels
   (`read-only`, `edits`, `full`).
+- **Autonomous Setup & Test Gatekeeper.** Runs `.acr.json` `setup` hooks in fresh worktrees, and runs
+  `testCommand` between worker and reviewer turns with test failure diagnostics fed directly to reviewers.
+- **Mechanical Goalpost Enforcement.** In Round 3+, reviewer citations are validated against modified hunks from
+  the worker's diff; citations outside the diff are downgraded to non-blocking nits to prevent endless review loops.
 - **Brainstorm mode.** Three rounds instead of a build loop: everyone answers in parallel,
   everyone reacts to the others, and the moderator writes a merged proposal. Nobody edits.
   One button turns the proposal into a `build-review` room.
@@ -33,6 +39,8 @@ somewhere for a finished room to go. What works today:
   losing anyone's session.
 - **Commit, Open PR and Export markdown.** Commit the working tree on demand; push the room
   branch and open a PR through your own `gh` login; save the whole room as a markdown file.
+- **Purge Room Data.** Cleanly remove worktrees, spilled diffs, turn logs, and database records via
+  `acr rooms purge <id>` or the web UI.
 - **`acr doctor`** – which runtimes are installed, new enough and logged in.
 - **`acr run`** – a whole room: the worker builds, every reviewer reviews in parallel, and the loop
   repeats until they all approve, someone asks you a question, or you pause or stop it. There is
@@ -42,16 +50,13 @@ somewhere for a finished room to go. What works today:
 - **Auto-commit on approve.** The round everyone approved is committed on the room branch with the
   worker's summary as the body, so a room's work is never sitting only in a working tree.
 - **SQLite persistence.** Rooms, participants, messages, turns and recent repos live in
-  `~/.config/agent-chat-room/acr.db`, and `acr rooms` reads them back.
+  `~/.config/agent-chat-room/acr.db` (schema v4), and `acr rooms` reads them back.
 - **Restart recovery.** A turn that died with its process is marked, its round is rolled back and
   re-run, and each agent keeps its own runtime session – so only the turn is repeated, not the
   conversation.
-- **`.acr.json`** – optional, committed per-repo defaults.
-
-Not here yet (M4): `npx agent-chat-room`, a LICENSE file, GitHub Actions, the contributor
-adapter guide, cross-platform spawn, and a "Merge into `<current branch>`" button next to
-Open PR – merging writes to the branch you are standing on, which the worktree design has
-deliberately avoided so far.
+- **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs`, `setup`, and `testCommand`.
+- **Governance & CI.** MIT License, Denly attribution `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
+  and GitHub Actions CI across macOS and Linux.
 
 ## Try it
 
@@ -91,6 +96,8 @@ node packages/cli/dist/bin.js rooms show <id>
 node packages/cli/dist/bin.js rooms export <id> --out room.md
 node packages/cli/dist/bin.js rooms resume <id>
 node packages/cli/dist/bin.js rooms close <id>
+node packages/cli/dist/bin.js rooms purge <id>
+node packages/cli/dist/bin.js data-path
 ```
 
 Driving one room from the browser and a terminal `acr run` at the same time is refused rather
@@ -183,8 +190,8 @@ Pass `--no-worktree` to work in the checkout instead (useful with submodules or 
 worktrees). In that mode `acr` refuses to start on a dirty tree unless you also pass `--allow-dirty`,
 because otherwise a room's diff is not attributable to the room.
 
-Note that a fresh worktree has no `node_modules` and no build output. The worker is told to say so
-rather than install the world; a setup hook is M4.
+Note that a fresh worktree has no `node_modules` and no build output. You can provide automated
+post-creation commands via the `"setup"` array in `.acr.json`.
 
 ### `.acr.json`
 
@@ -197,6 +204,9 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
   "timeoutSeconds": 1800,
   "models": { "claude": "opus", "cursor": "auto" },
   "permissions": { "worker": "edits" },
+  "additional_dirs": ["/path/to/shared/lib"], // additional directories mounted into the agent's context
+  "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
+  "testCommand": "npm test", // run between worker and reviewer turns; results injected under ## Test Results
 }
 ```
 
@@ -206,7 +216,8 @@ Unknown keys warn and are ignored, so a file written by a newer `acr` never bric
 
 ```
 ~/.config/agent-chat-room/
-  acr.db                  rooms, participants, messages, turns, recent repos (schema v3)
+  acr.db                  rooms, participants, messages, turns, recent repos (schema v4)
+  server.token            capability session authorization token (mode 0600)
   turns/<turnId>.jsonl    every raw line a runtime emitted, for debugging an adapter
   worktrees/<roomId>/     the room's checkout
   diffs/<messageId>.diff  diffs too large to keep in a row
@@ -240,6 +251,14 @@ of grepping for "LGTM":
 
 The fence is the portable path and works for any runtime. `--json-schema` (Claude) and
 `--output-schema` (Codex) are wired up as an optional extra, never as something the loop depends on.
+
+### Mechanical Goalpost Enforcement (Round 3+)
+
+To prevent endless review loops on unchanged code:
+
+- In **Round 1 and 2**, reviewers may raise blocking issues on any file.
+- Starting in **Round 3**, reviewer `file:line` citations are mechanically validated against modified hunks from `git diff base..HEAD`.
+- Blocking citations referencing untouched code outside the worker's diff hunks are automatically downgraded to non-blocking nits. If no valid blocking issues remain, the verdict is automatically converted to `approve`.
 
 ## Development
 
@@ -284,10 +303,23 @@ of the system honest:
 - **Never fail on an unknown event.** Runtimes add event types between releases; an adapter that
   throws on one breaks every room on the next upgrade.
 
-`packages/core/src/process/runTurn.ts` is the only place in the project that spawns a process, so
-adapters stay a pair of pure pieces: an argv builder and a stream parser. Likewise
-`packages/core/src/store/rooms.ts` is the only place that holds SQL, so swapping `better-sqlite3`
-for something else is one file rather than a refactor.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the complete guide to writing an adapter and using `EchoAdapter` as a reference.
+
+#### Runtime Capability Profiles & Permissions
+
+Every adapter maps the engine's 3 permission tiers to CLI flags:
+
+| Runtime      | Adapter       | `read-only`                                     | `edits`                         | `full`                                       |
+| ------------ | ------------- | ----------------------------------------------- | ------------------------------- | -------------------------------------------- |
+| Claude Code  | `claude`      | `--permission-mode plan --tools Read,Glob,Grep` | `--permission-mode acceptEdits` | `--permission-mode bypassPermissions`        |
+| Codex CLI    | `codex`       | `-s read-only`                                  | `-s workspace-write`            | `--dangerously-bypass-approvals-and-sandbox` |
+| Cursor Agent | `cursor`      | `--mode ask --sandbox enabled --trust`          | `--trust`                       | `--force --trust`                            |
+| Antigravity  | `antigravity` | `--sandbox`                                     | `--mode accept-edits`           | `--dangerously-skip-permissions`             |
+
+`packages/core/src/process/runTurn.ts` is the only place in the project that spawns an agent
+process, so adapters stay a pair of pure pieces: an argv builder and a stream parser.
+Likewise `packages/core/src/store/rooms.ts` is the only place that holds SQL, so swapping
+`better-sqlite3` for something else is one file rather than a refactor.
 
 The engine emits the event stream the WebSocket forwards, unchanged:
 
@@ -315,7 +347,10 @@ one loop rather than two implementations of it.
 
 ### The HTTP surface
 
-Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
+Everything is under `/api`, bound to `127.0.0.1`, and origin-checked. All mutating requests
+(`POST`, `PATCH`, `PUT`, `DELETE`) and WebSocket upgrades (`/api/ws`) require authorization via the
+capability token stored at `~/.config/agent-chat-room/server.token` (sent via `Authorization: Bearer <token>`
+or redeemed as a `SameSite=Strict; HttpOnly` session cookie on first navigation `GET /?token=...`):
 
 | method + path                                                               | what it does                                                     |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -330,6 +365,7 @@ Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
 | `GET /api/rooms/:id/files`                                                  | changed files and `git diff --stat` against the room's base      |
 | `POST /api/rooms/:id/messages`                                              | say something; holds the loop, sets the next speaker             |
 | `POST /api/rooms/:id/start` \| `/pause` \| `/resume` \| `/stop` \| `/close` | drive the room                                                   |
+| `POST /api/rooms/:id/purge`                                                 | remove room worktree, diffs, turn logs, and SQLite record        |
 | `PATCH /api/rooms/:id`                                                      | `{ title?, additionalDirs? }`                                    |
 | `PATCH /api/rooms/:id/participants/:runtime`                                | `{ role?, model? }` – the role swap and the model picker         |
 | `POST /api/rooms/:id/commit`                                                | `{ message? }` – commit the working tree                         |
@@ -341,13 +377,12 @@ Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
 | `POST /api/repos/pick`                                                      | `{ path? }` – open that dialog; `{ path, repoRoot }` back        |
 
 `GET /api/repos/browse` reads directories and `POST /api/rooms` spawns an agent CLI with `edits`
-permission, so the origin check is load-bearing rather than a nicety: without it, any page you have
-open could POST to `127.0.0.1:4321`. `POST /api/repos/pick` raises the stakes again – it opens a
-native folder dialog on the machine running the server, which is why it is a POST rather than a GET
-a plain navigation could trigger. On a headless host `GET /api/repos/picker` reports
-`available: false` (as it does when `ACR_NO_PICKER` is set) and the in-app directory browser is what
-the dialog falls back to.
+permission, so the origin check and capability token are load-bearing rather than a nicety: without them,
+any page open in your browser or malicious local script could POST to `127.0.0.1:4321`. `POST /api/repos/pick`
+raises the stakes again – it opens a native folder dialog on the machine running the server. On a headless host
+`GET /api/repos/picker` reports `available: false` (as it does when `ACR_NO_PICKER` is set) and the in-app
+directory browser is what the dialog falls back to.
 
 ## License
 
-MIT (LICENSE file lands with the public release in M4).
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

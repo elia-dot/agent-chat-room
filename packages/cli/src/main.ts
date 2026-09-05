@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-import type { RoomMode } from '@agent-chat-room/core';
+import { configDir, type RoomMode } from '@agent-chat-room/core';
 
 import { doctor } from './commands/doctor.js';
 import { rooms } from './commands/rooms.js';
@@ -10,7 +10,27 @@ import { serve, type ServeOptions } from './commands/serve.js';
 import { EXIT, type ExitCode } from './exit.js';
 import { Renderer } from './render.js';
 
-export const VERSION = '0.0.0';
+function resolveVersion(): string {
+  const candidates = [
+    '../../package.json',
+    '../../../package.json',
+    '../../../../package.json',
+    '../package.json',
+  ];
+  for (const rel of candidates) {
+    try {
+      const pkgUrl = new URL(rel, import.meta.url);
+      const content = readFileSync(pkgUrl, 'utf8');
+      const parsed = JSON.parse(content) as { version?: string };
+      if (parsed.version) return parsed.version;
+    } catch {
+      // try next
+    }
+  }
+  return process.env.npm_package_version ?? 'unknown';
+}
+
+export const VERSION = resolveVersion();
 
 const HELP = `acr - agent chat room
 
@@ -19,14 +39,16 @@ Usage:
   acr serve [--port N] [--no-open]
   acr doctor [--json] [--models]
   acr run --task <text> [options]
-  acr rooms ls | show <id> | export <id> | resume <id> | close <id>
+  acr rooms ls | show <id> | export <id> | resume <id> | close <id> | purge <id>
+  acr data-path
   acr --help | --version
 
 Commands:
   serve         Start the local server and open the web UI (the default with no arguments).
   doctor        Show which agent runtimes are installed, new enough and logged in.
   run           Run a room: the worker builds, the reviewers review, repeat until they agree.
-  rooms         List, inspect, export, resume and close the rooms in the local store.
+  rooms         List, inspect, export, resume, close and purge the rooms in the local store.
+  data-path     Print the directory holding database, worktrees, and logs.
 
 Options for \`doctor\`:
   --models                 Also list the models each installed runtime offers. This is the
@@ -107,6 +129,9 @@ export async function main(argv: string[], opts: MainOptions = {}): Promise<Exit
         return await runCommand(rest);
       case 'rooms':
         return await roomsCommand(rest);
+      case 'data-path':
+        process.stdout.write(`${configDir()}\n`);
+        return EXIT.ok;
       default:
         process.stderr.write(`acr: unknown command "${command}"\n\n${HELP}\n`);
         return EXIT.usage;

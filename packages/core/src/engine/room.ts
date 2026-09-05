@@ -1,15 +1,18 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants, mkdirSync, writeFileSync } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute } from 'node:path';
 
 import { adapters as defaultAdapters } from '../adapters/index.js';
+import type { LoadedRepoConfig } from '../config.js';
 import { loadRepoConfig, resolveRoomDefaults } from '../config.js';
 import type { CreatePrResult, GhRunner } from '../gh.js';
 import { createPr, detectGh } from '../gh.js';
 import * as git from '../git.js';
 import { diffPath as diffSpillPath, turnLogPath } from '../paths.js';
 import { canWrite } from '../permissions.js';
+import { killProcessTree } from '../process/runTurn.js';
 import type { PromptMessage } from '../prompt.js';
 import { DEFAULT_MAX_INLINE_DIFF_BYTES, buildTurnPrompt } from '../prompt.js';
 import type { BrainstormPhase, Role } from '../roles.js';
@@ -18,7 +21,7 @@ import type { RoomStore } from '../store/rooms.js';
 import type { Message, Participant, Room, RoomMode, RoomState } from '../store/types.js';
 import type { AgentAdapter, Permission, TurnResult } from '../types.js';
 import type { ParsedVerdict, Verdict } from '../verdict.js';
-import { parseVerdict, verdictJsonSchema } from '../verdict.js';
+import { enforceGoalposts, parseVerdict, verdictJsonSchema } from '../verdict.js';
 import {
   branchFor,
   createWorktree,
@@ -236,14 +239,17 @@ export class RoomEngine {
   private readonly active = new Set<{ cancel(reason?: string): void }>();
   private stopping = false;
   private stopReason: string | undefined;
+  private activeCommandCancel?: (reason?: string) => void;
+  private readonly repoConfig: LoadedRepoConfig;
   /** Files the most recent round touched, for the outcome and the CLI's summary. */
   private lastChangedFiles: string[] = [];
 
   /** Non-fatal `.acr.json` complaints, surfaced by the caller rather than thrown. */
   readonly configWarnings: string[];
 
-  private constructor(room: Room, opts: RoomEngineOptions, warnings: string[] = []) {
-    this.configWarnings = warnings;
+  private constructor(room: Room, opts: RoomEngineOptions, repoConfig: LoadedRepoConfig) {
+    this.configWarnings = repoConfig.warnings;
+    this.repoConfig = repoConfig;
     this.roomRow = room;
     this.store = opts.store;
     this.registry = opts.adapters ?? defaultAdapters;
@@ -295,7 +301,6 @@ export class RoomEngine {
 
     const task = input.task.trim();
     if (!task) throw new EngineError('a room needs a task');
-    const additionalDirs = await validateAdditionalDirs(input.additionalDirs ?? []);
 
     // Precedence: whatever the caller passed > `.acr.json` in the repo > built-in defaults.
     const repoConfig = loadRepoConfig(repoRoot);
@@ -303,7 +308,9 @@ export class RoomEngine {
       ...(input.agents.length > 0 ? { agents: input.agents } : {}),
       ...(input.worktree === undefined ? {} : { worktree: input.worktree }),
       ...(input.models ? { models: input.models } : {}),
+      ...(input.additionalDirs ? { additional_dirs: input.additionalDirs } : {}),
     });
+    const additionalDirs = await validateAdditionalDirs(settings.additional_dirs ?? []);
 
     const mode: RoomMode = input.mode ?? 'build-review';
     const registry = opts.adapters ?? defaultAdapters;
@@ -404,11 +411,13 @@ export class RoomEngine {
       text: task,
     });
 
-    return new RoomEngine(
+    const engine = new RoomEngine(
       room,
       { ...opts, timeoutMs: opts.timeoutMs ?? settings.timeoutSeconds * 1000 },
-      repoConfig.warnings,
+      repoConfig,
     );
+
+    return engine;
   }
 
   /**
@@ -427,7 +436,7 @@ export class RoomEngine {
     const engine = new RoomEngine(
       room,
       { ...opts, timeoutMs: opts.timeoutMs ?? settings.timeoutSeconds * 1000 },
-      repoConfig.warnings,
+      repoConfig,
     );
     await engine.recover();
     return engine;
@@ -499,6 +508,7 @@ export class RoomEngine {
   private async runLocked(opts: RunOptions): Promise<RoomOutcome> {
     this.stopping = false;
     this.stopReason = undefined;
+    if (!(await this.ensureSetup())) return this.outcome({});
     if (opts.directTurn) return await this.runDirectTurn(opts.directTurn);
     if (this.roomRow.mode === 'brainstorm') return await this.runBrainstormRounds();
 
@@ -551,6 +561,10 @@ export class RoomEngine {
   stop(reason = 'stopped by request'): void {
     this.stopping = true;
     this.stopReason = reason;
+    if (this.activeCommandCancel) {
+      this.activeCommandCancel(reason);
+      this.activeCommandCancel = undefined;
+    }
     for (const handle of this.active) handle.cancel(reason);
   }
 
@@ -1057,6 +1071,26 @@ export class RoomEngine {
       return { done: true };
     }
 
+    // --- autonomous test runner gatekeeper ---------------------------------
+    let testResults: string | undefined;
+    const testCmd = this.repoConfig.config.testCommand;
+    if (testCmd) {
+      const startTime = Date.now();
+      const timeoutMs = this.repoConfig.config.timeoutSeconds
+        ? this.repoConfig.config.timeoutSeconds * 1000
+        : 120_000;
+      const { exitCode, output } = await this.runTestCommand(testCmd, cwd, timeoutMs);
+      if (this.stopping) {
+        this.setState('stopped');
+        return { done: true };
+      }
+      const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
+      testResults = `Command: ${testCmd}\nExit code: ${exitCode}\nDuration: ${durationSec}s\n\n${output}`;
+      const detail = output ? `:\n\`\`\`\n${output}\n\`\`\`` : '';
+      const summary = `[test runner] \`${testCmd}\` finished with exit code ${exitCode} (${durationSec}s)`;
+      this.system(`${summary}${detail}`, round);
+    }
+
     // --- reviewers, in parallel --------------------------------------------
     this.setState('waiting-reviews');
     const diffFile = this.spillDiffForReviewers(workerMessage.id, diff);
@@ -1075,10 +1109,30 @@ export class RoomEngine {
           diffStat,
           diff,
           ...(diffFile ? { diffFile } : {}),
+          ...(testResults ? { testResults } : {}),
           newMessages,
           watermark,
         });
-        const verdict = parseVerdict(turn.result.text, turn.result.structured);
+        let verdict = parseVerdict(turn.result.text, turn.result.structured);
+        if (verdict.ok && round >= 3 && verdict.verdict.blocking.length > 0) {
+          const enforced = enforceGoalposts(verdict.verdict, diff);
+          if (enforced.downgraded.length > 0) {
+            for (const d of enforced.downgraded) {
+              const citStr = d.citations.map((c) => `${c.file}:${c.line}`).join(', ');
+              const msg =
+                `[goalpost enforcement] downgraded blocking citation from ${reviewer.runtime} ` +
+                `("${d.item}") to nit: line(s) ${citStr} untouched by worker`;
+              this.system(msg, round);
+            }
+            if (enforced.verdict.decision === 'approve' && verdict.verdict.decision !== 'approve') {
+              const msg =
+                `[goalpost enforcement] all blocking issues from ${reviewer.runtime} ` +
+                'were on untouched code – verdict changed to APPROVE';
+              this.system(msg, round);
+            }
+            verdict = { ...verdict, verdict: enforced.verdict };
+          }
+        }
         const message = this.postTurnMessage(
           reviewer,
           turn,
@@ -1206,6 +1260,7 @@ export class RoomEngine {
       newMessages?: PromptMessage[];
       watermark?: string | null;
       phase?: BrainstormPhase;
+      testResults?: string;
     },
   ): Promise<{ result: TurnResult; stream: TurnStream; messageId: string }> {
     const adapter = this.registry[participant.runtime];
@@ -1232,6 +1287,7 @@ export class RoomEngine {
       ...(ctx.diff ? { diff: ctx.diff } : {}),
       ...(ctx.diffFile ? { diffFile: ctx.diffFile } : {}),
       ...(ctx.phase ? { phase: ctx.phase } : {}),
+      ...(ctx.testResults ? { testResults: ctx.testResults } : {}),
       ...(roleChanged ? { roleChanged } : {}),
       ...(room.baseSha ? { diffCommand: `git diff ${room.baseSha}` } : {}),
     });
@@ -1466,6 +1522,108 @@ export class RoomEngine {
       changedFiles: this.lastChangedFiles,
       ...extra,
     };
+  }
+
+  private async ensureSetup(): Promise<boolean> {
+    if (
+      !this.roomRow.worktreePath ||
+      !this.repoConfig.config.setup ||
+      this.repoConfig.config.setup.length === 0
+    ) {
+      return true;
+    }
+    const alreadyDone = this.messages.some(
+      (m) => m.kind === 'system' && m.round === 0 && m.text === '[setup] completed all steps',
+    );
+    if (alreadyDone) return true;
+
+    const setupResult = await this.runSetup(this.repoConfig.config.setup);
+    if (this.stopping) {
+      this.setState('stopped');
+      return false;
+    }
+    if (!setupResult.ok) {
+      this.system(
+        `[setup] failed on \`${setupResult.failedCommand}\` – stopping for human intervention`,
+        0,
+      );
+      this.setState('needs-you');
+      return false;
+    }
+    this.system('[setup] completed all steps', 0);
+    return true;
+  }
+
+  async runSetup(
+    commands: string[],
+  ): Promise<{ ok: boolean; failedCommand?: string; exitCode?: number }> {
+    const cwd = this.workdir();
+    const timeoutMs = this.repoConfig.config.timeoutSeconds
+      ? this.repoConfig.config.timeoutSeconds * 1000
+      : 120_000;
+    for (const cmd of commands) {
+      if (this.stopping) return { ok: false };
+      this.system(`[setup] running: ${cmd}`, 0);
+      const { exitCode, output } = await this.runTestCommand(cmd, cwd, timeoutMs);
+      const detail = output ? `:\n${output}` : '';
+      if (exitCode === 0) {
+        this.system(`[setup] \`${cmd}\` completed successfully${detail}`, 0);
+      } else {
+        this.system(`[setup] \`${cmd}\` failed with exit code ${exitCode}${detail}`, 0);
+        return { ok: false, failedCommand: cmd, exitCode };
+      }
+    }
+    return { ok: true };
+  }
+
+  private async runTestCommand(
+    cmd: string,
+    cwd: string,
+    timeoutMs = 120_000,
+  ): Promise<{ exitCode: number; output: string }> {
+    if (this.stopping) {
+      return { exitCode: 1, output: 'command cancelled: room stopping' };
+    }
+    return new Promise<{ exitCode: number; output: string }>((resolve) => {
+      let settled = false;
+      const child = spawn(cmd, { cwd, shell: true, detached: true, windowsHide: true });
+      let combined = '';
+      const MAX_OUTPUT = 64 * 1024;
+
+      const finish = (code: number, output: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.activeCommandCancel = undefined;
+        resolve({ exitCode: code, output: output.trim() });
+      };
+
+      const cancel = (reason = 'cancelled') => {
+        killProcessTree(child, 'SIGKILL');
+        finish(1, `command ${reason}`);
+      };
+
+      this.activeCommandCancel = cancel;
+
+      const timer = setTimeout(() => {
+        cancel(`timed out after ${Math.round(timeoutMs / 1000)}s`);
+      }, timeoutMs);
+
+      child.stdout?.on('data', (chunk) => {
+        combined += chunk;
+        if (combined.length > MAX_OUTPUT) combined = combined.slice(-MAX_OUTPUT);
+      });
+      child.stderr?.on('data', (chunk) => {
+        combined += chunk;
+        if (combined.length > MAX_OUTPUT) combined = combined.slice(-MAX_OUTPUT);
+      });
+      child.on('error', (err) => {
+        finish(1, err.message);
+      });
+      child.on('close', (code) => {
+        finish(code ?? 1, combined);
+      });
+    });
   }
 
   private emit(event: EngineEvent): void {

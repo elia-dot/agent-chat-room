@@ -1,6 +1,6 @@
 {
   "name": "@agent-chat-room/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Agent adapters, process plumbing, prompt builder and verdict parser for agent-chat-room.",

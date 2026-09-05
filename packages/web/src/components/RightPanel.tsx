@@ -31,6 +31,7 @@ export interface RightPanelProps {
   onContinue: () => void;
   onStop: () => void;
   onCloseRoom: () => void;
+  onPurgeRoom: () => void;
   onSetAdditionalDirs: (paths: string[]) => void;
   onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
   onCommit: () => void;
@@ -56,7 +57,11 @@ export function RightPanel(props: RightPanelProps): React.ReactElement {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          <DiffViewer diff={diff.text} loading={diff.loading} />
+          <DiffViewer
+            diff={diff.text}
+            loading={diff.loading}
+            basePath={room.worktreePath ?? room.repoRoot}
+          />
         </div>
       </Panel>
     );
@@ -347,6 +352,20 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
 
       <Action onClick={props.onCloseRoom} disabled={busy || room.closedAt !== null}>
         {room.closedAt ? 'Closed' : 'Close room (removes the worktree)'}
+      </Action>
+
+      <Action
+        onClick={() => {
+          const msg =
+            'Purge all data for this room (worktree, diffs, turn logs, and history)? ' +
+            'This cannot be undone.';
+          if (window.confirm(msg)) {
+            props.onPurgeRoom();
+          }
+        }}
+        disabled={busy || running}
+      >
+        Purge Data
       </Action>
     </div>
   );

@@ -119,3 +119,144 @@ export function decisionLabel(decision: VerdictDecision): string {
       return 'QUESTION';
   }
 }
+
+export interface FileCitation {
+  file: string;
+  line: number;
+}
+
+const KNOWN_EXTENSIONLESS_FILES = new Set([
+  'makefile',
+  'dockerfile',
+  'containerfile',
+  'vagrantfile',
+  'rakefile',
+  'gemfile',
+  'procfile',
+  'license',
+  'notice',
+]);
+
+function isLikelyFilePath(path: string): boolean {
+  if (path.includes('/') || path.includes('\\')) return true;
+  const dotIndex = path.lastIndexOf('.');
+  if (dotIndex > 0 && dotIndex < path.length - 1) return true;
+  return KNOWN_EXTENSIONLESS_FILES.has(path.toLowerCase());
+}
+
+export function parseFileCitations(text: string): FileCitation[] {
+  const citationRe = /(?:^|[\s([`'"])((?:[a-zA-Z0-9_.-]+[/\\])*[a-zA-Z0-9_.-]+):(\d+)\b/g;
+  const citations: FileCitation[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = citationRe.exec(text)) !== null) {
+    const rawFile = match[1]!;
+    if (isLikelyFilePath(rawFile) && rawFile !== 'http' && rawFile !== 'https') {
+      citations.push({
+        file: rawFile.replace(/\\/g, '/'),
+        line: Number.parseInt(match[2]!, 10),
+      });
+    }
+  }
+  return citations;
+}
+
+const DIFF_FILE_RE = /^diff --git a\/(.+?) b\/(.+)$/;
+const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+export function parseModifiedHunks(
+  diffText: string,
+): Map<string, { start: number; end: number }[]> {
+  const map = new Map<string, { start: number; end: number }[]>();
+  let currentFile: string | undefined;
+
+  for (const line of diffText.split('\n')) {
+    const fileMatch = DIFF_FILE_RE.exec(line);
+    if (fileMatch) {
+      currentFile = fileMatch[2]!;
+      if (!map.has(currentFile)) {
+        map.set(currentFile, []);
+      }
+      continue;
+    }
+    if (!currentFile) continue;
+
+    const hunkMatch = HUNK_HEADER_RE.exec(line);
+    if (hunkMatch) {
+      const newLineStart = Number(hunkMatch[3]);
+      const newLineCount = hunkMatch[4] !== undefined ? Number(hunkMatch[4]) : 1;
+      const range = {
+        start: newLineStart,
+        end: newLineStart + Math.max(newLineCount, 1) - 1,
+      };
+      map.get(currentFile)?.push(range);
+    }
+  }
+
+  return map;
+}
+
+export function isLineInModifiedHunks(
+  file: string,
+  line: number,
+  modifiedMap: Map<string, { start: number; end: number }[]>,
+): boolean {
+  const normalized = file.replace(/\\/g, '/');
+  for (const [diffFile, ranges] of modifiedMap.entries()) {
+    if (
+      diffFile === normalized ||
+      diffFile.endsWith(`/${normalized}`) ||
+      normalized.endsWith(`/${diffFile}`)
+    ) {
+      for (const range of ranges) {
+        if (line >= range.start && line <= range.end) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+export interface GoalpostEnforcementResult {
+  verdict: Verdict;
+  downgraded: { item: string; citations: FileCitation[] }[];
+}
+
+/**
+ * Mechanical Goalpost Enforcement (starting in Round 3):
+ * Compare cited lines from blocking verdict items against git diff hunks.
+ * If a blocking citation points to untouched code, downgrade it to a nit.
+ */
+export function enforceGoalposts(verdict: Verdict, diffText: string): GoalpostEnforcementResult {
+  const modifiedMap = parseModifiedHunks(diffText);
+  const remainingBlocking: string[] = [];
+  const nits = [...verdict.nits];
+  const downgraded: { item: string; citations: FileCitation[] }[] = [];
+
+  for (const item of verdict.blocking) {
+    const citations = parseFileCitations(item);
+    if (
+      citations.length > 0 &&
+      citations.every((c) => !isLineInModifiedHunks(c.file, c.line, modifiedMap))
+    ) {
+      downgraded.push({ item, citations });
+      nits.push(item);
+    } else {
+      remainingBlocking.push(item);
+    }
+  }
+
+  const decision: VerdictDecision =
+    verdict.decision === 'request-changes' && remainingBlocking.length === 0
+      ? 'approve'
+      : verdict.decision;
+
+  return {
+    verdict: {
+      decision,
+      blocking: remainingBlocking,
+      nits,
+    },
+    downgraded,
+  };
+}

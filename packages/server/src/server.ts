@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { RoomStore } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 
 import { createApp } from './app.js';
+import { getOrCreateServerToken } from './security.js';
 import { RoomSupervisor } from './supervisor.js';
 
 export const DEFAULT_PORT = 4321;
@@ -24,11 +26,15 @@ export interface ServerOptions {
    * surprise for anything that hard-coded the URL.
    */
   portAttempts?: number;
+  /** Capability token for API authorization. Pass `false` to disable. */
+  token?: string | false;
 }
 
 export interface RunningServer {
   url: string;
   port: number;
+  token?: string;
+  urlWithToken?: string;
   app: FastifyInstance;
   supervisor: RoomSupervisor;
   close(): Promise<void>;
@@ -46,11 +52,16 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
   const ownsStore = opts.store === undefined;
   const supervisor = new RoomSupervisor({ store });
   const webRoot = opts.webRoot === false ? undefined : (opts.webRoot ?? defaultWebRoot());
+  const token =
+    opts.token === false
+      ? undefined
+      : getOrCreateServerToken(typeof opts.token === 'string' ? opts.token : undefined);
 
   const app = await createApp({
     supervisor,
     ...(webRoot ? { webRoot } : {}),
     ...(opts.logger === undefined ? {} : { logger: opts.logger }),
+    ...(token ? { token } : {}),
   });
 
   const attempts = opts.portAttempts ?? 10;
@@ -74,10 +85,12 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
   // the failure this avoids.
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : wanted;
+  const url = `http://${HOST}:${port}`;
 
   return {
-    url: `http://${HOST}:${port}`,
+    url,
     port,
+    ...(token ? { token, urlWithToken: `${url}/?token=${token}` } : {}),
     app,
     supervisor,
     async close(): Promise<void> {
@@ -94,8 +107,13 @@ function isAddressInUse(err: unknown): boolean {
 
 /**
  * `packages/web/dist`, relative to this file in both layouts it can run from: `dist/` in a
- * build, `src/` under vite-node or a test.
+ * build, `src/` under vite-node or a test, or `./web` in the distributed package.
  */
 export function defaultWebRoot(): string {
+  const candidates = ['../../web/dist', '../../../packages/web/dist', './web', '../web'];
+  for (const rel of candidates) {
+    const p = fileURLToPath(new URL(rel, import.meta.url));
+    if (existsSync(p)) return p;
+  }
   return fileURLToPath(new URL('../../web/dist', import.meta.url));
 }

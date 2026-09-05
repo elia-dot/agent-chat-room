@@ -11,7 +11,12 @@ import type {
   TurnEvent,
   gh,
 } from '@agent-chat-room/core';
-import { EngineError, RoomEngine, validateAdditionalDirs } from '@agent-chat-room/core';
+import {
+  EngineError,
+  RoomEngine,
+  purgeRoomData,
+  validateAdditionalDirs,
+} from '@agent-chat-room/core';
 
 import { notify, type NotifyOptions } from './notify.js';
 
@@ -344,6 +349,26 @@ export class RoomSupervisor {
     const room = entry.engine.room;
     this.forget(roomId);
     return room;
+  }
+
+  /**
+   * Purge the room completely: stop if loaded, evict from supervisor, and delete all
+   * associated on-disk worktree files, overflow diffs, turn logs, and database rows.
+   */
+  async purge(
+    roomId: string,
+  ): Promise<{ worktreeRemoved: boolean; diffsRemoved: number; turnsRemoved: number }> {
+    const entry = this.rooms.get(roomId);
+    if (entry?.running) {
+      throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
+    }
+    if (entry) {
+      entry.engine.stop('room purged');
+      this.forget(roomId);
+    }
+    const room = this.opts.store.findRoom(roomId);
+    if (!room) throw new EngineError(`room ${roomId.slice(0, 8)} not found`);
+    return await purgeRoomData(room, this.opts.store);
   }
 
   /** Stop every room and drop every engine. Called when the server shuts down. */

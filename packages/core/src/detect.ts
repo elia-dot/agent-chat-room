@@ -10,17 +10,27 @@ import { delimiter, isAbsolute, join } from 'node:path';
  * Windows; walking `PATH` ourselves is both faster and portable.
  */
 export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const isWin = process.platform === 'win32';
+  const exts = isWin ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+
   if (bin.includes('/') || bin.includes('\\')) {
-    return isExecutable(bin) ? bin : undefined;
+    if (isExecutable(bin)) return bin;
+    if (isWin) {
+      for (const ext of exts) {
+        const candidate = bin.toLowerCase().endsWith(ext.toLowerCase()) ? bin : bin + ext;
+        if (isExecutable(candidate)) return candidate;
+      }
+    }
+    return undefined;
   }
   const pathVar = env.PATH ?? env.Path ?? '';
-  const exts =
-    process.platform === 'win32'
-      ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-      : [''];
 
   for (const dir of pathVar.split(delimiter)) {
     if (dir.length === 0) continue;
+    if (isWin && isExecutable(join(dir, bin))) {
+      const candidate = join(dir, bin);
+      return isAbsolute(candidate) ? candidate : join(process.cwd(), candidate);
+    }
     for (const ext of exts) {
       const candidate = join(dir, bin + ext);
       if (isExecutable(candidate))

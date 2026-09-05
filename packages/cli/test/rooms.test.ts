@@ -250,4 +250,52 @@ describe('acr rooms', () => {
       rooms({ subcommand: 'show', id: 'nope', cwd: process.cwd(), store }),
     ).rejects.toThrow(/no room matches "nope"/);
   });
+
+  it('refuses to purge an open room', async () => {
+    const dir = repo();
+    const summary = await seed(dir, [
+      workerTurn(1, 'Swapped operator.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+
+    const capture = new Capture();
+    const code = await rooms({
+      subcommand: 'purge',
+      id: summary.roomId,
+      cwd: dir,
+      store,
+      renderer: new Renderer({ color: false, write: capture.write }),
+    });
+    expect(code).toBe(EXIT.usage);
+    expect(capture.text).toContain('is still open');
+    expect(store.findRoom(summary.roomId)).toBeDefined();
+  });
+
+  it('purges a closed room from the store', async () => {
+    const dir = repo();
+    const summary = await seed(dir, [
+      workerTurn(1, 'Swapped operator.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+
+    await rooms({
+      subcommand: 'close',
+      id: summary.roomId,
+      cwd: dir,
+      store,
+      renderer: new Renderer({ color: false, write: () => undefined }),
+    });
+
+    const capture = new Capture();
+    const code = await rooms({
+      subcommand: 'purge',
+      id: summary.roomId,
+      cwd: dir,
+      store,
+      renderer: new Renderer({ color: false, write: capture.write }),
+    });
+    expect(code).toBe(EXIT.ok);
+    expect(capture.text).toContain('purged room');
+    expect(store.findRoom(summary.roomId)).toBeUndefined();
+  });
 });

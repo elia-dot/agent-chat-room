@@ -1,6 +1,6 @@
 {
   "name": "@agent-chat-room/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "The localhost Fastify + WebSocket server that puts the room engine in a browser.",

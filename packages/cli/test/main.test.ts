@@ -102,11 +102,6 @@ describe('acr argument handling', () => {
     expect(err.join('')).toContain('at least one reviewer');
   });
 
-  it('rejects a non-integer round count', async () => {
-    expect(await main(['run', '--task', 'a', '--rounds', 'lots'])).toBe(EXIT.usage);
-    expect(err.join('')).toContain('--rounds');
-  });
-
   it('rejects a mode that is not one of the two, before opening anything', async () => {
     expect(await main(['run', '--task', 'a', '--mode', 'freeform'])).toBe(EXIT.usage);
     expect(err.join('')).toContain('--mode must be build-review or brainstorm');

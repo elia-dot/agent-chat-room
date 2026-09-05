@@ -27,6 +27,12 @@ export const RepoConfigSchema = z.object({
       reviewer: PermissionSchema.optional(),
     })
     .optional(),
+  /** Extra workspace roots to mount in agent turns. */
+  additional_dirs: z.array(z.string()).optional(),
+  /** Commands to execute in the worktree after creation. */
+  setup: z.array(z.string()).optional(),
+  /** Test command to run between worker and reviewer turns. */
+  testCommand: z.string().optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -103,6 +109,9 @@ export interface RoomDefaults {
   models: Record<string, string>;
   workerPermission: Permission;
   reviewerPermission: Permission;
+  additional_dirs?: string[];
+  setup?: string[];
+  testCommand?: string;
 }
 
 export const BUILTIN_DEFAULTS: RoomDefaults = {
@@ -120,6 +129,9 @@ export interface RoomOverrides {
   worktree?: boolean;
   timeoutSeconds?: number;
   models?: Record<string, string>;
+  additional_dirs?: string[];
+  setup?: string[];
+  testCommand?: string;
 }
 
 /** CLI flags > `.acr.json` > built-in defaults. */
@@ -135,6 +147,9 @@ export function resolveRoomDefaults(
     models: { ...BUILTIN_DEFAULTS.models, ...config.models, ...overrides.models },
     workerPermission: config.permissions?.worker ?? BUILTIN_DEFAULTS.workerPermission,
     reviewerPermission: config.permissions?.reviewer ?? BUILTIN_DEFAULTS.reviewerPermission,
+    additional_dirs: overrides.additional_dirs ?? config.additional_dirs,
+    setup: overrides.setup ?? config.setup,
+    testCommand: overrides.testCommand ?? config.testCommand,
   };
 }
 
