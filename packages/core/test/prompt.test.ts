@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MAX_INLINE_DIFF_BYTES, buildTurnPrompt } from '../src/prompt.js';
+import { NO_MOVING_GOALPOSTS, roleInstructions } from '../src/roles.js';
 
 const base = {
   runtime: 'claude',
@@ -13,6 +14,28 @@ const base = {
 };
 
 describe('buildTurnPrompt', () => {
+  it('omits only role instructions when delivered separately', () => {
+    const input = {
+      ...base,
+      newMessages: [{ author: 'owner', text: 'Keep the redirect.' }],
+      diff: '+fixed',
+      testResults: '1 test passed',
+      roleChanged: 'You were a reviewer; you are now the worker.',
+    };
+    const full = buildTurnPrompt(input);
+    const compact = buildTurnPrompt({ ...input, includeRoleInstructions: false });
+    expect(full).toBe(`${compact}\n## Your job now\n${roleInstructions('worker')}\n`);
+    expect(Buffer.byteLength(compact)).toBeLessThan(Buffer.byteLength(full));
+  });
+
+  it('retains round-specific reviewer rules in inline instructions', () => {
+    expect(buildTurnPrompt({ ...base, role: 'reviewer', round: 3 })).toContain(NO_MOVING_GOALPOSTS);
+  });
+
+  it.each(['answer', 'react', 'merge'] as const)('retains the %s phase instructions', (phase) => {
+    expect(buildTurnPrompt({ ...base, phase })).toContain(roleInstructions('worker', { phase }));
+  });
+
   it('matches the layout in PLAN.md section 4.2', () => {
     expect(buildTurnPrompt(base)).toMatchInlineSnapshot(`
       "You are claude acting as WORKER in room "fix the flaky login test" (round 1).

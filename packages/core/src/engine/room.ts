@@ -1291,6 +1291,10 @@ export class RoomEngine {
       cwd: ctx.cwd,
       branch: room.roomBranch,
       task: room.task,
+      includeRoleInstructions: !(
+        adapter.capabilities.systemAppendDelivery === 'every-turn' ||
+        (adapter.capabilities.systemAppendDelivery === 'first-turn' && !participant.sessionId)
+      ),
       newMessages,
       ...(ctx.diffStat ? { diffStat: ctx.diffStat } : {}),
       ...(ctx.diff ? { diff: ctx.diff } : {}),

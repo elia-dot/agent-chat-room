@@ -240,6 +240,7 @@ export const cursorAdapter: AgentAdapter = {
   // No `--output-schema` equivalent, and none is needed: the fenced verdict block is the
   // portable contract and the schema flags are the optional extra (see `verdict.ts`).
   capabilities: {
+    systemAppendDelivery: 'first-turn',
     resume: true,
     readOnly: true,
     structuredOutput: false,

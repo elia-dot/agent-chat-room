@@ -297,6 +297,7 @@ export const antigravityAdapter: AgentAdapter = {
   id: 'antigravity',
   displayName: 'Antigravity',
   capabilities: {
+    systemAppendDelivery: 'first-turn',
     resume: true,
     readOnly: true,
     // `--json-schema` exists, but it only shapes the final text and the `result` event has
