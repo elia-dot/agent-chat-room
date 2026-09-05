@@ -151,6 +151,8 @@ export const api = {
   resume: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/resume`),
   stop: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/stop`),
   close: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/close`),
+  addRounds: (id: string, count: number) =>
+    post<{ room: Room }>(`/api/rooms/${id}/rounds`, { count }),
 
   patchRoom: (
     id: string,

@@ -266,10 +266,12 @@ export function App(): React.ReactElement {
           onContinue={() => void act(() => api.start(room.id))}
           onStop={() => void act(() => api.stop(room.id))}
           onCloseRoom={() => void act(() => api.close(room.id))}
-          onRaiseRounds={(rounds) =>
+          onAddRounds={(count) =>
             void act(async () => {
-              await api.patchRoom(room.id, { maxRounds: rounds });
-              await api.start(room.id);
+              const { room: extended } = await api.addRounds(room.id, count);
+              store.merge({ room: extended });
+              const { room: started } = await api.start(room.id);
+              store.merge({ room: started });
             })
           }
           onSetAdditionalDirs={(additionalDirs) =>

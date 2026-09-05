@@ -67,6 +67,8 @@ const StartBody = z
   .optional()
   .default({});
 
+const AddRoundsBody = z.object({ count: z.number().int().positive().max(50) });
+
 const PatchBody = z
   .object({
     maxRounds: z.number().int().positive().max(50).optional(),
@@ -264,6 +266,12 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
     const body = PromoteBody.parse(request.body ?? {});
     const engine = await supervisor.promote(room.id, body);
     await reply.status(201).send({ room: engine.room, participants: engine.participants });
+  });
+
+  app.post('/api/rooms/:id/rounds', async (request) => {
+    const room = requireRoom(supervisor, request.params);
+    const body = AddRoundsBody.parse(request.body);
+    return { room: await supervisor.addRounds(room.id, body.count) };
   });
 
   app.get('/api/rooms/:id/export.md', async (request, reply) => {

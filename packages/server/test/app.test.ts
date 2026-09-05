@@ -334,6 +334,20 @@ describe('the REST surface', () => {
     expect(patched.json<{ room: Room }>().room.maxRounds).toBe(6);
     expect((await h.supervisor.open(id)).room.maxRounds).toBe(6);
 
+    const added = await h.app.inject({
+      method: 'POST',
+      url: `/api/rooms/${id}/rounds`,
+      payload: { count: 2 },
+    });
+    expect(added.json<{ room: Room }>().room.maxRounds).toBe(8);
+
+    const addedAgain = await h.app.inject({
+      method: 'POST',
+      url: `/api/rooms/${id}/rounds`,
+      payload: { count: 3 },
+    });
+    expect(addedAgain.json<{ room: Room }>().room.maxRounds).toBe(11);
+
     const nothing = await h.app.inject({
       method: 'PATCH',
       url: `/api/rooms/${id}`,

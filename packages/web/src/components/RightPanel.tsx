@@ -31,7 +31,7 @@ export interface RightPanelProps {
   onContinue: () => void;
   onStop: () => void;
   onCloseRoom: () => void;
-  onRaiseRounds: (rounds: number) => void;
+  onAddRounds: (rounds: number) => void;
   onSetAdditionalDirs: (paths: string[]) => void;
   onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
   onCommit: () => void;
@@ -300,7 +300,7 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
           </Action>
         ) : exhausted ? (
           <Action
-            onClick={() => props.onRaiseRounds(room.maxRounds + additionalRounds)}
+            onClick={() => props.onAddRounds(additionalRounds)}
             disabled={busy || !canAddRounds}
           >
             Add {additionalRounds || ''} rounds &amp; continue

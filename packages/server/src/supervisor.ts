@@ -225,6 +225,17 @@ export class RoomSupervisor {
     return entry.engine.reload();
   }
 
+  /** Add to the current limit atomically, so a stale browser cannot reset it to an old cap. */
+  async addRounds(roomId: string, count: number): Promise<Room> {
+    const entry = await this.entry(roomId);
+    const maxRounds = entry.engine.room.maxRounds + count;
+    if (maxRounds > 50) {
+      throw new EngineError('a room can have at most 50 rounds');
+    }
+    this.opts.store.updateRoom(roomId, { maxRounds });
+    return entry.engine.reload();
+  }
+
   /**
    * Swap a participant's role or change its model.
    *
