@@ -53,7 +53,6 @@ export interface CreateRoomInput {
   agents: string[];
   title?: string;
   mode?: RoomMode;
-  maxRounds?: number;
   /** Run in a dedicated git worktree (default). `false` works in the checkout itself. */
   worktree?: boolean;
   /** Per-runtime model override, e.g. `{ claude: 'opus' }`. */
@@ -142,8 +141,9 @@ const DEFAULT_TIMEOUT_MS = 1800_000;
 
 /**
  * Brainstorm mode is exactly three rounds (PLAN.md section 3): answer, react, merge. It is
- * a fixed shape rather than a limit, so `maxRounds` on a brainstorm room is this and the
- * new-room dialog hides the field.
+ * a fixed shape, so `maxRounds` on a brainstorm room is this. A build-review room has no
+ * round limit at all – it runs until every reviewer approves, someone asks you a question,
+ * or you pause or stop it – and stores `0` there.
  */
 export const BRAINSTORM_ROUNDS = 3;
 
@@ -265,7 +265,7 @@ export class RoomEngine {
 
   /**
    * Re-read the room row. A long-lived engine caches it, so anything that edits the row
-   * from outside – the server raising the round limit, say – has to say so.
+   * from outside – the server renaming the room, say – has to say so.
    */
   reload(): Room {
     const row = this.store.getRoom(this.roomRow.id);
@@ -301,7 +301,6 @@ export class RoomEngine {
     const repoConfig = loadRepoConfig(repoRoot);
     const settings = resolveRoomDefaults(repoConfig.config, {
       ...(input.agents.length > 0 ? { agents: input.agents } : {}),
-      ...(input.maxRounds ? { rounds: input.maxRounds } : {}),
       ...(input.worktree === undefined ? {} : { worktree: input.worktree }),
       ...(input.models ? { models: input.models } : {}),
     });
@@ -387,8 +386,8 @@ export class RoomEngine {
       roomBranch,
       baseSha,
       worktreePath,
-      // A brainstorm is three fixed phases, not a loop with a budget.
-      maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : settings.rounds,
+      // A brainstorm is three fixed phases; a build loop has no budget at all.
+      maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : 0,
     });
 
     roster.forEach((participant, index) => {
@@ -519,16 +518,6 @@ export class RoomEngine {
         break;
       }
       const round = this.roomRow.round + 1;
-      if (round > this.roomRow.maxRounds) {
-        // Resuming a room that already used up its rounds. Say so rather than looking
-        // like a no-op: raising `maxRounds` is what the human has to decide.
-        this.system(
-          `this room has already used all ${this.roomRow.maxRounds} of its rounds. ` +
-            `Raise the round limit to continue.`,
-        );
-        this.setState('needs-you');
-        break;
-      }
 
       let lock: LockHandle;
       try {
@@ -1159,18 +1148,8 @@ export class RoomEngine {
       return { done: true, ...(commit ? { commit } : {}) };
     }
 
-    if (round >= this.roomRow.maxRounds) {
-      const open = ok.flatMap((r) => (r.verdict.ok ? r.verdict.verdict.blocking : []));
-      const list = open.length > 0 ? `\n${open.map((i) => `- ${i}`).join('\n')}` : ' none cited.';
-      this.system(
-        `stopping after ${round} of ${this.roomRow.maxRounds} rounds without an approval. ` +
-          `Open blocking items:${list}`,
-        round,
-      );
-      this.setState('needs-you');
-      return { done: true };
-    }
-
+    // No round budget: a request-changes round is followed by another round, for as long
+    // as it takes. The human has Pause and Stop for the case where it is taking too long.
     return { done: false };
   }
 

@@ -35,7 +35,6 @@ describe('.acr.json', () => {
   it('overrides the built-in defaults', () => {
     const dir = repoWith({
       agents: ['codex', 'claude', 'cursor'],
-      rounds: 6,
       worktree: false,
       timeoutSeconds: 60,
       models: { claude: 'opus' },
@@ -46,7 +45,6 @@ describe('.acr.json', () => {
 
     const settings = resolveRoomDefaults(loaded.config);
     expect(settings.agents).toEqual(['codex', 'claude', 'cursor']);
-    expect(settings.rounds).toBe(6);
     expect(settings.worktree).toBe(false);
     expect(settings.timeoutSeconds).toBe(60);
     expect(settings.models).toEqual({ claude: 'opus' });
@@ -55,9 +53,9 @@ describe('.acr.json', () => {
   });
 
   it('lets a CLI flag win over the file, and the file over the defaults', () => {
-    const loaded = loadRepoConfig(repoWith({ agents: ['codex', 'claude'], rounds: 6 }));
-    const settings = resolveRoomDefaults(loaded.config, { rounds: 2 });
-    expect(settings.rounds).toBe(2);
+    const loaded = loadRepoConfig(repoWith({ agents: ['codex', 'claude'], timeoutSeconds: 60 }));
+    const settings = resolveRoomDefaults(loaded.config, { timeoutSeconds: 20 });
+    expect(settings.timeoutSeconds).toBe(20);
     expect(settings.agents).toEqual(['codex', 'claude']);
     expect(settings.worktree).toBe(BUILTIN_DEFAULTS.worktree);
   });
@@ -70,16 +68,16 @@ describe('.acr.json', () => {
 
   it('warns about an unknown key instead of failing', () => {
     // A config written by a newer acr must not brick an older one.
-    const loaded = loadRepoConfig(repoWith({ rounds: 3, futureFeature: { on: true } }));
-    expect(loaded.config.rounds).toBe(3);
+    const loaded = loadRepoConfig(repoWith({ worktree: false, futureFeature: { on: true } }));
+    expect(loaded.config.worktree).toBe(false);
     expect(loaded.warnings.join('\n')).toMatch(/unknown key "futureFeature"/);
   });
 
   it('drops one bad field and keeps the rest', () => {
-    const loaded = loadRepoConfig(repoWith({ rounds: -1, agents: ['echo', 'echo'] }));
+    const loaded = loadRepoConfig(repoWith({ timeoutSeconds: -1, agents: ['echo', 'echo'] }));
     expect(loaded.config.agents).toEqual(['echo', 'echo']);
-    expect(loaded.config.rounds).toBeUndefined();
-    expect(loaded.warnings.join('\n')).toMatch(/ignoring "rounds"/);
+    expect(loaded.config.timeoutSeconds).toBeUndefined();
+    expect(loaded.warnings.join('\n')).toMatch(/ignoring "timeoutSeconds"/);
   });
 
   it('ignores a file that is not valid JSON', () => {

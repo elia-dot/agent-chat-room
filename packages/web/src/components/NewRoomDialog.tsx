@@ -20,7 +20,7 @@ export interface NewRoomDialogProps {
 
 /**
  * PLAN.md section 5.5: repo picker (recent + native chooser), task, mode, roster as toggle
- * cards in worker-first order with a model each, max rounds, worktree.
+ * cards in worker-first order with a model each, worktree.
  *
  * Order is the role: in a build-review room the first selected runtime is the worker and
  * every other one reviews; in a brainstorm the last one moderates. That is the same rule
@@ -43,7 +43,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [agents, setAgents] = useState<string[]>([]);
   const [mode, setMode] = useState<RoomMode>('build-review');
   const [models, setModels] = useState<Record<string, string>>({});
-  const [maxRounds, setMaxRounds] = useState(4);
   const [worktree, setWorktree] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -141,8 +140,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
         mode,
         worktree,
         start: true,
-        // A brainstorm is three fixed phases, so a round budget would be meaningless.
-        ...(mode === 'brainstorm' ? {} : { maxRounds }),
         ...(Object.keys(chosen).length > 0 ? { models: chosen } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       });
@@ -377,18 +374,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 className="w-56 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </Field>
-            {mode === 'build-review' && (
-              <Field label="Max rounds">
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={maxRounds}
-                  onChange={(e) => setMaxRounds(Number(e.target.value))}
-                  className="w-20 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                />
-              </Field>
-            )}
             <label className="flex items-center gap-2 pb-1.5 text-sm">
               <input
                 type="checkbox"

@@ -62,13 +62,12 @@ afterEach(() => {
 });
 
 /** Run a room to completion so `rooms` has something to list. */
-async function seed(dir: string, turns: unknown[], maxRounds = 4) {
+async function seed(dir: string, turns: unknown[]) {
   process.env.ACR_ECHO_SCRIPT = writeEchoScript({ turns });
   const summary = await run({
     task: 'fix add()',
     cwd: dir,
     agents: ['echo', 'echo'],
-    maxRounds,
     timeoutMs: 5000,
     store,
     renderer: new Renderer({ color: false, write: () => undefined }),
@@ -155,19 +154,14 @@ describe('acr rooms', () => {
     expect(shown.turns).toHaveLength(2);
   });
 
-  it('resumes a room that ran out of rounds', async () => {
+  it('resumes a room that stopped for a question', async () => {
     const dir = repo();
-    const first = await seed(
-      dir,
-      [
-        workerTurn(1, 'Attempt.', { 'math.js': HALF }),
-        reviewTurn(1, verdict('request-changes', ['math.js:2 todo'])),
-      ],
-      1,
-    );
+    const first = await seed(dir, [
+      workerTurn(1, 'Attempt.', { 'math.js': HALF }),
+      reviewTurn(1, verdict('question', ['math.js:2 todo?'])),
+    ]);
     expect(first.state).toBe('needs-you');
 
-    store.updateRoom(first.roomId, { maxRounds: 2 });
     process.env.ACR_ECHO_SCRIPT = writeEchoScript({
       turns: [workerTurn(2, 'Fixed.', { 'math.js': FIXED }), reviewTurn(2, verdict('approve'))],
     });

@@ -28,7 +28,9 @@ export function roomToMarkdown(input: RoomExportInput): string {
   out.push(`- **Branch** \`${room.roomBranch}\` from \`${room.baseBranch}\``);
   if (room.baseSha) out.push(`- **Base** \`${room.baseSha}\``);
   out.push(`- **State** ${room.state}${room.paused ? ' (paused)' : ''}`);
-  out.push(`- **Rounds** ${room.round} of ${room.maxRounds}`);
+  out.push(
+    `- **Rounds** ${room.mode === 'brainstorm' ? `${room.round} of ${room.maxRounds}` : room.round}`,
+  );
   if (room.prUrl) out.push(`- **Pull request** ${room.prUrl}`);
   out.push(`- **Opened** ${room.createdAt}`);
   out.push('');

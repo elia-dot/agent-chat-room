@@ -122,13 +122,13 @@ describe('acr argument handling', () => {
     expect(await main(['run', '--task', 'a', '--frobnicate'])).toBe(EXIT.usage);
   });
 
-  it('documents the surface: serve, rounds, worktrees, .acr.json, rooms, mode and models', async () => {
+  it('documents the surface: serve, worktrees, .acr.json, rooms, mode and models', async () => {
     await main(['--help']);
     const help = out.join('');
     expect(help).toContain('acr serve [--port N] [--no-open]');
     expect(help).toContain('127.0.0.1');
     expect(help).toContain('acr rooms ls | show <id> | export <id> | resume <id> | close <id>');
-    expect(help).toContain('--rounds <n>');
+    expect(help).not.toContain('--rounds');
     expect(help).toContain('--no-worktree');
     expect(help).toContain('.acr.json');
     expect(help).toContain('--mode <mode>');

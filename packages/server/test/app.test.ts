@@ -138,10 +138,9 @@ describe('the REST surface', () => {
   });
 
   it('creates a room, lists it, and reads it back with its roster and transcript', async () => {
-    const created = await createRoom({ title: 'Fix add()', maxRounds: 2 });
+    const created = await createRoom({ title: 'Fix add()' });
     expect(created.status).toBe(201);
     expect(created.body.room.title).toBe('Fix add()');
-    expect(created.body.room.maxRounds).toBe(2);
     expect(created.body.participants.map((p) => `${p.role}:${p.runtime}`)).toEqual([
       'worker:echo',
       'reviewer:echo2',
@@ -314,8 +313,8 @@ describe('the REST surface', () => {
     expect(empty.statusCode).toBe(400);
   });
 
-  it('pauses, resumes, raises the round limit and closes', async () => {
-    const { body } = await createRoom({ maxRounds: 1 });
+  it('pauses, resumes, renames and closes', async () => {
+    const { body } = await createRoom();
     const id = body.room.id;
 
     const paused = await h.app.inject({ method: 'POST', url: `/api/rooms/${id}/pause` });
@@ -324,29 +323,14 @@ describe('the REST surface', () => {
     const resumed = await h.app.inject({ method: 'POST', url: `/api/rooms/${id}/resume` });
     expect(resumed.json<{ room: Room }>().room.paused).toBe(false);
 
-    // Raising the limit is the one edit M2 needs: a room that used up its rounds would
-    // otherwise dead-end in the browser.
+    // The edit reaches the live engine, not only the row.
     const patched = await h.app.inject({
       method: 'PATCH',
       url: `/api/rooms/${id}`,
-      payload: { maxRounds: 6 },
+      payload: { title: 'Fix add() properly' },
     });
-    expect(patched.json<{ room: Room }>().room.maxRounds).toBe(6);
-    expect((await h.supervisor.open(id)).room.maxRounds).toBe(6);
-
-    const added = await h.app.inject({
-      method: 'POST',
-      url: `/api/rooms/${id}/rounds`,
-      payload: { count: 2 },
-    });
-    expect(added.json<{ room: Room }>().room.maxRounds).toBe(8);
-
-    const addedAgain = await h.app.inject({
-      method: 'POST',
-      url: `/api/rooms/${id}/rounds`,
-      payload: { count: 3 },
-    });
-    expect(addedAgain.json<{ room: Room }>().room.maxRounds).toBe(11);
+    expect(patched.json<{ room: Room }>().room.title).toBe('Fix add() properly');
+    expect((await h.supervisor.open(id)).room.title).toBe('Fix add() properly');
 
     const nothing = await h.app.inject({
       method: 'PATCH',

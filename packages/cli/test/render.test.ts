@@ -169,7 +169,7 @@ describe('Renderer', () => {
     r.roomLine(room());
     expect(c.text).toContain('aaaabbbb');
     expect(c.text).toContain('Fix add()');
-    expect(c.text).toContain('approved · round 2/4 · acr/fix-add');
+    expect(c.text).toContain('approved · round 2 · acr/fix-add');
   });
 
   it('says so when there is no verdict', () => {

@@ -122,8 +122,8 @@ describe('PATCH /api/rooms/:id/participants/:participantId', () => {
       'echo:reviewer',
       'echo2:worker',
     ]);
-    // The same engine object sees it – this is the stale-`maxRounds` bug class that
-    // `patch()` exists to prevent, applied to the roster.
+    // The same engine object sees it – this is the stale-row bug class that `patch()`
+    // exists to prevent, applied to the roster.
     expect(live.participants.find((p) => p.role === 'worker')?.runtime).toBe('echo2');
   });
 

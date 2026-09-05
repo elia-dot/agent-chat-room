@@ -192,8 +192,8 @@ export function App(): React.ReactElement {
               <StatusDot state={room.state} paused={room.paused} />
               <h2 className="min-w-0 flex-1 truncate font-medium"># {room.title}</h2>
               <span className="text-xs text-zinc-500">
-                {stateLabel(room.state, room.paused, room.mode)} · round {room.round}/
-                {room.maxRounds}
+                {stateLabel(room.state, room.paused, room.mode)} · round {room.round}
+                {room.mode === 'brainstorm' ? `/${room.maxRounds}` : ''}
               </span>
             </>
           ) : (
@@ -266,14 +266,6 @@ export function App(): React.ReactElement {
           onContinue={() => void act(() => api.start(room.id))}
           onStop={() => void act(() => api.stop(room.id))}
           onCloseRoom={() => void act(() => api.close(room.id))}
-          onAddRounds={(count) =>
-            void act(async () => {
-              const { room: extended } = await api.addRounds(room.id, count);
-              store.merge({ room: extended });
-              const { room: started } = await api.start(room.id);
-              store.merge({ room: started });
-            })
-          }
           onSetAdditionalDirs={(additionalDirs) =>
             void act(async () => {
               const { room: updated } = await api.patchRoom(room.id, { additionalDirs });

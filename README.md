@@ -35,7 +35,8 @@ somewhere for a finished room to go. What works today:
   branch and open a PR through your own `gh` login; save the whole room as a markdown file.
 - **`acr doctor`** – which runtimes are installed, new enough and logged in.
 - **`acr run`** – a whole room: the worker builds, every reviewer reviews in parallel, and the loop
-  repeats until they all approve, someone asks you a question, or the rounds run out.
+  repeats until they all approve, someone asks you a question, or you pause or stop it. There is
+  no round limit.
 - **Git worktrees.** Every room runs in its own worktree on branch `acr/<slug>`, so your checkout is
   never touched and a room's diff is attributable to that room by construction.
 - **Auto-commit on approve.** The round everyone approved is committed on the room branch with the
@@ -76,7 +77,6 @@ node packages/cli/dist/bin.js doctor --models   # what you may pass to --model
 node packages/cli/dist/bin.js run \
   --task "The login test is flaky. Find out why and fix it." \
   --agents claude,codex \
-  --rounds 3 \
   --model claude=opus \
   --cwd ~/code/your-repo
 
@@ -113,7 +113,7 @@ you post the task
    -> round 1: worker turn (permission: edits), engine captures the diff
    -> reviewer turns, in parallel (permission: read-only), each ending in a verdict
    -> all approve?  yes: commit the round on acr/<slug>, room = approved
-                    no:  round 2 with the reviews, until max rounds, then room = needs-you
+                    no:  round 2 with the reviews, and so on until they approve or you stop it
 ```
 
 A `question` verdict stops the room immediately: it is addressed to you, so there is nobody else to
@@ -193,7 +193,6 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
 ```jsonc
 {
   "agents": ["claude", "codex"], // the first one is the worker
-  "rounds": 4,
   "worktree": true,
   "timeoutSeconds": 1800,
   "models": { "claude": "opus", "cursor": "auto" },
@@ -219,12 +218,12 @@ Unknown keys warn and are ignored, so a file written by a newer `acr` never bric
 
 Exit codes, so it is usable from a script:
 
-| code | meaning                                                                                        |
-| ---- | ---------------------------------------------------------------------------------------------- |
-| 0    | the reviewers approved                                                                         |
-| 1    | acr or a runtime failed                                                                        |
-| 2    | bad usage                                                                                      |
-| 3    | the reviewers did not approve (`request-changes`, `question`, no verdict block, or max rounds) |
+| code | meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
+| 0    | the reviewers approved                                                       |
+| 1    | acr or a runtime failed                                                      |
+| 2    | bad usage                                                                    |
+| 3    | the reviewers did not approve (a `question` for you, or the run was stopped) |
 
 A brainstorm room has no reviewers, so it exits 0 when it produced a proposal.
 
@@ -331,7 +330,7 @@ Everything is under `/api`, bound to `127.0.0.1`, and origin-checked:
 | `GET /api/rooms/:id/files`                                                  | changed files and `git diff --stat` against the room's base      |
 | `POST /api/rooms/:id/messages`                                              | say something; holds the loop, sets the next speaker             |
 | `POST /api/rooms/:id/start` \| `/pause` \| `/resume` \| `/stop` \| `/close` | drive the room                                                   |
-| `PATCH /api/rooms/:id`                                                      | `{ maxRounds?, title? }`                                         |
+| `PATCH /api/rooms/:id`                                                      | `{ title?, additionalDirs? }`                                    |
 | `PATCH /api/rooms/:id/participants/:runtime`                                | `{ role?, model? }` – the role swap and the model picker         |
 | `POST /api/rooms/:id/commit`                                                | `{ message? }` – commit the working tree                         |
 | `POST /api/rooms/:id/pr`                                                    | `{ title?, body?, remote?, draft? }` – push, then `gh pr create` |

@@ -53,13 +53,12 @@ function engineOptions(): Parameters<typeof RoomEngine.create>[1] {
   return { store, adapters: { echo: spyEcho, echo2: spyEcho2 }, timeoutMs: 5000 };
 }
 
-function open(dir: string, reviewers = 1, maxRounds = 4): Promise<RoomEngine> {
+function open(dir: string, reviewers = 1): Promise<RoomEngine> {
   return RoomEngine.create(
     {
       task: 'math.js exports add() but the body subtracts. Fix it.',
       cwd: dir,
       agents: ['echo', ...Array<string>(reviewers).fill('echo')],
-      maxRounds,
     },
     engineOptions(),
   );
@@ -209,32 +208,31 @@ describe('RoomEngine, the build-review loop', () => {
     expect(tally[1]).toContain('2 of 2 approved');
   });
 
-  it('parks in needs-you when the rounds run out, listing what is still blocking', async () => {
+  it('has no round budget: request-changes keeps the loop going until an approval', async () => {
     const dir = repo();
     script([
       workerTurn(1, 'Attempt 1.', { 'math.js': HALF }),
       reviewTurn(1, verdict('request-changes', ['math.js:2 still wrong'])),
       workerTurn(2, 'Attempt 2.', { 'math.js': HALF }),
       reviewTurn(2, verdict('request-changes', ['math.js:2 still still wrong'])),
+      workerTurn(3, 'Attempt 3.', { 'math.js': FIXED }),
+      reviewTurn(3, verdict('approve')),
     ]);
 
-    const engine = await open(dir, 1, 2);
+    const engine = await open(dir);
     const outcome = await engine.run();
 
-    expect(outcome.state).toBe('needs-you');
-    expect(outcome.approved).toBe(false);
-    expect(outcome.round).toBe(2);
-    expect(outcome.commit).toBeUndefined();
-
-    const summary = store
-      .listMessages(engine.room.id)
-      .find((m) => m.kind === 'system' && m.text.includes('stopping after'))!;
-    expect(summary.text).toContain('2 of 2 rounds');
-    expect(summary.text).toContain('math.js:2 still still wrong');
-
-    // Nothing was committed, but the work is still in the worktree – recoverable.
-    expect(gitIn(engine.room.worktreePath!, 'rev-list', '--count', 'HEAD')).toBe('1');
-    expect(readFileSync(join(engine.room.worktreePath!, 'math.js'), 'utf8')).toBe(HALF);
+    // The room never parked itself: the only things that end a build loop are an
+    // approval, a question, a failure, or the human pausing or stopping it.
+    expect(outcome.state).toBe('approved');
+    expect(outcome.round).toBe(3);
+    expect(outcome.commit).toBeTruthy();
+    expect(
+      store
+        .listMessages(engine.room.id)
+        .some((m) => m.kind === 'system' && m.text.includes('stopping after')),
+    ).toBe(false);
+    expect(readFileSync(join(engine.room.worktreePath!, 'math.js'), 'utf8')).toBe(FIXED);
   });
 
   it('never guesses an approval from a review with no verdict block', async () => {
@@ -242,12 +240,16 @@ describe('RoomEngine, the build-review loop', () => {
     script([
       workerTurn(1, 'Done.', { 'math.js': FIXED }),
       reviewTurn(1, 'Looks good to me, ship it.'),
+      workerTurn(2, 'Nothing to change.'),
+      reviewTurn(2, verdict('approve')),
     ]);
 
-    const engine = await open(dir, 1, 1);
+    const engine = await open(dir);
     const outcome = await engine.run();
 
-    expect(outcome.state).toBe('needs-you');
+    // Round 1 counted as not approved, so a second round ran before the approval.
+    expect(outcome.state).toBe('approved');
+    expect(outcome.round).toBe(2);
     const note = store
       .listMessages(engine.room.id)
       .find((m) => m.kind === 'system' && m.text.includes('did not end with a verdict block'))!;
@@ -264,7 +266,7 @@ describe('RoomEngine, the build-review loop', () => {
       workerTurn(2, 'should never run', { 'math.js': BROKEN }),
     ]);
 
-    const engine = await open(dir, 1, 4);
+    const engine = await open(dir);
     const outcome = await engine.run();
 
     expect(outcome.state).toBe('needs-you');
@@ -361,13 +363,13 @@ describe('RoomEngine restart recovery', () => {
     const dir = repo();
     script([
       workerTurn(1, 'First pass.', { 'math.js': HALF }),
-      reviewTurn(1, verdict('request-changes', ['math.js:2 drop the stray comment'])),
+      reviewTurn(1, verdict('question', ['math.js:2 is the stray comment meant to stay?'])),
       workerTurn(2, 'Dropped the comment.', { 'math.js': FIXED }),
       reviewTurn(2, verdict('approve')),
     ]);
 
-    // Round 1 really runs, and asks for changes.
-    const first = await open(dir, 1, 1);
+    // Round 1 really runs, and stops for the human with a question.
+    const first = await open(dir);
     const roomId = first.room.id;
     expect((await first.run()).state).toBe('needs-you');
     const workerId = store.listParticipants(roomId).find((p) => p.role === 'worker')!.id;
@@ -377,7 +379,7 @@ describe('RoomEngine restart recovery', () => {
     // Now the durable state a SIGKILLed `acr` leaves behind half way through round 2: the
     // turn row is written before the child is spawned, so it is there with no `ended_at`,
     // and the room still claims to be running. There is no way to reattach to that child.
-    store.updateRoom(roomId, { maxRounds: 4, round: 2, state: 'running' });
+    store.updateRoom(roomId, { round: 2, state: 'running' });
     const orphan = store.startTurn({
       roomId,
       participantId: workerId,
@@ -421,7 +423,7 @@ describe('RoomEngine restart recovery', () => {
     const dir = repo();
     script([workerTurn(1, 'Done.', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))]);
 
-    const first = await open(dir, 1, 4);
+    const first = await open(dir);
     const roomId = first.room.id;
     const worktree = first.room.worktreePath!;
     rmSync(worktree, { recursive: true, force: true });
@@ -449,14 +451,13 @@ describe('RoomEngine restart recovery', () => {
 
 describe('RoomEngine interactivity, the part the browser needs', () => {
   /** A room whose reviewer has a distinct runtime id, so `@echo2` names one participant. */
-  function openMixed(maxRounds = 4): Promise<RoomEngine> {
+  function openMixed(): Promise<RoomEngine> {
     const dir = repo();
     return RoomEngine.create(
       {
         task: 'math.js exports add() but the body subtracts. Fix it.',
         cwd: dir,
         agents: ['echo', 'echo2'],
-        maxRounds,
       },
       engineOptions(),
     );

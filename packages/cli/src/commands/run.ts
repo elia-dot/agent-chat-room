@@ -31,7 +31,6 @@ export interface RunOptions {
   /** Model override applied to every reviewer. */
   modelReviewer?: string;
   timeoutMs?: number;
-  maxRounds?: number;
   /** `false` runs in the checkout instead of a dedicated worktree. */
   worktree?: boolean;
   allowDirty?: boolean;
@@ -97,7 +96,7 @@ export async function run(opts: RunOptions): Promise<RunSummary> {
     r.info(
       room.mode === 'brainstorm'
         ? 'brainstorm: everyone answers, everyone reacts, the moderator merges'
-        : `max ${room.maxRounds} rounds`,
+        : 'build-review: rounds continue until every reviewer approves, or you stop it',
     );
 
     const unsubscribe = engine.subscribe((event) => r.engineEvent(event));
@@ -153,7 +152,6 @@ async function open(opts: RunOptions, store: RoomStore): Promise<RoomEngine> {
         ...(opts.modelWorker ? { modelWorker: opts.modelWorker } : {}),
         ...(opts.modelReviewer ? { modelReviewer: opts.modelReviewer } : {}),
         ...(opts.title ? { title: opts.title } : {}),
-        ...(opts.maxRounds ? { maxRounds: opts.maxRounds } : {}),
         ...(opts.worktree === undefined ? {} : { worktree: opts.worktree }),
         ...(opts.allowDirty ? { allowDirty: true } : {}),
       },

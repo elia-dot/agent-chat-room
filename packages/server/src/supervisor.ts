@@ -201,12 +201,10 @@ export class RoomSupervisor {
 
   /**
    * Edit the room row and tell the engine about it. Going through here rather than through
-   * the store directly is what keeps a running loop from reading a stale `maxRounds`.
+   * the store directly is what keeps a live engine from building its next prompt from a
+   * stale row.
    */
-  async patch(
-    roomId: string,
-    patch: { maxRounds?: number; title?: string; additionalDirs?: string[] },
-  ): Promise<Room> {
+  async patch(roomId: string, patch: { title?: string; additionalDirs?: string[] }): Promise<Room> {
     const entry = await this.entry(roomId);
     if (patch.additionalDirs !== undefined && entry.running) {
       throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
@@ -222,17 +220,6 @@ export class RoomSupervisor {
       ...patch,
       ...(additionalDirs === undefined ? {} : { additionalDirs }),
     });
-    return entry.engine.reload();
-  }
-
-  /** Add to the current limit atomically, so a stale browser cannot reset it to an old cap. */
-  async addRounds(roomId: string, count: number): Promise<Room> {
-    const entry = await this.entry(roomId);
-    const maxRounds = entry.engine.room.maxRounds + count;
-    if (maxRounds > 50) {
-      throw new EngineError('a room can have at most 50 rounds');
-    }
-    this.opts.store.updateRoom(roomId, { maxRounds });
     return entry.engine.reload();
   }
 

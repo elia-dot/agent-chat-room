@@ -30,7 +30,6 @@ export interface CreateRoomRequest {
   agents: string[];
   title?: string;
   mode?: RoomMode;
-  maxRounds?: number;
   worktree?: boolean;
   modelWorker?: string;
   modelReviewer?: string;
@@ -151,13 +150,7 @@ export const api = {
   resume: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/resume`),
   stop: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/stop`),
   close: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/close`),
-  addRounds: (id: string, count: number) =>
-    post<{ room: Room }>(`/api/rooms/${id}/rounds`, { count }),
-
-  patchRoom: (
-    id: string,
-    body: { maxRounds?: number; title?: string; additionalDirs?: string[] },
-  ) =>
+  patchRoom: (id: string, body: { title?: string; additionalDirs?: string[] }) =>
     request<{ room: Room }>(`/api/rooms/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
