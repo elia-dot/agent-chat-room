@@ -314,7 +314,18 @@ export class RoomSupervisor {
 
   async say(roomId: string, text: string, opts: { mention?: string } = {}): Promise<Message> {
     const entry = await this.entry(roomId);
-    return entry.engine.postUserMessage(text, opts);
+    const wasRunning = entry.running !== undefined;
+    const completedBrainstorm =
+      entry.engine.room.mode === 'brainstorm' &&
+      entry.engine.room.round >= entry.engine.room.maxRounds &&
+      entry.engine.proposal() !== undefined;
+    const message = entry.engine.postUserMessage(text, opts);
+
+    // A completed brainstorm has no loop left to pause and no useful default action other
+    // than revising its proposal. Sending feedback is therefore the confirmation: start the
+    // named participant (the moderator by default) immediately and stream the response.
+    if (completedBrainstorm && !wasRunning) await this.start(roomId);
+    return message;
   }
 
   /** Close the room: remove the worktree, keep the branch, and forget the engine. */

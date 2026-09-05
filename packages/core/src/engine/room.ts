@@ -599,7 +599,18 @@ export class RoomEngine {
     if (!body) throw new EngineError('a message needs some text');
 
     const roster = this.participants;
-    let next = this.requireWorker().runtime;
+    const defaultTarget =
+      this.roomRow.mode === 'brainstorm'
+        ? roster.find((participant) => participant.role === 'moderator')
+        : roster.find((participant) => participant.role === 'worker');
+    if (!defaultTarget) {
+      throw new EngineError(
+        this.roomRow.mode === 'brainstorm'
+          ? 'this brainstorm room has no moderator'
+          : `room ${this.roomRow.id} has no worker participant`,
+      );
+    }
+    let next = defaultTarget.runtime;
     if (opts.mention) {
       const target = roster.find((p) => p.runtime === opts.mention);
       if (!target) {
@@ -681,7 +692,16 @@ export class RoomEngine {
       this.system(`${runtime}'s turn failed: ${error}`, round);
     }
 
-    this.settle();
+    // A moderator's direct brainstorm turn is a revised proposal, not a side conversation.
+    // Keep the room at its successful handoff state so Promote uses the newest proposal.
+    if (this.roomRow.mode === 'brainstorm' && participant.role === 'moderator') {
+      if (!error) {
+        this.system('the moderator has revised the proposal. Accept it, or promote it.', round);
+      }
+      this.setState('needs-you');
+    } else {
+      this.settle();
+    }
     return this.outcome(error ? { error } : {});
   }
 

@@ -233,6 +233,44 @@ describe('RoomSupervisor', () => {
     expect(store.getRoom(id)!.paused).toBe(false);
   });
 
+  it('starts a moderator revision as soon as feedback is sent to a completed brainstorm', async () => {
+    writeEchoScript([
+      { when: { round: 1, runtime: 'echo' }, text: 'periods' },
+      { when: { round: 1, runtime: 'echo2' }, text: 'tiers' },
+      { when: { round: 1, runtime: 'echo3' }, text: 'tests' },
+      { when: { round: 2, runtime: 'echo' }, text: 'agree' },
+      { when: { round: 2, runtime: 'echo2' }, text: 'agree' },
+      { when: { round: 2, runtime: 'echo3' }, text: 'merge both' },
+      { when: { round: 3, runtime: 'echo3' }, text: 'Proposed task: first version.' },
+      {
+        when: { round: 3, runtime: 'echo3' },
+        text: 'Proposed task: revised version.',
+        delayMs: 100,
+      },
+    ]);
+    const s = supervisor();
+    const engine = await s.create({
+      task: 'plan the change',
+      cwd: repo(),
+      mode: 'brainstorm',
+      agents: ['echo', 'echo2', 'echo3'],
+    });
+    const id = engine.room.id;
+
+    await s.start(id);
+    await waitFor(() => !s.isRunning(id), 'the proposal to finish');
+    expect(engine.proposal()?.text).toContain('first version');
+
+    await s.say(id, 'Leave npm publishing for later.');
+    expect(s.isRunning(id)).toBe(true);
+    expect(store.getRoom(id)?.paused).toBe(false);
+
+    await waitFor(() => !s.isRunning(id), 'the revision to finish');
+    expect(engine.proposal()?.text).toContain('revised version');
+    expect(store.getRoom(id)?.state).toBe('needs-you');
+    expect(store.getRoom(id)?.round).toBe(3);
+  });
+
   it('drops the engine when a room closes', async () => {
     const s = supervisor();
     const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });

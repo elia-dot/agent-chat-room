@@ -279,6 +279,7 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
   const { room, busy } = props;
   const [rounds, setRounds] = useState(room.maxRounds + 2);
   const running = room.state === 'running' || room.state === 'waiting-reviews';
+  const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
   const exhausted =
     room.mode !== 'brainstorm' && room.round >= room.maxRounds && room.state !== 'approved';
   // The room ran in a worktree on `acr/<slug>`; with `--no-worktree` there is no room
@@ -296,7 +297,9 @@ function RoomActions(props: RightPanelProps): React.ReactElement {
         ) : (
           <Action
             onClick={props.onContinue}
-            disabled={busy || room.closedAt !== null || room.state === 'approved'}
+            disabled={
+              busy || room.closedAt !== null || room.state === 'approved' || completedBrainstorm
+            }
           >
             Continue
           </Action>

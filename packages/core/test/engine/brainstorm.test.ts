@@ -188,6 +188,39 @@ describe('RoomEngine, brainstorm mode', () => {
     expect(engine.proposal()?.text).toContain('Proposed task: split by tier.');
   });
 
+  it('routes feedback to the moderator and replaces the proposal without consuming a round', async () => {
+    const dir = repo();
+    script([
+      { when: { round: 1, runtime: 'echo' }, text: 'periods' },
+      { when: { round: 1, runtime: 'echo2' }, text: 'tiers' },
+      { when: { round: 1, runtime: 'echo3' }, text: 'tests' },
+      { when: { round: 2, runtime: 'echo' }, text: 'agree' },
+      { when: { round: 2, runtime: 'echo2' }, text: 'agree' },
+      { when: { round: 2, runtime: 'echo3' }, text: 'merge both' },
+      { when: { round: 3, runtime: 'echo3' }, text: 'Proposed task: first version.' },
+      { when: { round: 3, runtime: 'echo3' }, text: 'Proposed task: revised version.' },
+    ]);
+
+    const engine = await open(dir);
+    await engine.run();
+    const firstProposal = engine.proposal();
+
+    engine.postUserMessage('Keep npm publishing out of the first release.');
+    expect(engine.room.paused).toBe(true);
+    expect(engine.room.nextSpeaker).toBe('echo3');
+
+    engine.resume();
+    const outcome = await engine.run({ directTurn: engine.room.nextSpeaker ?? undefined });
+
+    expect(outcome.state).toBe('needs-you');
+    expect(outcome.round).toBe(3);
+    expect(engine.proposal()?.id).not.toBe(firstProposal?.id);
+    expect(engine.proposal()?.text).toBe('Proposed task: revised version.');
+    expect(requests.at(-1)?.prompt).toContain('Keep npm publishing out of the first release.');
+    expect(requests.at(-1)?.prompt).toContain('Your job is the merged proposal');
+    expect(engine.messages.at(-1)?.text).toContain('moderator has revised the proposal');
+  });
+
   it('refuses a brainstorm room with fewer than two participants', async () => {
     await expect(
       RoomEngine.create(

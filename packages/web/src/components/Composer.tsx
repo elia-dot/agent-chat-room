@@ -80,6 +80,7 @@ export function Composer({
   };
 
   const closed = room.closedAt !== null;
+  const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
 
   return (
     <div className="border-t border-zinc-200 dark:border-zinc-800">
@@ -135,7 +136,12 @@ export function Composer({
                 next turn: <b>{parsed.mention}</b>
               </>
             ) : (
-              'Enter to send · Shift+Enter for a newline'
+              <>
+                {completedBrainstorm
+                  ? 'Send feedback to revise via the moderator · '
+                  : 'Enter to send · '}
+                Shift+Enter for a newline
+              </>
             )}
           </div>
 
@@ -144,7 +150,10 @@ export function Composer({
               Pause
             </Button>
           ) : (
-            <Button onClick={onContinue} disabled={busy || closed || room.state === 'approved'}>
+            <Button
+              onClick={onContinue}
+              disabled={busy || closed || room.state === 'approved' || completedBrainstorm}
+            >
               {room.paused || room.state === 'idle' ? 'Continue' : 'Start'}
             </Button>
           )}
