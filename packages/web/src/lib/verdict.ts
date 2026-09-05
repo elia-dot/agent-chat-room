@@ -55,11 +55,17 @@ export function splitVerdictBlocks(text: string): VerdictSplit {
   // it. `parseVerdict` in core accepts that, so the body has to give it up here as well –
   // otherwise the message shows the raw JSON and then repeats it as a card underneath.
   if (blocks.length === 0) {
-    const lines = body.trimEnd().split('\n');
-    const last = lines[lines.length - 1]?.trim() ?? '';
-    if (last.startsWith('{') && last.endsWith('}') && readVerdict(last)) {
-      blocks.push(last);
-      body = lines.slice(0, -1).join('\n');
+    const trimmed = body.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}') && readVerdict(trimmed)) {
+      blocks.push(trimmed);
+      body = '';
+    } else {
+      const lines = body.trimEnd().split('\n');
+      const last = lines[lines.length - 1]?.trim() ?? '';
+      if (last.startsWith('{') && last.endsWith('}') && readVerdict(last)) {
+        blocks.push(last);
+        body = lines.slice(0, -1).join('\n');
+      }
     }
   }
 

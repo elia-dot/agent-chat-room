@@ -68,6 +68,20 @@ describe('parseVerdict', () => {
     expect(parsed.verdict.decision).toBe('approve');
   });
 
+  it('accepts a pretty-printed bare verdict object as the whole response', () => {
+    const parsed = parseVerdict(
+      JSON.stringify(
+        { decision: 'request-changes', blocking: ['a.ts:1 broken'], nits: [] },
+        null,
+        2,
+      ),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.verdict.decision).toBe('request-changes');
+    expect(parsed.verdict.blocking).toEqual(['a.ts:1 broken']);
+  });
+
   it('does not treat a bare object with unknown keys, or one mid-message, as a verdict', () => {
     expect(parseVerdict('{"decision":"approve","confidence":1}').ok).toBe(false);
     expect(parseVerdict('{"decision":"approve"}\nbut actually I am not sure.').ok).toBe(false);

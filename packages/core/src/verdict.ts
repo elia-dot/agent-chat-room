@@ -91,21 +91,23 @@ export function parseVerdict(text: string, structured?: unknown): ParsedVerdict 
 
 /**
  * A runtime with schema-constrained output sometimes prints the verdict object itself as
- * the final line, with no fence around it. That is still a validated verdict, not a guess
- * from prose: it has to be a lone JSON object on the last line, and it has to match the
- * schema exactly, with no unknown keys.
+ * the final output, with no fence around it. That is still a validated verdict, not a guess
+ * from prose: it has to be either the entire response or a compact object on the last line,
+ * and it has to match the schema exactly, with no unknown keys.
  */
 function bareVerdict(text: string): ParsedVerdict | undefined {
-  const lastLine = text.trim().split('\n').at(-1)?.trim() ?? '';
-  if (!lastLine.startsWith('{') || !lastLine.endsWith('}')) return undefined;
+  const trimmed = text.trim();
+  const lastLine = trimmed.split('\n').at(-1)?.trim() ?? '';
+  const raw = trimmed.startsWith('{') && trimmed.endsWith('}') ? trimmed : lastLine;
+  if (!raw.startsWith('{') || !raw.endsWith('}')) return undefined;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(lastLine);
+    parsed = JSON.parse(raw);
   } catch {
     return undefined;
   }
   const result = VerdictSchema.strict().safeParse(parsed);
-  return result.success ? { ok: true, verdict: result.data, raw: lastLine } : undefined;
+  return result.success ? { ok: true, verdict: result.data, raw } : undefined;
 }
 
 /** How the CLI and (later) the UI label a decision. */

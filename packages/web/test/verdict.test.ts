@@ -104,6 +104,18 @@ describe('a verdict printed without a fence', () => {
     expect(display.unreadable).toBe(false);
   });
 
+  it('lifts a pretty-printed verdict object out of the body', () => {
+    const text = JSON.stringify(
+      { decision: 'request-changes', blocking: ['a.ts:1 broken'], nits: [] },
+      null,
+      2,
+    );
+    const display = verdictForDisplay({ text, role: 'reviewer' });
+    expect(display.body).toBe('');
+    expect(display.verdict?.decision).toBe('request-changes');
+    expect(display.rawBlocks).toEqual([text]);
+  });
+
   it('leaves prose alone when the trailing braces are not a verdict', () => {
     const display = verdictForDisplay({
       text: 'The config ends up as {"retries":3}',

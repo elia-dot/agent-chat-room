@@ -1359,7 +1359,7 @@ export class RoomEngine {
           round: ctx.round,
           ...(ctx.phase ? { phase: ctx.phase } : {}),
         }),
-        ...(role === 'reviewer' && adapter.capabilities.structuredOutput
+        ...(role === 'reviewer' && ctx.phase === undefined && adapter.capabilities.structuredOutput
           ? { outputSchema: verdictJsonSchema }
           : {}),
         ...(participant.sessionId ? { sessionId: participant.sessionId } : {}),

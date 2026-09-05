@@ -15,6 +15,8 @@ const requests: TurnRequest[] = [];
 
 const spy = (id: string): AgentAdapter => ({
   ...echoAdapter,
+  // Mirrors Codex: brainstorm speakers must not receive its verdict-only output schema.
+  capabilities: { ...echoAdapter.capabilities, structuredOutput: true },
   id,
   run(req, sink) {
     requests.push(req);
@@ -117,12 +119,14 @@ describe('RoomEngine, brainstorm mode', () => {
       expect(req.systemAppend).toContain('thinking out loud, in parallel');
       // Nobody reviews here, so nothing should ask for a verdict block.
       expect(req.prompt).not.toContain('```verdict');
+      expect(req.outputSchema).toBeUndefined();
       expect(req.permission).toBe('read-only');
     }
 
     const react = requests.filter((r) => r.prompt.includes('(round 2)'));
     expect(react).toHaveLength(3);
     expect(react[0]?.systemAppend).toContain('This is your one turn to react');
+    expect(react.every((req) => req.outputSchema === undefined)).toBe(true);
     // The answers from round 1 reach round 2 through the ordinary unseen-messages path.
     expect(react.some((r) => r.prompt.includes('## New messages since your last turn'))).toBe(true);
 
@@ -130,6 +134,7 @@ describe('RoomEngine, brainstorm mode', () => {
     expect(merge).toHaveLength(1);
     expect(merge[0]?.prompt).toContain('acting as MODERATOR');
     expect(merge[0]?.systemAppend).toContain('merged proposal');
+    expect(merge[0]?.outputSchema).toBeUndefined();
   });
 
   it('commits nothing and parses no verdict, because nobody edits or reviews', async () => {
