@@ -9,6 +9,7 @@ existing subscriptions. **No API keys.** `acr` never reads your credentials – 
 a credentials file exists, and lets each CLI find its own login the way it normally does.
 
 The full design lives in [`docs/PLAN.md`](docs/PLAN.md).
+Token-saving options and quality safeguards live in [`docs/TOKEN_EFFICIENCY.md`](docs/TOKEN_EFFICIENCY.md).
 
 ## Status: milestone M4 (Production-Ready)
 
