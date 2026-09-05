@@ -52,6 +52,57 @@ export async function currentBranch(cwd: string): Promise<string> {
   return !name || name === 'HEAD' ? 'detached HEAD' : name;
 }
 
+/**
+ * The newest fast-forward-compatible commit on `main`.
+ *
+ * A room must not inherit whichever feature branch happened to be checked out when it was
+ * opened. Fetching into the remote-tracking ref gives it the result of an up-to-date main
+ * without switching or modifying the human's checkout. Local commits already ahead of
+ * origin/main are preserved, just as they would be by `git pull --ff-only`.
+ */
+export async function freshMainSha(cwd: string): Promise<string> {
+  const local = (await gitOrUndefined(cwd, ['rev-parse', '--verify', 'refs/heads/main']))?.trim();
+  if (!local) throw new Error('this repository has no local main branch');
+
+  if (!(await remoteExists(cwd, 'origin'))) return local;
+
+  try {
+    // A newly configured, still-empty forge remote has nothing to pull yet. That is not a
+    // stale-main condition: local main is necessarily the only available starting point.
+    const advertised = await git(cwd, ['ls-remote', '--heads', 'origin', 'refs/heads/main']);
+    if (!advertised.trim()) return local;
+    await git(cwd, ['fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
+  } catch (err) {
+    throw new Error(`could not update main from origin: ${errText(err)}`);
+  }
+
+  const remote = (
+    await gitOrUndefined(cwd, ['rev-parse', '--verify', 'refs/remotes/origin/main'])
+  )?.trim();
+  if (!remote) throw new Error('origin has no main branch');
+  if (await isAncestor(cwd, local, remote)) return remote;
+  if (await isAncestor(cwd, remote, local)) return local;
+  throw new Error('local main has diverged from origin/main; reconcile it before opening a room');
+}
+
+async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
+  try {
+    await git(cwd, ['merge-base', '--is-ancestor', ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fast-forward the currently checked-out branch to `target`, surfacing git's explanation. */
+export async function fastForward(cwd: string, target: string): Promise<void> {
+  try {
+    await git(cwd, ['merge', '--ff-only', target]);
+  } catch (err) {
+    throw new Error(`could not fast-forward main: ${errText(err)}`);
+  }
+}
+
 /** Tracked modifications plus untracked files – the same thing `git status` calls dirty. */
 export async function isDirty(cwd: string): Promise<boolean> {
   const out = await gitOrUndefined(cwd, ['status', '--porcelain']);

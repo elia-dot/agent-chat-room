@@ -1,11 +1,10 @@
 import type { Message } from '@agent-chat-room/core';
 
 /**
- * What a round came to. These are the three verdict outcomes plus the two states a round
- * can be in without one: still going, or finished without any reviewer voting (a failed
- * turn, a stop).
+ * What a round came to. These are the three verdict outcomes, an execution error, plus the
+ * two states a round can be in without one: still going, or finished without a verdict.
  */
-export type RoundOutcome = 'approved' | 'changes' | 'question' | 'running' | 'none';
+export type RoundOutcome = 'approved' | 'changes' | 'question' | 'errored' | 'running' | 'none';
 
 export interface RoundSummary {
   round: number;
@@ -23,9 +22,9 @@ export interface RoundSummary {
  * the messages rather than asking the server keeps it correct while a round is still
  * streaming, which is exactly when someone wants to look at it.
  *
- * A question outranks a request for changes, which outranks an approval: the strip should
- * show the most human-demanding thing that happened in the round, since that is what a
- * person is scanning for.
+ * An errored turn outranks a question, which outranks a request for changes, which outranks
+ * an approval: the strip should show the most human-demanding thing that happened in the
+ * round, since that is what a person is scanning for.
  */
 export function summariseRounds(
   messages: Message[],
@@ -49,16 +48,17 @@ export function summariseRounds(
         entry.approvals += 1;
         if (entry.outcome === 'none') entry.outcome = 'approved';
       } else if (message.verdict.decision === 'question') {
-        entry.outcome = 'question';
-      } else if (entry.outcome !== 'question') {
+        if (entry.outcome !== 'errored') entry.outcome = 'question';
+      } else if (entry.outcome !== 'question' && entry.outcome !== 'errored') {
         entry.outcome = 'changes';
       }
     }
 
-    // A failed turn is not a verdict, but it is why a round ended, so it should not read
-    // as an approval just because the one reviewer that answered said yes.
+    // A failed turn is not a verdict, but it is why a round ended. Keep it distinct from
+    // request-changes: one asks for another implementation pass, the other says the round
+    // itself did not complete successfully.
     if (message.kind === 'system' && /failed|timeout|usage limit/i.test(message.text)) {
-      if (entry.outcome === 'approved' || entry.outcome === 'none') entry.outcome = 'changes';
+      entry.outcome = 'errored';
     }
 
     byRound.set(message.round, entry);

@@ -356,28 +356,48 @@ export class RoomEngine {
     }
     assertRoster(roster, mode);
 
-    const baseBranch = await git.currentBranch(repoRoot);
+    // New rooms always cut from an up-to-date main, independent of the branch the launcher
+    // is standing on. `freshMainSha` fetches origin/main without switching that checkout.
+    const baseBranch = 'main';
+    const mainSha = await git.freshMainSha(repoRoot);
     const title = input.title?.trim() || deriveTitle(task, repoRoot);
     const useWorktree = settings.worktree;
     const roomId = randomUUID();
 
     let roomBranch = baseBranch;
     let worktreePath: string | null = null;
-    let baseSha = (await git.headSha(repoRoot)) ?? null;
+    let baseSha = mainSha;
 
     if (useWorktree) {
       const slug = await uniqueSlug(repoRoot, title, roomId.replace(/-/g, ''));
       roomBranch = branchFor(slug);
-      const worktree = await createWorktree({ repoRoot, roomId, branch: roomBranch });
+      const worktree = await createWorktree({
+        repoRoot,
+        roomId,
+        branch: roomBranch,
+        startPoint: mainSha,
+      });
       worktreePath = worktree.path;
       baseSha = worktree.baseSha ?? baseSha;
-    } else if (!input.allowDirty && (await git.isDirty(repoRoot))) {
-      // Without a worktree the worker edits the checkout you are standing in, so a dirty
-      // tree would make the room's diff unattributable. This is the M0 behaviour, kept as
-      // an escape hatch for repos where worktrees misbehave (submodules, some tooling).
-      throw new EngineError(
-        `${repoRoot} has uncommitted changes. Commit or stash them, drop --no-worktree, or pass --allow-dirty.`,
-      );
+    } else {
+      // Opting out of isolation cannot silently turn "start from main" back into "start
+      // from whichever branch is open". In this mode the checkout itself is the workspace.
+      const checkoutBranch = await git.currentBranch(repoRoot);
+      if (checkoutBranch !== 'main') {
+        throw new EngineError(
+          `${repoRoot} is on ${checkoutBranch}. Switch to main or use an isolated worktree.`,
+        );
+      }
+      if (!input.allowDirty && (await git.isDirty(repoRoot))) {
+        // Without a worktree the worker edits the checkout you are standing in, so a dirty
+        // tree would make the room's diff unattributable. This is the M0 behaviour, kept as
+        // an escape hatch for repos where worktrees misbehave (submodules, some tooling).
+        throw new EngineError(
+          `${repoRoot} has uncommitted changes. Commit or stash them, drop --no-worktree, or pass --allow-dirty.`,
+        );
+      }
+      await git.fastForward(repoRoot, mainSha);
+      baseSha = (await git.headSha(repoRoot)) ?? mainSha;
     }
 
     const slug = roomBranch.startsWith('acr/') ? roomBranch.slice(4) : baseBranch;

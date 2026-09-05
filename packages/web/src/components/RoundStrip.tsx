@@ -16,6 +16,7 @@ const CELL: Record<RoundOutcome, string> = {
   approved: 'bg-approve-bg border-b-2 border-b-approve',
   changes: 'bg-changes-bg border-b-2 border-b-changes',
   question: 'bg-question-bg border-b-2 border-b-question',
+  errored: 'bg-error-bg border-b-2 border-b-error',
   none: 'bg-raised border-b-2 border-b-line-strong',
   running: '',
 };
@@ -72,6 +73,7 @@ export function RoundStrip(props: RoundStripProps): React.ReactElement {
 
       <div className="hidden shrink-0 items-center gap-3 font-mono text-[10px] text-ink-faint xl:flex">
         <Key className="bg-changes">changes</Key>
+        <Key className="bg-error">errored</Key>
         <Key className="bg-question">question</Key>
         <Key className="bg-approve">approved</Key>
       </div>

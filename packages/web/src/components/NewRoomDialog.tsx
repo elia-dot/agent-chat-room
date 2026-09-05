@@ -45,7 +45,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [agents, setAgents] = useState<string[]>([]);
   const [mode, setMode] = useState<RoomMode>('build-review');
   const [models, setModels] = useState<Record<string, string>>({});
-  const [worktree, setWorktree] = useState(true);
+  const [worktree, setWorktree] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -415,10 +415,12 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             />
             <span>
               <span className="block text-[13.5px] text-ink">Work in an isolated git worktree</span>
-              <span className="block font-mono text-[11px] text-ink-faint">
+              <span
+                className={`block font-mono text-[11px] ${worktree ? 'text-question' : 'text-ink-faint'}`}
+              >
                 {worktree
-                  ? `a fresh checkout on branch acr/${slugify(slug)} · your working tree is never touched`
-                  : 'the agents edit your checkout directly'}
+                  ? `isolated branch acr/${slugify(slug)} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
+                  : 'default · agents use your main checkout, including its installed dependencies and build artifacts'}
               </span>
             </span>
           </label>

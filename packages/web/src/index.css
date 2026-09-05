@@ -30,7 +30,7 @@
   --color-ink-dim: var(--acr-ink-dim);
   --color-ink-faint: var(--acr-ink-faint);
 
-  /* Verdicts and outcomes. These three must never be confusable. */
+  /* Verdicts and outcomes. These four must never be confusable. */
   --color-approve: var(--acr-approve);
   --color-approve-bg: var(--acr-approve-bg);
   --color-approve-line: var(--acr-approve-line);
@@ -40,6 +40,9 @@
   --color-question: var(--acr-question);
   --color-question-bg: var(--acr-question-bg);
   --color-question-line: var(--acr-question-line);
+  --color-error: var(--acr-error);
+  --color-error-bg: var(--acr-error-bg);
+  --color-error-line: var(--acr-error-line);
 
   /* Liveness, which is a state rather than an outcome, so it gets its own hue. */
   --color-live: var(--acr-live);
@@ -78,6 +81,9 @@
   --acr-question: oklch(0.5 0.12 75);
   --acr-question-bg: oklch(0.95 0.04 88);
   --acr-question-line: oklch(0.82 0.09 88);
+  --acr-error: oklch(0.47 0.15 315);
+  --acr-error-bg: oklch(0.95 0.035 315);
+  --acr-error-line: oklch(0.81 0.08 315);
 
   --acr-live: oklch(0.48 0.12 250);
   --acr-live-bg: oklch(0.95 0.03 250);
@@ -110,6 +116,9 @@
   --acr-question: oklch(0.8 0.15 88);
   --acr-question-bg: oklch(0.36 0.07 88);
   --acr-question-line: oklch(0.5 0.1 88);
+  --acr-error: oklch(0.75 0.16 315);
+  --acr-error-bg: oklch(0.32 0.065 315);
+  --acr-error-line: oklch(0.47 0.1 315);
 
   --acr-live: oklch(0.8 0.09 250);
   --acr-live-bg: oklch(0.28 0.03 250);

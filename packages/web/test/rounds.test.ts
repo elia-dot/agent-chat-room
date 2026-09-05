@@ -65,13 +65,22 @@ describe('summariseRounds', () => {
     expect(rounds[2]).toMatchObject({ approvals: 2, votes: 2 });
   });
 
-  it('does not let one approval hide a reviewer that failed', () => {
+  it('gives an errored round its own outcome instead of request-changes', () => {
     const rounds = summariseRounds(
       [agent(4, 'claude', 'approve'), system(4, "cursor's review failed: usage limit")],
       4,
       false,
     );
-    expect(rounds[0]?.outcome).toBe('changes');
+    expect(rounds[0]?.outcome).toBe('errored');
+  });
+
+  it('keeps an error visible when a later reviewer returns a verdict', () => {
+    const rounds = summariseRounds(
+      [system(4, "cursor's review failed: timeout"), agent(4, 'claude', 'question')],
+      4,
+      false,
+    );
+    expect(rounds[0]?.outcome).toBe('errored');
   });
 
   it('shows the round in flight as running, whatever votes are already in', () => {

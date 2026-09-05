@@ -1,4 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -524,6 +526,47 @@ describe('RoomEngine, the build-review loop', () => {
     expect(outcome.state).toBe('approved');
     // The human's scratch file is not in the room's diff, because it is not in the worktree.
     expect(outcome.changedFiles).toEqual(['math.js']);
+  });
+
+  it('starts a new room from freshly fetched main, not the launcher branch', async () => {
+    const dir = repo();
+    const remote = mkdtempSync(join(tmpdir(), 'acr-remote-'));
+    const updater = mkdtempSync(join(tmpdir(), 'acr-updater-'));
+    repos.push(remote, updater);
+
+    execFileSync('git', ['init', '--bare', '-q', remote]);
+    gitIn(dir, 'remote', 'add', 'origin', remote);
+    gitIn(dir, 'push', '-q', '-u', 'origin', 'main');
+    gitIn(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+    execFileSync('git', ['clone', '-q', remote, updater]);
+    gitIn(updater, 'config', 'user.email', 'acr@example.test');
+    gitIn(updater, 'config', 'user.name', 'acr test');
+    writeFileSync(join(updater, 'from-main.txt'), 'new on main\n');
+    gitIn(updater, 'add', 'from-main.txt');
+    gitIn(updater, 'commit', '-qm', 'advance main');
+    gitIn(updater, 'push', '-q', 'origin', 'main');
+
+    gitIn(dir, 'switch', '-q', '-c', 'feature/in-progress');
+    writeFileSync(join(dir, 'feature-only.txt'), 'uncommitted feature work\n');
+
+    const engine = await open(dir);
+    expect(engine.room.baseBranch).toBe('main');
+    expect(readFileSync(join(engine.room.worktreePath!, 'from-main.txt'), 'utf8')).toBe(
+      'new on main\n',
+    );
+    expect(() => readFileSync(join(engine.room.worktreePath!, 'feature-only.txt'))).toThrow();
+    expect(gitIn(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature/in-progress');
+  });
+
+  it('requires main when isolation is explicitly disabled', async () => {
+    const dir = repo();
+    gitIn(dir, 'switch', '-q', '-c', 'feature/in-progress');
+    await expect(
+      RoomEngine.create(
+        { task: 'x', cwd: dir, agents: ['echo', 'echo'], worktree: false },
+        engineOptions(),
+      ),
+    ).rejects.toThrow(/Switch to main or use an isolated worktree/);
   });
 });
 
