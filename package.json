@@ -4,6 +4,24 @@
   "description": "A local chat room where your installed agent CLIs build and review code together.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elia-dot/agent-chat-room.git"
+  },
+  "homepage": "https://github.com/elia-dot/agent-chat-room#readme",
+  "bugs": {
+    "url": "https://github.com/elia-dot/agent-chat-room/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "codex",
+    "cursor",
+    "opencode",
+    "cli",
+    "code-review"
+  ],
   "bin": {
     "acr": "./packages/cli/dist/bin.js",
     "agent-chat-room": "./packages/cli/dist/bin.js"

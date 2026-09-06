@@ -187,6 +187,45 @@ describe('the retry budget', () => {
     expect(workerTurns(engine)).toBe(2);
   });
 
+  it('obeys a budget lowered while the failing turn is still running', async () => {
+    const dir = repo();
+    const engine = await open(dir, 3);
+    script([
+      { when: { role: 'worker', round: 1 }, delayMs: 200, error: 'slow failure' },
+      { when: { role: 'worker', round: 1 }, text: 'would be a paid retry' },
+    ]);
+
+    const running = engine.run();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // "Stop spending" has to mean exactly that, even mid-attempt.
+    store.updateRoom(engine.room.id, { maxTurnRetries: 0 });
+    const outcome = await running;
+
+    expect(outcome.state).toBe('needs-you');
+    expect(workerTurns(engine)).toBe(1);
+  });
+
+  it('obeys a budget lowered during the backoff between attempts', async () => {
+    const dir = repo();
+    const engine = await RoomEngine.create(
+      { task: 'fix add()', cwd: dir, agents: ['echo', 'echo2'], maxTurnRetries: 3 },
+      { store, adapters, timeoutMs: 5000, retryBackoffMs: 300 },
+    );
+    script([
+      { when: { role: 'worker', round: 1 }, error: 'instant failure' },
+      { when: { role: 'worker', round: 1 }, text: 'would be a paid retry' },
+    ]);
+
+    const running = engine.run();
+    // The first attempt fails at once, so by now the engine is sleeping out the backoff.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    store.updateRoom(engine.room.id, { maxTurnRetries: 0 });
+    const outcome = await running;
+
+    expect(outcome.state).toBe('needs-you');
+    expect(workerTurns(engine)).toBe(1);
+  });
+
   it('does not retry a turn the human stopped', async () => {
     const dir = repo();
     const engine = await open(dir, 3);

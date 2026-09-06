@@ -5,12 +5,12 @@ workflow into a room: you post a task, one agent builds, the others review, and 
 until they agree or you step in. Every agent runs through the CLI you already have installed
 and logged in, so it all works on your existing subscriptions. No API keys.
 
-Status: private prototype on this machine. Target: public GitHub repo (MIT) that anyone can
-install with `npx agent-chat-room` and use with whatever agents they have.
+Target: a public GitHub repo (MIT) that anyone can install with `npx agent-chat-room` and
+use with whatever agents they have.
 
 ---
 
-## 1. What exists on this machine today
+## 1. The runtimes this was designed against
 
 | Runtime | Binary | Headless mode | Session resume | Read-only mode |
 |---|---|---|---|---|
@@ -47,8 +47,8 @@ Verified event shapes (live probe, 2026-09-03):
   ended the turn. Probed live 2026-09-04 and recorded in
   `packages/core/test/fixtures/agy_run.jsonl`.
 
-Toolchain: Node 22.14, npm 11. No bun/pnpm. Denly (`~/Desktop/coding-control-plane`) is the
-reference for "spawn the user's CLI with their subscription login"; see section 9.
+Toolchain: Node 22.14, npm 11. No bun/pnpm. The "spawn the user's CLI with their
+subscription login" approach was carried over from an earlier private runner; see section 9.
 
 ---
 
@@ -397,24 +397,25 @@ surprises are.
 | User's global hooks/settings interfere (seen: Claude SessionStart hook) | Default to `--setting-sources project` for Claude and `--ignore-user-config` for Codex, with a per-room override |
 | Long turns look hung | Stream activity events; per-turn timeout with "still running" heartbeat |
 
-## 9. Reuse from Denly
+## 9. Lessons from an earlier runner
 
-Denly's runner (`~/Desktop/coding-control-plane/pipeline/runtime_cli.py`, Python asyncio)
-already solves the hard half of this project. What to carry over, and what not to:
+An earlier private prototype (a Python asyncio runner) already solved the hard half of this
+project. The adapters here are a clean rewrite in TypeScript – same command lines, fresh
+code – so this repository has no shared ancestry with it. What was carried over as design,
+and what was not:
 
-(Four of Denly's five runtimes have landed here: `claude`, `codex`, `cursor` and, as of
-task #11, `agy` – see `packages/core/src/adapters/antigravity.ts`. Only `grok` is left.)
+(Four of its five runtimes have landed here: `claude`, `codex`, `cursor` and, as of task
+#11, `agy` – see `packages/core/src/adapters/antigravity.ts`. Only `grok` is left.)
 
-**Carry over the shape.** Denly's `CliSpec(id, argv, parse_line, parse_text, env, buffered,
-inspect_supported)` is exactly the adapter interface in 4.1, and it has five working entries
-(claude, codex, cursor, grok, agy). Port the argv builders and parsers to TypeScript
-one-to-one; they are the distilled result of a lot of trial and error:
+**Carry over the shape.** A `CliSpec(id, argv, parse_line, parse_text, env, buffered,
+inspect_supported)` record per runtime is exactly the adapter interface in 4.1. The argv
+builders and parsers are the distilled result of a lot of trial and error:
 
 - One subprocess per turn, `stdin` closed, prompt passed as an argument; session id is read
   from the first event and threaded into the next turn's resume flag. (This plan passes the
   prompt on stdin instead, because room transcripts can exceed comfortable argv sizes.)
 - Turn done = child exits. No in-band "done" event is needed. Keep the same guards: a
-  per-read stall timeout (Denly uses 1800 s), a 30 s exit grace, kill in `finally`, and a
+  per-read stall timeout (1800 s worked well), a 30 s exit grace, kill in `finally`, and a
   concurrent stderr drain so the pipe never deadlocks.
 - No env injection at all. Each CLI finds its own login on disk or in the keychain. That is
   the entire subscription mechanism, and it is what keeps us out of credential handling.
@@ -426,14 +427,9 @@ one-to-one; they are the distilled result of a lot of trial and error:
 - Golden fixtures `tests/fixtures/codex_run.jsonl` and `cursor_run.jsonl` are worth copying
   in as adapter contract tests.
 
-**Do differently.** Denly's UI polls REST; this project streams over a WebSocket because a
-chat room is all about watching turns as they happen. Denly is a control plane with a cloud
-backend; this project is local only and single process.
-
-**License caveat.** Denly has no LICENSE file and its README says "all rights reserved
-pending a license decision". Since you own it, either add a note relicensing the two files
-you port, or write the TypeScript adapters as a clean port (same command lines, fresh code)
-so the public MIT repo has no ancestry question. The second option is simpler.
+**Do differently.** That runner's UI polled REST; this project streams over a WebSocket
+because a chat room is all about watching turns as they happen. It was a control plane with
+a cloud backend; this project is local only and single process.
 
 ## 10. Resolved questions
 

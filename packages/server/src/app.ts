@@ -11,7 +11,7 @@ import type { FolderPicker } from './picker.js';
 import { repoRoutes } from './routes/repos.js';
 import { roomRoutes } from './routes/rooms.js';
 import { runtimeRoutes } from './routes/runtimes.js';
-import { isAllowed, isLocalOrigin, validateCapabilityToken } from './security.js';
+import { isAllowed, isLocalHost, isLocalOrigin, validateCapabilityToken } from './security.js';
 import { ConflictError, type RoomSupervisor } from './supervisor.js';
 import { websocketRoute } from './ws.js';
 
@@ -19,6 +19,9 @@ export const SERVER_VERSION = '0.0.0';
 
 /** The one API path the origin hook skips, because `verifyClient` guards it instead. */
 export const WS_PATH = '/api/ws';
+
+/** The one API path that needs no token, so `acr serve` can be probed for liveness. */
+export const HEALTH_PATH = '/api/health';
 
 type VerifyNext = (ok: boolean, code?: number, message?: string) => void;
 
@@ -77,8 +80,10 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
       return;
     }
 
-    const mutatingMethods = ['POST', 'PATCH', 'PUT', 'DELETE'];
-    if (opts.token && path.startsWith('/api/') && mutatingMethods.includes(request.method)) {
+    // Every API route, reads included: a transcript, a diff and a directory listing are
+    // as private as the room itself. `/api/health` is the one exception, so a probe can
+    // ask whether the server is up without being handed the token first.
+    if (opts.token && path.startsWith('/api/') && path !== HEALTH_PATH) {
       if (!validateCapabilityToken(request.headers, opts.token)) {
         await reply
           .status(401)
@@ -120,7 +125,11 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
         info: { origin?: string; req: { headers: Record<string, string | string[] | undefined> } },
         next: VerifyNext,
       ) => {
-        if (!isLocalOrigin(info.origin || undefined)) {
+        const host = info.req.headers.host;
+        if (
+          !isLocalHost(typeof host === 'string' ? host : undefined) ||
+          !isLocalOrigin(info.origin || undefined)
+        ) {
           next(false, 403, 'cross-origin websocket refused');
           return;
         }
@@ -133,7 +142,7 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
     },
   });
 
-  app.get('/api/health', () => ({ ok: true, version: SERVER_VERSION }));
+  app.get(HEALTH_PATH, () => ({ ok: true, version: SERVER_VERSION }));
   roomRoutes(app, opts.supervisor);
   runtimeRoutes(app);
   repoRoutes(app, opts.supervisor, opts.picker);

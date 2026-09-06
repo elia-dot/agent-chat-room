@@ -70,11 +70,26 @@ export function websocketRoute(app: FastifyInstance, supervisor: RoomSupervisor)
           send({ type: 'pong' });
           return;
         case 'unsubscribe':
-          subscribed.delete(frame.roomId);
+          if (typeof frame.roomId === 'string') subscribed.delete(frame.roomId);
           return;
-        case 'subscribe':
-          void subscribe(frame.roomId);
+        case 'subscribe': {
+          const roomId: unknown = frame.roomId;
+          if (typeof roomId !== 'string' || !roomId) {
+            send({ type: 'error', message: 'subscribe needs a roomId' });
+            return;
+          }
+          // Nothing in here may reject unhandled: this is the one place a client frame
+          // reaches the store, and an ambiguous room prefix throws. An unhandled rejection
+          // would take the whole server down with every room it is running.
+          subscribe(roomId).catch((err: unknown) => {
+            send({
+              type: 'error',
+              roomId,
+              message: err instanceof Error ? err.message : String(err),
+            });
+          });
           return;
+        }
         default:
           send({ type: 'error', message: `unknown frame type` });
       }
@@ -86,17 +101,18 @@ export function websocketRoute(app: FastifyInstance, supervisor: RoomSupervisor)
     });
 
     async function subscribe(roomId: string): Promise<void> {
-      const room = supervisor.store.findRoom(roomId);
-      if (!room) {
-        send({ type: 'error', roomId, message: `no room matches "${roomId}"` });
-        return;
-      }
+      let room: Room | undefined;
       try {
+        room = supervisor.store.findRoom(roomId);
+        if (!room) {
+          send({ type: 'error', roomId, message: `no room matches "${roomId}"` });
+          return;
+        }
         await supervisor.open(room.id);
       } catch (err) {
         send({
           type: 'error',
-          roomId: room.id,
+          roomId: room?.id ?? roomId,
           message: err instanceof Error ? err.message : String(err),
         });
         return;

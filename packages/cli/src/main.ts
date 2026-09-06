@@ -32,6 +32,9 @@ function resolveVersion(): string {
 
 export const VERSION = resolveVersion();
 
+/** Matches the ceiling in `RepoConfigSchema` and the HTTP API. */
+const MAX_TURN_RETRIES = 10;
+
 const HELP = `acr - agent chat room
 
 Usage:
@@ -397,6 +400,11 @@ function nonNegative(value: string | undefined, flag: string): number | undefine
   const parsed = Number(value.trim());
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new UsageError(`${flag} must be a whole number of 0 or more, got "${value}"`);
+  }
+  // The same ceiling `.acr.json` and the HTTP API enforce, so no entry point can set a
+  // budget the others would refuse to display.
+  if (parsed > MAX_TURN_RETRIES) {
+    throw new UsageError(`${flag} can be at most ${MAX_TURN_RETRIES}, got "${value}"`);
   }
   return parsed;
 }

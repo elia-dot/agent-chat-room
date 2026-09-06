@@ -579,6 +579,42 @@ describe('RoomEngine, the build-review loop', () => {
     expect(gitIn(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature/in-progress');
   });
 
+  it('cuts from whatever the repository calls its trunk, not only main', async () => {
+    const dir = repo();
+    gitIn(dir, 'branch', '-m', 'main', 'master');
+
+    const engine = await open(dir);
+    expect(engine.room.baseBranch).toBe('master');
+    expect(engine.room.roomBranch).toMatch(/^acr\//);
+    expect(gitIn(engine.room.worktreePath!, 'rev-parse', 'HEAD')).toBe(
+      gitIn(dir, 'rev-parse', 'master'),
+    );
+
+    // Without a worktree the checkout itself is the workspace, and it has to be on the
+    // trunk – which is `master` here, so `main` is not demanded.
+    const plain = await RoomEngine.create(
+      { task: 'fix add()', cwd: dir, agents: ['echo', 'echo'], worktree: false },
+      engineOptions(),
+    );
+    expect(plain.room.baseBranch).toBe('master');
+    expect(plain.room.roomBranch).toBe('master');
+  });
+
+  it('prefers the trunk the remote advertises over the conventional names', async () => {
+    const dir = repo();
+    const remote = mkdtempSync(join(tmpdir(), 'acr-remote-'));
+    repos.push(remote);
+    execFileSync('git', ['init', '--bare', '-q', remote]);
+    // The remote says `trunk` is the default branch, and `main` also exists locally.
+    gitIn(dir, 'branch', 'trunk');
+    gitIn(dir, 'remote', 'add', 'origin', remote);
+    gitIn(dir, 'push', '-q', 'origin', 'main', 'trunk');
+    gitIn(dir, 'remote', 'set-head', 'origin', 'trunk');
+
+    const engine = await open(dir);
+    expect(engine.room.baseBranch).toBe('trunk');
+  });
+
   it('requires main when isolation is explicitly disabled', async () => {
     const dir = repo();
     gitIn(dir, 'switch', '-q', '-c', 'feature/in-progress');

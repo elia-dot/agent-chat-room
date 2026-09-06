@@ -226,7 +226,10 @@ export class RoomSupervisor {
       patch.additionalDirs === undefined
         ? undefined
         : carryOverDirState(
-            await validateAdditionalDirs(patch.additionalDirs),
+            await validateAdditionalDirs(patch.additionalDirs, [
+              entry.engine.room.repoRoot,
+              ...(entry.engine.room.worktreePath ? [entry.engine.room.worktreePath] : []),
+            ]),
             entry.engine.room.additionalDirs,
           );
     this.opts.store.updateRoom(roomId, {

@@ -18,6 +18,7 @@ export type {
 export { NotFoundError } from './errors.js';
 export {
   isLocalOrigin,
+  isLocalHost,
   isLoopbackHost,
   isAllowed,
   validateCapabilityToken,

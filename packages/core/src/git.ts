@@ -53,36 +53,73 @@ export async function currentBranch(cwd: string): Promise<string> {
 }
 
 /**
- * The newest fast-forward-compatible commit on `main`.
+ * The branch rooms are cut from: what `origin/HEAD` points at when the remote says, else
+ * `main` or `master` when one exists locally, else the branch that is checked out.
+ *
+ * A repository is not required to call its trunk `main`. Guessing wrong here would send
+ * every room of a `master` repository to a branch that does not exist, so the remote's
+ * own answer is preferred and the two conventional names are only a fallback.
+ */
+export async function defaultBranch(cwd: string): Promise<string> {
+  const advertised = (
+    await gitOrUndefined(cwd, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+  )?.trim();
+  if (advertised) {
+    const name = advertised.replace(/^origin\//, '');
+    if (await branchExists(cwd, name)) return name;
+  }
+  for (const name of ['main', 'master']) {
+    if (await branchExists(cwd, name)) return name;
+  }
+  const current = await currentBranch(cwd);
+  if (current !== 'detached HEAD') return current;
+  throw new Error(
+    'could not tell which branch this repository starts from: no origin/HEAD, no main or ' +
+      'master, and HEAD is detached',
+  );
+}
+
+/**
+ * The newest fast-forward-compatible commit on `branch`, the repository's base branch.
  *
  * A room must not inherit whichever feature branch happened to be checked out when it was
- * opened. Fetching into the remote-tracking ref gives it the result of an up-to-date main
- * without switching or modifying the human's checkout. Local commits already ahead of
- * origin/main are preserved, just as they would be by `git pull --ff-only`.
+ * opened. Fetching into the remote-tracking ref gives it the result of an up-to-date base
+ * without switching or modifying the human's checkout. Local commits already ahead of the
+ * remote are preserved, just as they would be by `git pull --ff-only`.
  */
-export async function freshMainSha(cwd: string): Promise<string> {
-  const local = (await gitOrUndefined(cwd, ['rev-parse', '--verify', 'refs/heads/main']))?.trim();
-  if (!local) throw new Error('this repository has no local main branch');
+export async function freshBaseSha(cwd: string, branch: string): Promise<string> {
+  const local = (
+    await gitOrUndefined(cwd, ['rev-parse', '--verify', `refs/heads/${branch}`])
+  )?.trim();
+  if (!local) throw new Error(`this repository has no local ${branch} branch`);
 
   if (!(await remoteExists(cwd, 'origin'))) return local;
 
   try {
     // A newly configured, still-empty forge remote has nothing to pull yet. That is not a
-    // stale-main condition: local main is necessarily the only available starting point.
-    const advertised = await git(cwd, ['ls-remote', '--heads', 'origin', 'refs/heads/main']);
+    // stale-base condition: the local branch is necessarily the only available start.
+    const ref = `refs/heads/${branch}`;
+    const advertised = await git(cwd, ['ls-remote', '--heads', 'origin', ref]);
     if (!advertised.trim()) return local;
-    await git(cwd, ['fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
+    await git(cwd, ['fetch', 'origin', `+${ref}:refs/remotes/origin/${branch}`]);
   } catch (err) {
-    throw new Error(`could not update main from origin: ${errText(err)}`);
+    throw new Error(`could not update ${branch} from origin: ${errText(err)}`);
   }
 
   const remote = (
-    await gitOrUndefined(cwd, ['rev-parse', '--verify', 'refs/remotes/origin/main'])
+    await gitOrUndefined(cwd, ['rev-parse', '--verify', `refs/remotes/origin/${branch}`])
   )?.trim();
-  if (!remote) throw new Error('origin has no main branch');
+  if (!remote) throw new Error(`origin has no ${branch} branch`);
   if (await isAncestor(cwd, local, remote)) return remote;
   if (await isAncestor(cwd, remote, local)) return local;
-  throw new Error('local main has diverged from origin/main; reconcile it before opening a room');
+  throw new Error(
+    `local ${branch} has diverged from origin/${branch}; reconcile it before opening a room`,
+  );
+}
+
+/** `freshBaseSha` for a repository whose base branch is `main`. */
+export function freshMainSha(cwd: string): Promise<string> {
+  return freshBaseSha(cwd, 'main');
 }
 
 async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {

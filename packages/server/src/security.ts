@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { serverTokenPath } from '@agent-chat-room/core';
 import type { FastifyRequest } from 'fastify';
 
@@ -63,10 +63,31 @@ export function isLoopbackHost(hostname: string): boolean {
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
+/**
+ * The `Host` a request was addressed to, checked the same way as `Origin`.
+ *
+ * `Origin` alone does not stop DNS rebinding: a page on `evil.example` whose name is
+ * re-pointed at 127.0.0.1 makes *same-origin* requests to this server, and a same-origin
+ * GET carries no `Origin` at all. What it cannot fake is `Host`, which still says
+ * `evil.example` – so a request addressed to any name other than loopback is refused.
+ */
+export function isLocalHost(host: string | undefined): boolean {
+  if (!host) return false;
+  // `[::1]:4321`, `127.0.0.1:4321`, `localhost` – strip a port without breaking IPv6.
+  const hostname = host.startsWith('[')
+    ? host.slice(0, host.indexOf(']') + 1)
+    : host.replace(/:\d+$/, '');
+  return isLoopbackHost(hostname);
+}
+
 /** True when this request may touch the API. */
 export function isAllowed(request: Pick<FastifyRequest, 'headers'>): boolean {
   const origin = request.headers.origin;
-  return isLocalOrigin(typeof origin === 'string' ? origin : undefined);
+  const host = request.headers.host;
+  return (
+    isLocalHost(typeof host === 'string' ? host : undefined) &&
+    isLocalOrigin(typeof origin === 'string' ? origin : undefined)
+  );
 }
 
 export function parseCookies(cookieHeader: string | undefined): Record<string, string> {
@@ -107,5 +128,8 @@ export function validateCapabilityToken(
 ): boolean {
   if (!expectedToken) return true;
   const provided = extractToken(headers);
-  return Boolean(provided && provided === expectedToken);
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expectedToken);
+  return a.length === b.length && timingSafeEqual(a, b);
 }

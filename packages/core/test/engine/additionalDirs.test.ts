@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -229,6 +230,27 @@ describe('read-only additional folders', () => {
       .listMessages(engine.room.id)
       .find((m) => m.kind === 'system' && m.text.includes('could not be put back'));
     expect(kept?.text).toContain('auth.js');
+  });
+
+  it('refuses a folder inside the room repository', async () => {
+    const dir = repo({ 'math.js': BROKEN });
+    mkdirSync(join(dir, 'packages'));
+    await expect(open(dir, [{ path: join(dir, 'packages'), access: 'read' }])).rejects.toThrow(
+      /inside the room's own repository/,
+    );
+    await expect(open(dir, [dir])).rejects.toThrow(/inside the room's own repository/);
+  });
+
+  it('refuses read-only access to a folder with no repository to revert against', async () => {
+    const dir = repo({ 'math.js': BROKEN });
+    const plain = mkdtempSync(join(tmpdir(), 'acr-plain-'));
+    repos.push(plain);
+    await expect(open(dir, [{ path: plain, access: 'read' }])).rejects.toThrow(
+      /not in a git repository/,
+    );
+    // Write access has nothing to enforce, so a plain folder is fine there.
+    const engine = await open(dir, [{ path: plain, access: 'write' }]);
+    expect(engine.room.additionalDirs.map((d) => d.access)).toEqual(['write']);
   });
 });
 

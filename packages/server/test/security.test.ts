@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startServer } from '../src/server.js';
-import { isLocalOrigin, isLoopbackHost } from '../src/security.js';
+import { isLocalHost, isLocalOrigin, isLoopbackHost } from '../src/security.js';
 import { type Harness, harness, useTempConfigDir } from './helpers.js';
 
 let config: ReturnType<typeof useTempConfigDir>;
@@ -80,6 +80,20 @@ describe('the origin check', () => {
     });
     expect(allowed.statusCode).toBe(200);
   });
+
+  it('refuses a request addressed to a name that is not loopback', async () => {
+    // DNS rebinding: a page on evil.example whose name now resolves to 127.0.0.1 makes a
+    // same-origin GET, which carries no Origin header at all. Host still says evil.example.
+    for (const host of ['evil.example:4321', '192.168.1.10:4321', '127.0.0.1.evil.com']) {
+      expect(isLocalHost(host), host).toBe(false);
+      const rebound = await h.app.inject({ url: '/api/rooms', headers: { host } });
+      expect(rebound.statusCode, host).toBe(403);
+    }
+    for (const host of ['localhost:4321', '127.0.0.1:4321', '[::1]:4321', 'localhost']) {
+      expect(isLocalHost(host), host).toBe(true);
+    }
+    expect(isLocalHost(undefined)).toBe(false);
+  });
 });
 
 describe('startServer', () => {
@@ -145,6 +159,17 @@ describe('startServer', () => {
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('SameSite=Strict');
     expect(setCookie).toContain('Max-Age=2592000');
+
+    // 1b. Reads need the token as much as writes: a transcript is as private as the room.
+    // Only the health probe is open, so a script can ask whether the server is up.
+    const unauthGet = await fetch(`${server.url}/api/rooms`);
+    expect(unauthGet.status).toBe(401);
+    const health = await fetch(`${server.url}/api/health`);
+    expect(health.status).toBe(200);
+    const authGet = await fetch(`${server.url}/api/rooms`, {
+      headers: { Cookie: 'acr_token=test-token-123' },
+    });
+    expect(authGet.status).toBe(200);
 
     // 2. Mutating API call without token is rejected with 401
     const unauthPost = await fetch(`${server.url}/api/rooms`, {

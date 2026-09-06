@@ -130,9 +130,24 @@ export const MAX_ADDITIONAL_DIRS = 20;
  */
 export async function validateAdditionalDirs(
   entries: readonly AdditionalDirInput[],
+  /**
+   * The room's own repository and worktree. A grant inside either is refused: the
+   * checkout is exactly what the worktree keeps the agents out of, and the revert that
+   * makes a read grant mean something skips the room's own repository.
+   */
+  within: readonly string[] = [],
 ): Promise<AdditionalDir[]> {
   if (entries.length > MAX_ADDITIONAL_DIRS) {
     throw new EngineError(`a room can grant at most ${MAX_ADDITIONAL_DIRS} additional folders`);
+  }
+
+  const owned: string[] = [];
+  for (const dir of within) {
+    try {
+      owned.push(await realpath(dir));
+    } catch {
+      owned.push(dir);
+    }
   }
 
   const result: AdditionalDir[] = [];
@@ -155,6 +170,23 @@ export async function validateAdditionalDirs(
     } catch (err) {
       if (err instanceof EngineError) throw err;
       throw new EngineError(`additional folder does not exist or cannot be read: "${path}"`);
+    }
+    const inside = owned.find((root) => canonical === root || canonical.startsWith(`${root}/`));
+    if (inside) {
+      throw new EngineError(
+        `"${path}" is inside the room's own repository (${inside}). The room already works ` +
+          'there, and granting it as an extra folder would hand the agents the checkout the ' +
+          'worktree keeps them out of.',
+      );
+    }
+    // A read grant is enforced by reverting the folder's repository after each turn. With
+    // no repository there is nothing to revert against, and a grant the room cannot keep
+    // is worse than one it refuses.
+    if (grant === 'read' && !(await git.repoRoot(canonical))) {
+      throw new EngineError(
+        `"${path}" is not in a git repository, so read-only access cannot be enforced ` +
+          'there. Grant it write access, or make it a repository first.',
+      );
     }
     if (!seen.has(canonical)) {
       seen.add(canonical);
@@ -371,7 +403,7 @@ export class RoomEngine {
       ...(input.additionalDirs ? { additional_dirs: input.additionalDirs } : {}),
       ...(input.maxTurnRetries === undefined ? {} : { maxTurnRetries: input.maxTurnRetries }),
     });
-    const additionalDirs = await validateAdditionalDirs(settings.additional_dirs ?? []);
+    const additionalDirs = await validateAdditionalDirs(settings.additional_dirs ?? [], [repoRoot]);
 
     const mode: RoomMode = input.mode ?? 'build-review';
     const registry = opts.adapters ?? defaultAdapters;
@@ -417,10 +449,11 @@ export class RoomEngine {
     }
     assertRoster(roster, mode);
 
-    // New rooms always cut from an up-to-date main, independent of the branch the launcher
-    // is standing on. `freshMainSha` fetches origin/main without switching that checkout.
-    const baseBranch = 'main';
-    const mainSha = await git.freshMainSha(repoRoot);
+    // New rooms always cut from an up-to-date base branch, independent of the branch the
+    // launcher is standing on. `freshBaseSha` fetches the remote's copy without switching
+    // that checkout. The base is whatever the repository calls its trunk, not always `main`.
+    const baseBranch = await git.defaultBranch(repoRoot);
+    const mainSha = await git.freshBaseSha(repoRoot, baseBranch);
     const title = input.title?.trim() || deriveTitle(task, repoRoot);
     const useWorktree = settings.worktree;
     const roomId = randomUUID();
@@ -453,9 +486,9 @@ export class RoomEngine {
       // Opting out of isolation cannot silently turn "start from main" back into "start
       // from whichever branch is open". In this mode the checkout itself is the workspace.
       const checkoutBranch = await git.currentBranch(repoRoot);
-      if (checkoutBranch !== 'main') {
+      if (checkoutBranch !== baseBranch) {
         throw new EngineError(
-          `${repoRoot} is on ${checkoutBranch}. Switch to main or use an isolated worktree.`,
+          `${repoRoot} is on ${checkoutBranch}. Switch to ${baseBranch} or use an isolated worktree.`,
         );
       }
       if (!input.allowDirty && (await git.isDirty(repoRoot))) {
@@ -668,6 +701,12 @@ export class RoomEngine {
       let result: { done: boolean; error?: string; commit?: string };
       try {
         result = await this.runRound(round);
+      } catch (err) {
+        // Anything a turn did not report as a failure – a git command that blew up, a
+        // store write that hit a busy database. Without this the room would stay in
+        // `running` with no way back short of a restart, and any reviewer still in flight
+        // would keep its CLI alive with nobody listening.
+        result = this.abortRound(round, err);
       } finally {
         lock.release();
       }
@@ -681,6 +720,24 @@ export class RoomEngine {
       ...(lastError ? { error: lastError } : {}),
       ...(commit ? { commit } : {}),
     });
+  }
+
+  /**
+   * A round that threw rather than failed. Cancel whatever is still running, tell the
+   * transcript, and hand the room over: the round counter rewinds so the human's Continue
+   * retries it, the same as a failed worker turn.
+   */
+  private abortRound(round: number, err: unknown): { done: boolean; error: string } {
+    const error = err instanceof Error ? err.message : String(err);
+    for (const handle of this.active) handle.cancel(`round ${round} aborted: ${error}`);
+    this.system(`round ${round} aborted: ${error}`, round);
+    if (this.stopping) {
+      this.setState('stopped');
+    } else {
+      this.roomRow = this.store.updateRoom(this.roomRow.id, { round: round - 1 });
+      this.setState('needs-you');
+    }
+    return { done: true, error };
   }
 
   /** Ask the running turns to stop. The room lands in `stopped` once they settle. */
@@ -1353,7 +1410,10 @@ export class RoomEngine {
       watermark: this.store.latestMessageId(room.id),
     }));
 
-    const reviews = await Promise.all(
+    // `allSettled`, so one reviewer's crash does not abandon the others mid-turn with their
+    // CLIs still running. The first rejection is rethrown once every turn has ended, and
+    // `runLocked` turns that into an aborted round.
+    const settled = await Promise.allSettled(
       reviewerRequests.map(async ({ reviewer, newMessages, watermark }): Promise<ReviewOutcome> => {
         const turn = await this.runParticipantTurn(reviewer, {
           round,
@@ -1395,6 +1455,11 @@ export class RoomEngine {
         return { participant: reviewer, result: turn.result, message, verdict };
       }),
     );
+    const reviews: ReviewOutcome[] = [];
+    for (const outcome of settled) {
+      if (outcome.status === 'rejected') throw outcome.reason;
+      reviews.push(outcome.value);
+    }
 
     if (this.stopping) {
       this.setState('stopped');
@@ -1528,12 +1593,16 @@ export class RoomEngine {
       testResults?: string;
     },
   ): Promise<{ result: TurnResult; stream: TurnStream; messageId: string }> {
-    const budget = Math.max(0, this.reload().maxTurnRetries);
     let current = participant;
 
     for (let attempt = 0; ; attempt += 1) {
       const turn = await this.runOneTurn(current, ctx);
-      if (turn.result.ok || attempt >= budget) return turn;
+      if (turn.result.ok) return turn;
+      // Read fresh after every attempt, not once up front: the budget can be changed from
+      // the panel while a turn is running, and a human lowering it to zero mid-failure
+      // means "stop spending", which must not be answered with another paid attempt.
+      const budget = Math.max(0, this.reload().maxTurnRetries);
+      if (attempt >= budget) return turn;
       if (turn.result.cancelled || this.stopping) return turn;
 
       this.system(
@@ -1542,7 +1611,10 @@ export class RoomEngine {
         ctx.round,
       );
       await delay(this.retryBackoffMs * (attempt + 1));
+      // The backoff is the other window a human can act in. Both a stop and a budget cut
+      // during it have to be honoured before the next attempt is paid for.
       if (this.stopping) return turn;
+      if (attempt >= Math.max(0, this.reload().maxTurnRetries)) return turn;
       // Re-read the row: the failed attempt may have persisted a session id, and the retry
       // should resume that session rather than start a third cold one.
       current = this.participants.find((p) => p.id === participant.id) ?? current;

@@ -5,7 +5,6 @@
 | Version | Supported          |
 | ------- | ------------------ |
 | 0.1.x   | :white_check_mark: |
-| 0.0.x   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
@@ -23,11 +22,12 @@ Please include:
 `agent-chat-room` is designed with a strict local-first security boundary:
 
 1. **Localhost only**: The HTTP and WebSocket server binds strictly to `127.0.0.1`.
-2. **Origin Verification**: Requests are checked to ensure they originate from loopback hosts
-   (`localhost`, `127.0.0.1`, `[::1]`) preventing cross-origin browser exploitation and DNS
-   rebinding attacks.
-3. **Capability Token Boundary**: State-mutating API routes and WebSocket connections require an
-   authorized session capability token. The token is generated with `0600` permissions in
+2. **Origin and Host Verification**: Every API request must carry a loopback `Host`
+   (`localhost`, `127.0.0.1`, `[::1]`) and, when present, a loopback `Origin`. The `Host`
+   check is what defeats DNS rebinding: a page whose name is re-pointed at 127.0.0.1 still
+   addresses the server by that name.
+3. **Capability Token Boundary**: Every API route except `/api/health`, and every WebSocket
+   connection, requires the session capability token. The token is generated with `0600` permissions in
    `~/.config/agent-chat-room/server.token` and redeemed via a one-time HTTP redirect into an
    `HttpOnly; SameSite=Strict` cookie, isolating browser tabs and unauthenticated network
    processes. (Processes running as the same local user UID share user file permissions.)

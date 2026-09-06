@@ -38,8 +38,10 @@ const TRANSITIONS: Record<RoomState, readonly RoomState[]> = {
   approved: ['stopped', 'needs-you'],
   // The human is the next actor. Answering resumes the loop.
   'needs-you': ['running', 'stopped'],
-  // Resumable: `acr rooms resume` picks a stopped room back up.
-  stopped: ['running', 'idle'],
+  // Resumable: `acr rooms resume` picks a stopped room back up. A resumed room can fail
+  // before its first turn – setup, the write lock, a finished brainstorm – and that lands
+  // in `needs-you` straight from `stopped`.
+  stopped: ['running', 'idle', 'needs-you'],
 };
 
 export function canTransition(from: RoomState, to: RoomState): boolean {

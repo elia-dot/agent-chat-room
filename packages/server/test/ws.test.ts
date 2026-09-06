@@ -162,10 +162,18 @@ describe('the room WebSocket', () => {
     socket.send('not json at all');
     socket.send(JSON.stringify({ type: 'subscribe', roomId: 'nope' }));
     socket.send(JSON.stringify({ type: 'frobnicate' }));
-    await waitFor(() => frames.length >= 3, 'three error frames');
+    // A roomId that is not a string used to reach the store and throw where nothing
+    // caught it – an unhandled rejection that took the whole server down.
+    socket.send(JSON.stringify({ type: 'subscribe', roomId: 42 }));
+    socket.send(JSON.stringify({ type: 'subscribe' }));
+    await waitFor(() => frames.length >= 5, 'five error frames');
 
     expect(frames.every((f) => f.type === 'error')).toBe(true);
     expect(socket.readyState).toBe(WebSocket.OPEN);
+
+    // And the server is still there to answer.
+    socket.send(JSON.stringify({ type: 'ping' }));
+    await waitFor(() => frames.some((f) => f.type === 'pong'), 'a pong');
   });
 
   it('refuses a handshake from a page that is not on localhost', async () => {

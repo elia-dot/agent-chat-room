@@ -62,10 +62,17 @@ export class RoomSocket {
     this.open();
   }
 
-  /** Watch a room. Safe before the socket is open: the id is replayed on connect. */
+  /**
+   * Watch a room. Safe before the socket is open: the id is replayed on connect.
+   *
+   * Subscribing to the room already being watched is not a no-op: the server answers
+   * every subscribe with a fresh snapshot, and a caller that has just emptied its store
+   * needs exactly that.
+   */
   subscribe(roomId: string): void {
-    if (this.roomId === roomId) return;
-    if (this.roomId) this.send({ type: 'unsubscribe', roomId: this.roomId });
+    if (this.roomId && this.roomId !== roomId) {
+      this.send({ type: 'unsubscribe', roomId: this.roomId });
+    }
     this.roomId = roomId;
     this.send({ type: 'subscribe', roomId });
   }
@@ -110,12 +117,19 @@ export class RoomSocket {
   }
 
   private open(): void {
+    // One live socket at a time. "Retry now" can arrive while the previous attempt is
+    // still handshaking; leaving that one alive would deliver every frame twice.
+    const previous = this.socket;
+    this.socket = undefined;
+    previous?.close();
+
     this.report('connecting');
 
     const socket = new WebSocket(this.endpoint());
     this.socket = socket;
 
     socket.addEventListener('open', () => {
+      if (socket !== this.socket) return;
       this.retryMs = FIRST_RETRY_MS;
       this.attempt = 0;
       this.nextRetryAt = null;
@@ -129,6 +143,7 @@ export class RoomSocket {
     });
 
     socket.addEventListener('message', (event: MessageEvent<string>) => {
+      if (socket !== this.socket) return;
       try {
         const frame = JSON.parse(event.data) as IncomingFrame;
         this.lastFrameAt = Date.now();
@@ -139,6 +154,9 @@ export class RoomSocket {
     });
 
     socket.addEventListener('close', () => {
+      // A socket that was replaced must not schedule a retry of its own: only the current
+      // one owns the timer, or a replaced socket would keep reopening after `close()`.
+      if (socket !== this.socket) return;
       if (this.closedByUs) {
         this.report('closed');
         return;

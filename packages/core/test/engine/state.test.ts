@@ -18,6 +18,8 @@ const LEGAL: [RoomState, RoomState][] = [
   ['running', 'needs-you'],
   ['needs-you', 'running'],
   ['stopped', 'running'],
+  // A resumed room whose setup or write lock fails asks the human without ever running.
+  ['stopped', 'needs-you'],
   ['approved', 'stopped'],
   // An @mention is the one thing that reopens a finished room.
   ['approved', 'needs-you'],
