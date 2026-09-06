@@ -44,6 +44,7 @@ export function App(): React.ReactElement {
   const [files, setFiles] = useState<ChangedFiles | null>(null);
   const [gh, setGh] = useState<Detection | null>(null);
   const [catalogs, setCatalogs] = useState<Record<string, ModelCatalog>>({});
+  const [usableRuntimes, setUsableRuntimes] = useState<string[]>([]);
   const [diff, setDiff] = useState<DiffState | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [showNewRoom, setShowNewRoom] = useState(false);
@@ -111,7 +112,12 @@ export function App(): React.ReactElement {
     // on every render of the panel.
     void api
       .runtimes()
-      .then((r) => setGh(r.gh))
+      .then((r) => {
+        setGh(r.gh);
+        // Only the ones that would actually run: offering a runtime that is not installed
+        // in the roster's replace picker would just produce a failed turn.
+        setUsableRuntimes(r.runtimes.filter((entry) => entry.usable).map((entry) => entry.id));
+      })
       .catch(() => undefined);
     // The model picker's list. Cached server-side, so asking once here is enough, and a
     // failure just means the picker offers `default` and `Custom…`.
@@ -421,11 +427,18 @@ export function App(): React.ReactElement {
           diff={diff}
           busy={busy}
           catalogs={catalogs}
+          usableRuntimes={usableRuntimes}
           onClose={() => setSheet(null)}
           onCloseDiff={() => setDiff(null)}
           onSetAdditionalDirs={(additionalDirs) =>
             void act(async () => {
               const { room: updated } = await api.patchRoom(room.id, { additionalDirs });
+              store.merge({ room: updated });
+            })
+          }
+          onSetMaxTurnRetries={(maxTurnRetries) =>
+            void act(async () => {
+              const { room: updated } = await api.patchRoom(room.id, { maxTurnRetries });
               store.merge({ room: updated });
             })
           }

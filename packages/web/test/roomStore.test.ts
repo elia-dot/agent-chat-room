@@ -23,6 +23,7 @@ const room = (over: Partial<Room> = {}): Room => ({
   nextSpeaker: null,
   round: 0,
   maxRounds: 4,
+  maxTurnRetries: 0,
   prUrl: null,
   createdAt: 'then',
   updatedAt: 'then',

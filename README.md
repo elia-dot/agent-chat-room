@@ -58,12 +58,12 @@ M4 brings complete production-readiness and the next-generation feature set:
 - **Auto-commit on approve.** The round everyone approved is committed on the room branch with the
   worker's summary as the body, so a room's work is never sitting only in a working tree.
 - **SQLite persistence.** Rooms, participants, messages, turns and recent repos live in
-  `~/.config/agent-chat-room/acr.db` (schema v4), and `acr rooms` reads them back.
+  `~/.config/agent-chat-room/acr.db` (schema v5), and `acr rooms` reads them back.
 - **Restart recovery.** A turn that died with its process is marked, its round is rolled back and
   re-run, and each agent keeps its own runtime session – so only the turn is repeated, not the
   conversation.
 - **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs` (with per-folder
-  `access`), `setup`, and `testCommand`.
+  `access`), `setup`, `testCommand`, and `maxTurnRetries`.
 - **Governance & CI.** MIT License, Denly attribution `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
   and GitHub Actions CI across macOS and Linux.
 
@@ -175,6 +175,33 @@ mean a swapped agent's session still remembers being the other role, so the engi
 `--append-system-prompt`, but Codex, Cursor, Antigravity and opencode only see role instructions
 on the first prompt of a session.
 
+The same control **replaces a runtime in place** – swap Codex out for opencode without
+reopening the room. That is the one roster change no session can survive, since a session id
+names a conversation only the old binary can resume, so the replacement starts cold: its
+model is cleared too (model ids belong to the runtime that offered them) and it is handed the
+whole transcript on its first turn rather than only the messages since a turn it never took.
+A swap will not put the same runtime in the room twice – two participants under one name are
+what an `@mention` cannot tell apart – though a room opened that way on purpose
+(`--agents opencode,opencode`) is legal, and the roster is addressed by participant id so the
+right one is still reachable.
+
+### When a turn fails
+
+By default the first failure hands the room back to you: it lands in `needs-you`, the round
+counter rewinds so **Continue** retries that same round, and the failed agent's session is
+kept so the retry resumes rather than starting cold.
+
+A room can be told to retry first. `maxTurnRetries` – set in the new-room dialog, in
+`.acr.json`, with `--retries n`, or changed at any time from the right panel – runs a failed
+turn again up to _n_ times before giving up. Every attempt writes its own turn row, so
+`rooms show` reports what actually happened rather than hiding a failure behind a success.
+
+Two things it deliberately will not do. It never retries a turn **you** stopped, because that
+would be arguing with you. And it does not change what a failed round _means_: once the
+budget is spent the room still rewinds and asks you, exactly as it always did. The default is
+0 – retrying costs another turn each time, and that is the room owner's decision to make, not
+a default that quietly spends their tokens twice.
+
 ### Commit, Open PR, Export
 
 - **Commit** stages and commits the room's working tree, for the common case of a `needs-you`
@@ -220,6 +247,7 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
   "additional_dirs": ["/path/to/app", { "path": "/path/to/shared/lib", "access": "read" }],
   "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
   "testCommand": "npm test", // run between worker and reviewer turns; results injected under ## Test Results
+  "maxTurnRetries": 0, // retries per failed turn before the room stops and asks you
 }
 ```
 
@@ -229,7 +257,7 @@ Unknown keys warn and are ignored, so a file written by a newer `acr` never bric
 
 ```
 ~/.config/agent-chat-room/
-  acr.db                  rooms, participants, messages, turns, recent repos (schema v4)
+  acr.db                  rooms, participants, messages, turns, recent repos (schema v5)
   server.token            capability session authorization token (mode 0600)
   turns/<turnId>.jsonl    every raw line a runtime emitted, for debugging an adapter
   worktrees/<roomId>/     the room's checkout

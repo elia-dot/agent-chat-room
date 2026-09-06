@@ -36,6 +36,8 @@ export interface CreateRoomRequest {
   modelReviewer?: string;
   /** Per-runtime model override, keyed by runtime id. */
   models?: Record<string, string>;
+  /** Retries per failed turn before the room stops and asks. 0 (default) never retries. */
+  maxTurnRetries?: number;
   start?: boolean;
 }
 
@@ -151,14 +153,24 @@ export const api = {
   resume: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/resume`),
   stop: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/stop`),
   close: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/close`),
-  patchRoom: (id: string, body: { title?: string; additionalDirs?: AdditionalDir[] }) =>
+  patchRoom: (
+    id: string,
+    body: { title?: string; additionalDirs?: AdditionalDir[]; maxTurnRetries?: number },
+  ) =>
     request<{ room: Room }>(`/api/rooms/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
 
-  /** Role swap and model picker: one route, because both change a participant of a live room. */
-  setParticipant: (id: string, runtime: string, body: { role?: Role; model?: string }) =>
+  /**
+   * Role swap, model picker and runtime replacement: one route, because all three change a
+   * participant of a live room. `runtime` in the body replaces the one in the path.
+   */
+  setParticipant: (
+    id: string,
+    runtime: string,
+    body: { role?: Role; model?: string; runtime?: string },
+  ) =>
     request<{ participants: Participant[] }>(
       `/api/rooms/${id}/participants/${encodeURIComponent(runtime)}`,
       { method: 'PATCH', body: JSON.stringify(body) },

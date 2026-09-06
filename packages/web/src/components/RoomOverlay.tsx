@@ -28,7 +28,13 @@ export interface RoomOverlayProps {
   onClose: () => void;
   onCloseDiff: () => void;
   onSetAdditionalDirs: (dirs: AdditionalDir[]) => void;
-  onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
+  onSetParticipant: (
+    runtime: string,
+    patch: { role?: Role; model?: string; runtime?: string },
+  ) => void;
+  /** Runtime ids this machine can actually run, for the roster's replace-runtime picker. */
+  usableRuntimes: string[];
+  onSetMaxTurnRetries: (value: number) => void;
 }
 
 /**
@@ -116,6 +122,8 @@ export function RoomOverlay(props: RoomOverlayProps): React.ReactElement {
             room={room}
             busy={props.busy}
             catalog={props.catalogs[participant.runtime]}
+            usableRuntimes={props.usableRuntimes}
+            taken={participants.map((p) => p.runtime)}
             onSet={props.onSetParticipant}
           />
         ))}
@@ -127,6 +135,9 @@ export function RoomOverlay(props: RoomOverlayProps): React.ReactElement {
           <Tag>owner</Tag>
         </li>
       </ul>
+
+      <Divider label="WHEN A TURN FAILS" />
+      <RetryPolicy room={room} busy={props.busy} onSet={props.onSetMaxTurnRetries} />
 
       <Divider label="FOLDER ACCESS" />
       <AdditionalFolders
@@ -246,6 +257,8 @@ function ParticipantRow({
   room,
   busy,
   catalog,
+  usableRuntimes,
+  taken,
   onSet,
 }: {
   participant: Participant;
@@ -253,7 +266,9 @@ function ParticipantRow({
   room: Room;
   busy: boolean;
   catalog: ModelCatalog | undefined;
-  onSet: (runtime: string, patch: { role?: Role; model?: string }) => void;
+  usableRuntimes: string[];
+  taken: string[];
+  onSet: (participantId: string, patch: { role?: Role; model?: string; runtime?: string }) => void;
 }): React.ReactElement {
   const [model, setModel] = useState(participant.model ?? '');
   const running = room.state === 'running' || room.state === 'waiting-reviews';
@@ -268,14 +283,25 @@ function ParticipantRow({
         >
           {initials(participant.runtime)}
         </span>
-        <span className={`flex-1 truncate font-mono text-[12px] ${tone.text}`}>
-          {participant.runtime}
-        </span>
+        <select
+          value={participant.runtime}
+          disabled={locked}
+          aria-label={`${participant.runtime} runtime`}
+          onChange={(e) => onSet(participant.id, { runtime: e.target.value })}
+          className={`min-w-0 flex-1 truncate rounded border border-transparent bg-transparent font-mono text-[12px] hover:border-line disabled:opacity-50 ${tone.text}`}
+          title="Replace this runtime. The replacement starts a fresh session."
+        >
+          {runtimeOptions(participant.runtime, usableRuntimes, taken).map((id) => (
+            <option key={id} value={id}>
+              {id}
+            </option>
+          ))}
+        </select>
         <select
           value={participant.role}
           disabled={locked}
           aria-label={`${participant.runtime} role`}
-          onChange={(e) => onSet(participant.runtime, { role: e.target.value as Role })}
+          onChange={(e) => onSet(participant.id, { role: e.target.value as Role })}
           className="rounded border border-line bg-surface px-1 py-px font-mono text-[10px] disabled:opacity-50"
         >
           {roleOptions(room.mode, participant.role).map((role) => (
@@ -295,11 +321,63 @@ function ParticipantRow({
           className="w-full"
           onChange={setModel}
           onCommit={(next) => {
-            if (next !== (participant.model ?? '')) onSet(participant.runtime, { model: next });
+            if (next !== (participant.model ?? '')) onSet(participant.id, { model: next });
           }}
         />
       </div>
     </li>
+  );
+}
+
+/**
+ * What this slot may become: whatever this machine can run, minus the runtimes already in
+ * the room, plus the incumbent so the select always shows its own value. A room cannot hold
+ * the same runtime twice – two participants called `claude` would be indistinguishable in
+ * the transcript and in an `@mention`.
+ */
+function runtimeOptions(current: string, usable: string[], taken: string[]): string[] {
+  const others = new Set(taken.filter((id) => id !== current));
+  return [current, ...usable.filter((id) => id !== current && !others.has(id))];
+}
+
+/**
+ * The room's retry budget, editable while the room is open.
+ *
+ * Unlike the roster this stays enabled during a round: the engine re-reads the budget at
+ * the top of every attempt, so raising it while a flaky turn is failing takes effect on
+ * that very turn rather than the next room.
+ */
+function RetryPolicy({
+  room,
+  busy,
+  onSet,
+}: {
+  room: Room;
+  busy: boolean;
+  onSet: (value: number) => void;
+}): React.ReactElement {
+  const value = room.maxTurnRetries;
+  return (
+    <label className="mt-2 flex items-center gap-2 text-[12px]">
+      <select
+        value={value}
+        disabled={busy || room.closedAt !== null}
+        aria-label="retries per failed turn"
+        onChange={(e) => onSet(Number(e.target.value))}
+        className="rounded border border-line bg-surface px-1 py-px font-mono text-[10px] disabled:opacity-50"
+      >
+        {[0, 1, 2, 3].map((n) => (
+          <option key={n} value={n}>
+            {n === 0 ? 'never retry' : `retry ${n}×`}
+          </option>
+        ))}
+      </select>
+      <span className="min-w-0 flex-1 font-mono text-[11px] text-ink-faint">
+        {value > 0
+          ? `a failed turn runs again up to ${value}× before the room asks you`
+          : 'the first failure hands the room back to you'}
+      </span>
+    </label>
   );
 }
 

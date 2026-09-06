@@ -39,6 +39,7 @@ export interface CreateRoomInput {
   baseSha?: string | null;
   worktreePath?: string | null;
   maxRounds?: number;
+  maxTurnRetries?: number;
   state?: RoomState;
   round?: number;
 }
@@ -123,10 +124,10 @@ export class RoomStore {
       .prepare(
         `INSERT INTO rooms (id, slug, title, task, mode, repo_root, additional_dirs_json,
            base_branch, room_branch, base_sha, worktree_path, state, round, max_rounds,
-           created_at, updated_at)
+           max_turn_retries, created_at, updated_at)
          VALUES (@id, @slug, @title, @task, @mode, @repoRoot, @additionalDirsJson,
            @baseBranch, @roomBranch, @baseSha, @worktreePath, @state, @round, @maxRounds,
-           @createdAt, @updatedAt)`,
+           @maxTurnRetries, @createdAt, @updatedAt)`,
       )
       .run({
         id,
@@ -143,6 +144,7 @@ export class RoomStore {
         state: input.state ?? 'idle',
         round: input.round ?? 0,
         maxRounds: input.maxRounds ?? 4,
+        maxTurnRetries: input.maxTurnRetries ?? 0,
         createdAt: now,
         updatedAt: now,
       });
@@ -217,6 +219,7 @@ export class RoomStore {
         | 'nextSpeaker'
         | 'round'
         | 'maxRounds'
+        | 'maxTurnRetries'
         | 'baseSha'
         | 'worktreePath'
         | 'closedAt'
@@ -234,6 +237,7 @@ export class RoomStore {
       nextSpeaker: 'next_speaker',
       round: 'round',
       maxRounds: 'max_rounds',
+      maxTurnRetries: 'max_turn_retries',
       baseSha: 'base_sha',
       worktreePath: 'worktree_path',
       closedAt: 'closed_at',
@@ -317,7 +321,10 @@ export class RoomStore {
   updateParticipant(
     id: string,
     patch: Partial<
-      Pick<Participant, 'sessionId' | 'lastSeenMessageId' | 'role' | 'permission' | 'model'>
+      Pick<
+        Participant,
+        'sessionId' | 'lastSeenMessageId' | 'role' | 'permission' | 'model' | 'runtime'
+      >
     >,
   ): Participant {
     const map: Record<string, string> = {
@@ -326,6 +333,7 @@ export class RoomStore {
       role: 'role',
       permission: 'permission',
       model: 'model',
+      runtime: 'runtime',
     };
     const sets: string[] = [];
     const params: Row = { id };
@@ -637,6 +645,7 @@ function toRoom(row: Row): Room {
     nextSpeaker: str(row.next_speaker),
     round: Number(row.round),
     maxRounds: Number(row.max_rounds),
+    maxTurnRetries: Number(row.max_turn_retries ?? 0),
     prUrl: str(row.pr_url),
     createdAt: asText(row.created_at),
     updatedAt: asText(row.updated_at),

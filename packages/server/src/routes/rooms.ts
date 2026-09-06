@@ -27,6 +27,8 @@ const CreateRoomBody = z.object({
   allowDirty: z.boolean().optional(),
   /** Kick the loop off as part of creating the room, which is what the dialog does. */
   start: z.boolean().optional(),
+  /** Retries per failed turn before the room stops and asks. 0 (the default) never retries. */
+  maxTurnRetries: z.number().int().min(0).max(10).optional(),
 });
 
 const ParticipantBody = z
@@ -34,9 +36,11 @@ const ParticipantBody = z
     role: z.enum(['worker', 'reviewer', 'moderator']).optional(),
     /** Empty string clears the override and falls back to the runtime's own default. */
     model: z.string().optional(),
+    /** Replace the runtime in this slot, keeping the role. The session cannot come along. */
+    runtime: z.string().min(1).optional(),
   })
-  .refine((v) => v.role !== undefined || v.model !== undefined, {
-    message: 'nothing to change: pass a role, a model, or both',
+  .refine((v) => v.role !== undefined || v.model !== undefined || v.runtime !== undefined, {
+    message: 'nothing to change: pass a role, a model, a runtime, or several',
   });
 
 const CommitBody = z
@@ -76,10 +80,13 @@ const PatchBody = z
   .object({
     title: z.string().min(1).optional(),
     additionalDirs: z.array(AdditionalDirSchema).max(20).optional(),
+    maxTurnRetries: z.number().int().min(0).max(10).optional(),
   })
-  .refine((v) => v.title !== undefined || v.additionalDirs !== undefined, {
-    message: 'nothing to change',
-  });
+  .refine(
+    (v) =>
+      v.title !== undefined || v.additionalDirs !== undefined || v.maxTurnRetries !== undefined,
+    { message: 'nothing to change' },
+  );
 
 const ListQuery = z.object({
   repo: z.string().optional(),
@@ -123,6 +130,7 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       ...(body.modelWorker ? { modelWorker: body.modelWorker } : {}),
       ...(body.modelReviewer ? { modelReviewer: body.modelReviewer } : {}),
       ...(body.allowDirty ? { allowDirty: true } : {}),
+      ...(body.maxTurnRetries === undefined ? {} : { maxTurnRetries: body.maxTurnRetries }),
     });
 
     // Asked for before the room starts, so a typo like `opus-5` is a sentence in the UI
@@ -240,9 +248,10 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
     if (!target) throw new NotFoundError(`nobody called "${participantId}" is in this room`);
 
     return {
-      participants: await supervisor.setParticipant(room.id, target.runtime, {
+      participants: await supervisor.setParticipant(room.id, target.id, {
         ...(body.role ? { role: body.role } : {}),
         ...(body.model === undefined ? {} : { model: body.model.trim() || null }),
+        ...(body.runtime === undefined ? {} : { runtime: body.runtime }),
       }),
     };
   });
@@ -287,6 +296,7 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       room: await supervisor.patch(room.id, {
         ...(body.title === undefined ? {} : { title: body.title }),
         ...(body.additionalDirs === undefined ? {} : { additionalDirs: body.additionalDirs }),
+        ...(body.maxTurnRetries === undefined ? {} : { maxTurnRetries: body.maxTurnRetries }),
       }),
     };
   });

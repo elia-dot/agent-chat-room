@@ -81,6 +81,9 @@ Options for \`run\`:
                            (e.g. --model claude=opus --model codex=gpt-5.3-codex).
   --timeout <seconds>      Per-read stall timeout for a turn (default: 1800, or
                            "timeoutSeconds" from .acr.json).
+  --retries <n>            Retry a failed turn up to n times before handing the room
+                           back to you (default: 0, or "maxTurnRetries" from
+                           .acr.json). A turn you stop yourself is never retried.
   --json                   Print a JSON summary instead of a human transcript.
   --no-color               Disable colour.
 
@@ -256,6 +259,7 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
         'model-worker': { type: 'string' },
         'model-reviewer': { type: 'string' },
         timeout: { type: 'string' },
+        retries: { type: 'string' },
         worktree: { type: 'boolean' },
         'allow-dirty': { type: 'boolean', default: false },
         json: { type: 'boolean', default: false },
@@ -272,6 +276,7 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
   }
 
   const timeoutSeconds = positive(values.timeout, '--timeout');
+  const retries = nonNegative(values.retries, '--retries');
 
   const agents = splitAgents(values.agents);
   if (agents && agents.length < 2) {
@@ -298,6 +303,7 @@ async function runCommand(argv: string[]): Promise<ExitCode> {
     // `--no-worktree` arrives as `worktree: false`; leaving it unset keeps the default.
     ...(worktree === undefined ? {} : { worktree }),
     ...(timeoutSeconds ? { timeoutMs: Math.round(timeoutSeconds * 1000) } : {}),
+    ...(retries === undefined ? {} : { maxTurnRetries: retries }),
     allowDirty: values['allow-dirty'] === true,
     renderer,
   });
@@ -376,6 +382,21 @@ function positive(value: string | undefined, flag: string): number | undefined {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new UsageError(`${flag} must be a positive number, got "${value}"`);
+  }
+  return parsed;
+}
+
+/**
+ * Like `positive`, but 0 is a legal answer – it is how you say "never retry".
+ *
+ * `Number` rather than `parseInt`, deliberately: `parseInt('1.5', 10)` is 1, so a parsed
+ * count would silently round a typo into a number the user did not ask for.
+ */
+function nonNegative(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value.trim());
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new UsageError(`${flag} must be a whole number of 0 or more, got "${value}"`);
   }
   return parsed;
 }

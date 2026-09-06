@@ -366,3 +366,82 @@ describe('POST /api/rooms/:id/promote', () => {
     expect(noProposal.statusCode).toBe(409);
   });
 });
+
+describe('replacing a runtime over the REST surface', () => {
+  it('swaps the runtime in the slot and reaches the live engine', async () => {
+    const room = await createRoom();
+    const live = await h.supervisor.open(room.id);
+
+    const response = await h.app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${room.id}/participants/echo2`,
+      payload: { runtime: 'echo3' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const { participants } = response.json<{ participants: Participant[] }>();
+    expect(participants.map((p) => `${p.runtime}:${p.role}`)).toEqual([
+      'echo:worker',
+      'echo3:reviewer',
+    ]);
+    expect(live.participants.map((p) => p.runtime)).toEqual(['echo', 'echo3']);
+  });
+
+  it('refuses an unknown runtime and one the room already holds', async () => {
+    const room = await createRoom();
+
+    const unknown = await h.app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${room.id}/participants/echo2`,
+      payload: { runtime: 'not-a-runtime' },
+    });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json<{ error: string }>().error).toMatch(/unknown runtime/);
+
+    const duplicate = await h.app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${room.id}/participants/echo2`,
+      payload: { runtime: 'echo' },
+    });
+    expect(duplicate.statusCode).toBe(400);
+    expect(duplicate.json<{ error: string }>().error).toMatch(/already in this room/);
+  });
+});
+
+describe('the retry budget over the REST surface', () => {
+  it('is 0 unless the room asked for one', async () => {
+    const room = await createRoom();
+    expect(room.maxTurnRetries).toBe(0);
+
+    const withRetries = await createRoom({ maxTurnRetries: 2 });
+    expect(withRetries.maxTurnRetries).toBe(2);
+  });
+
+  it('can be changed after the room is open', async () => {
+    const room = await createRoom();
+    const live = await h.supervisor.open(room.id);
+
+    const response = await h.app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${room.id}`,
+      payload: { maxTurnRetries: 3 },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ room: Room }>().room.maxTurnRetries).toBe(3);
+    // The live engine reads the budget from its own row, so it has to see the change.
+    expect(live.room.maxTurnRetries).toBe(3);
+  });
+
+  it('rejects a budget that is not a small whole number', async () => {
+    const room = await createRoom();
+    for (const maxTurnRetries of [-1, 99, 1.5]) {
+      const response = await h.app.inject({
+        method: 'PATCH',
+        url: `/api/rooms/${room.id}`,
+        payload: { maxTurnRetries },
+      });
+      expect(response.statusCode).toBe(400);
+    }
+  });
+});

@@ -115,11 +115,21 @@ const ADDITIONAL_DIRS = `
 ALTER TABLE rooms ADD COLUMN additional_dirs_json TEXT NOT NULL DEFAULT '[]';
 `;
 
+/**
+ * M5 lets a room decide for itself how many times a failed turn is retried before the room
+ * stops and asks the human. `0` is the historical behaviour – fail once, hand it over – so
+ * an M4 database opens with exactly the semantics it had before.
+ */
+const TURN_RETRIES = `
+ALTER TABLE rooms ADD COLUMN max_turn_retries INTEGER NOT NULL DEFAULT 0;
+`;
+
 export const migrations: readonly Migration[] = [
   { version: 1, name: '001_init', sql: INIT },
   { version: 2, name: '002_interactivity', sql: INTERACTIVITY },
   { version: 3, name: '003_m3', sql: M3 },
   { version: 4, name: '004_additional_dirs', sql: ADDITIONAL_DIRS },
+  { version: 5, name: '005_turn_retries', sql: TURN_RETRIES },
 ] as const;
 
 export const LATEST_VERSION: number = migrations.reduce((max, m) => Math.max(max, m.version), 0);

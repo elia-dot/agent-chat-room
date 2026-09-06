@@ -52,6 +52,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [mode, setMode] = useState<RoomMode>('build-review');
   const [models, setModels] = useState<Record<string, string>>({});
   const [worktree, setWorktree] = useState(false);
+  const [maxTurnRetries, setMaxTurnRetries] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -151,6 +152,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
         worktree,
         start: true,
         ...(Object.keys(chosen).length > 0 ? { models: chosen } : {}),
+        ...(maxTurnRetries > 0 ? { maxTurnRetries } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       });
     } catch (err) {
@@ -462,6 +464,31 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 {worktree
                   ? `isolated branch ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
                   : 'default · agents use your main checkout, including its installed dependencies and build artifacts'}
+              </span>
+            </span>
+          </label>
+
+          <Divider label="WHEN A TURN FAILS" />
+          <label className="mt-2 flex items-start gap-2.5">
+            <select
+              value={maxTurnRetries}
+              onChange={(e) => setMaxTurnRetries(Number(e.target.value))}
+              className="mt-0.5 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11.5px] text-ink"
+            >
+              {[0, 1, 2, 3].map((n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? 'never retry' : `retry ${n}×`}
+                </option>
+              ))}
+            </select>
+            <span>
+              <span className="block text-[13.5px] text-ink">Retry a failed turn</span>
+              <span
+                className={`block font-mono text-[11px] ${maxTurnRetries > 0 ? 'text-question' : 'text-ink-faint'}`}
+              >
+                {maxTurnRetries > 0
+                  ? `a turn that fails is run again up to ${maxTurnRetries} time${maxTurnRetries === 1 ? '' : 's'} before the room asks you · costs another turn each time, and a turn you stop yourself is never retried`
+                  : 'default · the first failure hands the room back to you'}
               </span>
             </span>
           </label>

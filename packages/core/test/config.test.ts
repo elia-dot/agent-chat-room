@@ -110,4 +110,23 @@ describe('.acr.json', () => {
     expect(settings.setup).toEqual(['npm ci']);
     expect(settings.testCommand).toBe('npm test');
   });
+  it('takes maxTurnRetries from .acr.json, and lets a flag beat it', () => {
+    // The room owner decides whether a failure is retried; the built-in answer is "no", so
+    // an existing repo behaves exactly as it did before the setting existed.
+    expect(resolveRoomDefaults({}).maxTurnRetries).toBe(0);
+
+    const loaded = loadRepoConfig(repoWith({ maxTurnRetries: 2 }));
+    expect(loaded.warnings).toEqual([]);
+    expect(resolveRoomDefaults(loaded.config).maxTurnRetries).toBe(2);
+
+    // CLI flags > .acr.json > built-in, including the flag that turns retrying back off.
+    expect(resolveRoomDefaults(loaded.config, { maxTurnRetries: 3 }).maxTurnRetries).toBe(3);
+    expect(resolveRoomDefaults(loaded.config, { maxTurnRetries: 0 }).maxTurnRetries).toBe(0);
+  });
+
+  it('ignores a nonsensical maxTurnRetries rather than opening with it', () => {
+    const loaded = loadRepoConfig(repoWith({ maxTurnRetries: -1 }));
+    expect(loaded.warnings.join(' ')).toMatch(/maxTurnRetries/);
+    expect(resolveRoomDefaults(loaded.config).maxTurnRetries).toBe(0);
+  });
 });

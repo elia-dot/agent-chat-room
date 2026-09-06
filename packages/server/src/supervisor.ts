@@ -213,7 +213,7 @@ export class RoomSupervisor {
    */
   async patch(
     roomId: string,
-    patch: { title?: string; additionalDirs?: AdditionalDirInput[] },
+    patch: { title?: string; additionalDirs?: AdditionalDirInput[]; maxTurnRetries?: number },
   ): Promise<Room> {
     const entry = await this.entry(roomId);
     if (patch.additionalDirs !== undefined && entry.running) {
@@ -232,6 +232,9 @@ export class RoomSupervisor {
     this.opts.store.updateRoom(roomId, {
       ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(additionalDirs === undefined ? {} : { additionalDirs }),
+      // Allowed while the room is running, unlike the roster: the retry budget is read
+      // fresh at the top of every attempt, so raising it mid-round takes effect at once.
+      ...(patch.maxTurnRetries === undefined ? {} : { maxTurnRetries: patch.maxTurnRetries }),
     });
     return entry.engine.reload();
   }
@@ -244,8 +247,9 @@ export class RoomSupervisor {
    */
   async setParticipant(
     roomId: string,
-    runtime: string,
-    patch: { role?: Role; model?: string | null },
+    /** Participant row id, or a runtime id when the roster has no duplicates. */
+    target: string,
+    patch: { role?: Role; model?: string | null; runtime?: string },
   ): Promise<Participant[]> {
     const entry = await this.entry(roomId);
     if (entry.running) {
@@ -253,7 +257,7 @@ export class RoomSupervisor {
         `room ${roomId.slice(0, 8)} is running. Pause it before changing the roster.`,
       );
     }
-    return entry.engine.setParticipant(runtime, patch);
+    return entry.engine.setParticipant(target, patch);
   }
 
   async commit(roomId: string, message?: string): Promise<{ room: Room; sha?: string }> {

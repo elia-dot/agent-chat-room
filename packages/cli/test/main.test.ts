@@ -65,6 +65,20 @@ describe('acr argument handling', () => {
     expect(served).toEqual([]);
   });
 
+  it('documents --retries in --help', async () => {
+    await main(['--help']);
+    expect(out.join('')).toContain('--retries <n>');
+  });
+
+  it('rejects a --retries that is not a whole number of 0 or more', async () => {
+    // Validated while the arguments are parsed, before anything opens a repo or a room, so
+    // a typo costs nothing.
+    for (const value of ['abc', '-1', '1.5']) {
+      expect(await main(['run', '--task', 'x', '--retries', value])).toBe(EXIT.usage);
+    }
+    expect(err.join('')).toContain('--retries');
+  });
+
   it('documents the exit codes in --help', async () => {
     await main(['--help']);
     const help = out.join('');

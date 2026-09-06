@@ -103,3 +103,29 @@ describe('004_additional_dirs', () => {
     db.close();
   });
 });
+
+describe('005_turn_retries', () => {
+  it('gives an existing v4 room the old never-retry behaviour', () => {
+    const db = new Database(':memory:');
+    for (const migration of migrations.filter((entry) => entry.version <= 4)) {
+      db.exec(migration.sql);
+      db.pragma(`user_version = ${migration.version}`);
+    }
+    db.prepare(
+      `INSERT INTO rooms (id, slug, title, task, mode, repo_root, base_branch, room_branch,
+         state, round, max_rounds, created_at, updated_at)
+       VALUES ('r1', 'fix-add', 'Fix add()', 'add subtracts', 'build-review', '/repo', 'main',
+         'acr/fix-add', 'needs-you', 3, 4, 'then', 'then')`,
+    ).run();
+
+    expect(migrate(db)).toBe(LATEST_VERSION);
+
+    const row = db.prepare('SELECT * FROM rooms WHERE id = ?').get('r1') as Record<string, unknown>;
+    // Defaulted rather than nulled: a room opened before the setting existed must keep
+    // behaving the way its owner watched it behave, which is one failure and hand over.
+    expect(row.max_turn_retries).toBe(0);
+    expect(row.state).toBe('needs-you');
+    expect(row.round).toBe(3);
+    db.close();
+  });
+});

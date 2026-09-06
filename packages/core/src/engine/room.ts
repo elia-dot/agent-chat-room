@@ -72,6 +72,8 @@ export interface RoomEngineOptions {
    * not opt into. `agentBranchNamer` is the real implementation.
    */
   branchNamer?: BranchNamer;
+  /** Retry backoff, injectable so tests do not sit through the real one. */
+  retryBackoffMs?: number;
 }
 
 export interface CreateRoomInput {
@@ -95,6 +97,11 @@ export interface CreateRoomInput {
   reviewerPermission?: Permission;
   /** Only meaningful with `worktree: false`; a worktree starts clean by construction. */
   allowDirty?: boolean;
+  /**
+   * How many times to retry a failed turn before handing the room to the human. Omitted
+   * falls through to `.acr.json` and then to 0, which is the behaviour rooms always had.
+   */
+  maxTurnRetries?: number;
 }
 
 export interface RoomOutcome {
@@ -204,6 +211,13 @@ const BRAINSTORM_PHASES: Record<number, BrainstormPhase> = {
 const ROOM_LOCK_TIMEOUT_MS = 2000;
 
 /**
+ * Pause between retries of a failed turn, multiplied by the attempt number. Short on
+ * purpose: the failures worth retrying are transient (a dropped connection, a brief 429),
+ * and a room owner watching the transcript should not think it has wedged.
+ */
+const RETRY_BACKOFF_MS = 2000;
+
+/**
  * The roster rules, in one place, checked on creation *and* on every edit.
  *
  * The single-writer rule (PLAN.md section 3) is the one invariant that protects the
@@ -279,6 +293,7 @@ export class RoomEngine {
   private readonly registry: Record<string, AgentAdapter>;
   private readonly timeoutMs: number;
   private readonly lockOptions: AcquireLockOptions;
+  private readonly retryBackoffMs: number;
   private readonly listeners = new Set<EngineEventSink>();
   private readonly active = new Set<{ cancel(reason?: string): void }>();
   private stopping = false;
@@ -299,6 +314,7 @@ export class RoomEngine {
     this.registry = opts.adapters ?? defaultAdapters;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.lockOptions = opts.lock ?? {};
+    this.retryBackoffMs = opts.retryBackoffMs ?? RETRY_BACKOFF_MS;
   }
 
   get room(): Room {
@@ -353,6 +369,7 @@ export class RoomEngine {
       ...(input.worktree === undefined ? {} : { worktree: input.worktree }),
       ...(input.models ? { models: input.models } : {}),
       ...(input.additionalDirs ? { additional_dirs: input.additionalDirs } : {}),
+      ...(input.maxTurnRetries === undefined ? {} : { maxTurnRetries: input.maxTurnRetries }),
     });
     const additionalDirs = await validateAdditionalDirs(settings.additional_dirs ?? []);
 
@@ -468,6 +485,7 @@ export class RoomEngine {
       worktreePath,
       // A brainstorm is three fixed phases; a build loop has no budget at all.
       maxRounds: mode === 'brainstorm' ? BRAINSTORM_ROUNDS : 0,
+      maxTurnRetries: settings.maxTurnRetries,
     });
 
     roster.forEach((participant, index) => {
@@ -999,35 +1017,76 @@ export class RoomEngine {
    * violated. Sessions are kept, which is the whole point; `runParticipantTurn` re-announces
    * the new role in the next prompt, because Codex and Cursor only see role instructions on
    * a session's first turn.
+   *
+   * `patch.runtime` replaces the runtime in place, keeping the slot and the role: this is
+   * how a room swaps codex out for opencode without being reopened. That one cannot keep a
+   * session – a different CLI has never heard of it – so the replacement starts cold, and
+   * three things are reset with it. The session id goes, because it names a conversation
+   * that only the old binary can resume. The model goes unless the same call names a new
+   * one, because model ids are runtime-specific and `opencode/claude-opus-5` means nothing
+   * to `claude`. And the watermark goes, so the newcomer's first prompt carries the whole
+   * transcript rather than the handful of messages since a turn it never took.
+   *
+   * `target` is a participant row id or a runtime id. Prefer the row id: a roster may hold
+   * the same runtime twice – `--agents opencode,opencode` is a legal room – and a runtime
+   * id then names two participants, of which this can only resolve the first.
    */
-  setParticipant(runtime: string, patch: { role?: Role; model?: string | null }): Participant[] {
+  setParticipant(
+    target: string,
+    patch: { role?: Role; model?: string | null; runtime?: string },
+  ): Participant[] {
     const room = this.reload();
     if (room.state === 'running' || room.state === 'waiting-reviews') {
       throw new EngineError(
-        `${runtime} is mid-round. Pause or stop the room before changing the roster.`,
+        `${target} is mid-round. Pause or stop the room before changing the roster.`,
       );
     }
 
     const roster = this.participants;
-    const target = roster.find((p) => p.runtime === runtime);
-    if (!target) {
+    // Row id first: it is the only unambiguous handle when a roster holds a runtime twice.
+    const slot = roster.find((p) => p.id === target) ?? roster.find((p) => p.runtime === target);
+    if (!slot) {
       throw new EngineError(
-        `nobody called "${runtime}" is in this room. Try: ${roster.map((p) => p.runtime).join(', ')}`,
+        `nobody called "${target}" is in this room. Try: ${roster.map((p) => p.runtime).join(', ')}`,
       );
     }
-    if (patch.role === undefined && patch.model === undefined) {
-      throw new EngineError('nothing to change: pass a role, a model, or both');
+    if (patch.role === undefined && patch.model === undefined && patch.runtime === undefined) {
+      throw new EngineError('nothing to change: pass a role, a model, a runtime, or several');
+    }
+
+    const replacement = patch.runtime === slot.runtime ? undefined : patch.runtime;
+    if (replacement !== undefined) {
+      if (!this.registry[replacement]) {
+        throw new EngineError(
+          `unknown runtime "${replacement}". Run \`acr doctor\` to see what acr knows about.`,
+        );
+      }
+      if (roster.some((p) => p.id !== slot.id && p.runtime === replacement)) {
+        throw new EngineError(
+          `${replacement} is already in this room. Swapping one in would leave two ` +
+            'participants under the same name, which an `@mention` cannot tell apart.',
+        );
+      }
     }
 
     const workerPermission = roster.find((p) => p.role === 'worker')?.permission ?? 'edits';
     const next: Participant[] = roster.map((p) => {
-      if (p.id === target.id) {
+      if (p.id === slot.id) {
         const role = patch.role ?? p.role;
+        // A replacement drops the old model rather than inheriting it: model ids belong to
+        // the runtime that offers them.
+        const model =
+          patch.model !== undefined
+            ? patch.model || null
+            : replacement !== undefined
+              ? null
+              : p.model;
         return {
           ...p,
+          ...(replacement !== undefined ? { runtime: replacement } : {}),
           role,
           permission: role === 'worker' ? workerPermission : 'read-only',
-          model: patch.model === undefined ? p.model : patch.model || null,
+          model,
         };
       }
       // Promoting somebody else to worker demotes the incumbent in the same step.
@@ -1040,7 +1099,9 @@ export class RoomEngine {
 
     for (const participant of next) {
       const before = roster.find((p) => p.id === participant.id)!;
+      const swapped = before.runtime !== participant.runtime;
       if (
+        !swapped &&
         before.role === participant.role &&
         before.permission === participant.permission &&
         before.model === participant.model
@@ -1048,14 +1109,30 @@ export class RoomEngine {
         continue;
       }
       this.store.updateParticipant(participant.id, {
+        ...(swapped
+          ? { runtime: participant.runtime, sessionId: null, lastSeenMessageId: null }
+          : {}),
         role: participant.role,
         permission: participant.permission,
         model: participant.model,
       });
-      this.system(
-        `${participant.runtime} is now ${participant.role} (${participant.permission})` +
-          `${participant.model ? ` on ${participant.model}` : ''}.`,
-      );
+      if (swapped) {
+        this.system(
+          `${before.runtime} was replaced by ${participant.runtime} as ${participant.role} ` +
+            `(${participant.permission})${participant.model ? ` on ${participant.model}` : ''}. ` +
+            'It starts a fresh session and is given the whole transcript on its first turn.',
+        );
+      } else {
+        this.system(
+          `${participant.runtime} is now ${participant.role} (${participant.permission})` +
+            `${participant.model ? ` on ${participant.model}` : ''}.`,
+        );
+      }
+      // An `@mention` pointing at the runtime that just left would route the next turn to
+      // nobody, so it follows the slot.
+      if (swapped && this.roomRow.nextSpeaker === before.runtime) {
+        this.roomRow = this.store.updateRoom(room.id, { nextSpeaker: participant.runtime });
+      }
     }
 
     const updated = this.participants;
@@ -1425,7 +1502,54 @@ export class RoomEngine {
 
   // --- turns ---------------------------------------------------------------
 
+  /**
+   * One participant's turn, retried up to the room's `maxTurnRetries`.
+   *
+   * The retry lives here rather than in `runRound` so every caller gets it on the same
+   * terms: the worker, each reviewer, a brainstorm phase and a direct turn. Each attempt
+   * writes its own turn row, so `rooms show` reports what actually happened rather than
+   * hiding the failures behind a success.
+   *
+   * A cancelled turn is never retried – the human ended it on purpose, and retrying would
+   * be arguing with them. `maxTurnRetries` is 0 by default, which makes this a straight
+   * pass-through and leaves the original one-failure-hands-over behaviour intact.
+   */
   private async runParticipantTurn(
+    participant: Participant,
+    ctx: {
+      round: number;
+      cwd: string;
+      diffStat?: string;
+      diff?: string;
+      diffFile?: string;
+      newMessages?: PromptMessage[];
+      watermark?: string | null;
+      phase?: BrainstormPhase;
+      testResults?: string;
+    },
+  ): Promise<{ result: TurnResult; stream: TurnStream; messageId: string }> {
+    const budget = Math.max(0, this.reload().maxTurnRetries);
+    let current = participant;
+
+    for (let attempt = 0; ; attempt += 1) {
+      const turn = await this.runOneTurn(current, ctx);
+      if (turn.result.ok || attempt >= budget) return turn;
+      if (turn.result.cancelled || this.stopping) return turn;
+
+      this.system(
+        `${current.runtime}'s turn failed (attempt ${attempt + 1} of ${budget + 1}): ` +
+          `${turn.result.error ?? 'unknown error'} – retrying.`,
+        ctx.round,
+      );
+      await delay(this.retryBackoffMs * (attempt + 1));
+      if (this.stopping) return turn;
+      // Re-read the row: the failed attempt may have persisted a session id, and the retry
+      // should resume that session rather than start a third cold one.
+      current = this.participants.find((p) => p.id === participant.id) ?? current;
+    }
+  }
+
+  private async runOneTurn(
     participant: Participant,
     ctx: {
       round: number;
@@ -1540,7 +1664,10 @@ export class RoomEngine {
     if (sessionId && sessionId !== participant.sessionId) {
       this.store.updateParticipant(participant.id, { sessionId });
     }
-    if (watermark) {
+    // Only on success. A turn that died before the agent ever read its prompt has not seen
+    // these messages, and advancing the watermark anyway would drop them from the retry –
+    // which is precisely the turn that needs them most.
+    if (watermark && result.ok) {
       this.store.updateParticipant(participant.id, { lastSeenMessageId: watermark });
     }
     if (!result.ok) {
@@ -1999,6 +2126,15 @@ export function deriveTitle(task: string, root: string): string {
   const firstLine = task.trim().split('\n')[0]?.trim() ?? '';
   const short = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
   return short || `task in ${basename(root)}`;
+}
+
+/**
+ * Retry backoff. Deliberately not `unref`'d, unlike the lock's own sleep: this one has to
+ * actually elapse, and a room between two attempts may have nothing else keeping the loop
+ * alive.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function commitSubject(title: string): string {

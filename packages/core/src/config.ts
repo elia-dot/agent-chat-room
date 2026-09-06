@@ -45,6 +45,11 @@ export const RepoConfigSchema = z.object({
   setup: z.array(z.string()).optional(),
   /** Test command to run between worker and reviewer turns. */
   testCommand: z.string().optional(),
+  /**
+   * How many times a failed turn is retried before the room stops and asks a human.
+   * Omitted means 0: one failure hands the room over, which is what rooms always did.
+   */
+  maxTurnRetries: z.number().int().min(0).max(10).optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -124,6 +129,7 @@ export interface RoomDefaults {
   additional_dirs?: AdditionalDirInput[];
   setup?: string[];
   testCommand?: string;
+  maxTurnRetries: number;
 }
 
 export const BUILTIN_DEFAULTS: RoomDefaults = {
@@ -133,6 +139,9 @@ export const BUILTIN_DEFAULTS: RoomDefaults = {
   models: {},
   workerPermission: 'edits',
   reviewerPermission: 'read-only',
+  // Zero on purpose. Retrying is the room owner's decision, not a default that quietly
+  // spends their tokens twice.
+  maxTurnRetries: 0,
 };
 
 /** Anything the caller passed explicitly on the command line. `undefined` means "not set". */
@@ -144,6 +153,7 @@ export interface RoomOverrides {
   additional_dirs?: AdditionalDirInput[];
   setup?: string[];
   testCommand?: string;
+  maxTurnRetries?: number;
 }
 
 /** CLI flags > `.acr.json` > built-in defaults. */
@@ -162,6 +172,8 @@ export function resolveRoomDefaults(
     additional_dirs: overrides.additional_dirs ?? config.additional_dirs,
     setup: overrides.setup ?? config.setup,
     testCommand: overrides.testCommand ?? config.testCommand,
+    maxTurnRetries:
+      overrides.maxTurnRetries ?? config.maxTurnRetries ?? BUILTIN_DEFAULTS.maxTurnRetries,
   };
 }
 

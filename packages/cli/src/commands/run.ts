@@ -32,6 +32,8 @@ export interface RunOptions {
   /** Model override applied to every reviewer. */
   modelReviewer?: string;
   timeoutMs?: number;
+  /** Retries per failed turn before the room stops and asks. 0 never retries. */
+  maxTurnRetries?: number;
   /** `false` runs in the checkout instead of a dedicated worktree. */
   worktree?: boolean;
   allowDirty?: boolean;
@@ -157,6 +159,7 @@ async function open(opts: RunOptions, store: RoomStore): Promise<RoomEngine> {
         ...(opts.title ? { title: opts.title } : {}),
         ...(opts.worktree === undefined ? {} : { worktree: opts.worktree }),
         ...(opts.allowDirty ? { allowDirty: true } : {}),
+        ...(opts.maxTurnRetries === undefined ? {} : { maxTurnRetries: opts.maxTurnRetries }),
       },
       engineOptions,
     );

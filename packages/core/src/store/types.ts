@@ -71,6 +71,12 @@ export interface Room {
   round: number;
   /** The fixed phase count of a brainstorm. A build-review room has no limit and stores 0. */
   maxRounds: number;
+  /**
+   * How many times a failed turn is retried before the room stops and asks the human.
+   * `0` – the default – is the original behaviour: one failure hands the room over.
+   * The room owner sets this, and may change it while the room is open.
+   */
+  maxTurnRetries: number;
   /** The pull request "Open PR" created, kept so it survives a reload. */
   prUrl: string | null;
   createdAt: string;
