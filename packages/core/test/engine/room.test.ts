@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { echoAdapter, resetEchoAdapter } from '../../src/adapters/echo.js';
 import type { BranchNameContext, BranchNamer } from '../../src/branchName.js';
 import { condenseSlug } from '../../src/branchName.js';
+import * as git from '../../src/git.js';
 import { claudeAdapter, buildClaudeArgs } from '../../src/adapters/claude.js';
 import { codexAdapter, buildCodexPrompt } from '../../src/adapters/codex.js';
 import { cursorAdapter, buildCursorPrompt } from '../../src/adapters/cursor.js';
@@ -517,6 +518,33 @@ describe('RoomEngine, the build-review loop', () => {
     expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(FIXED);
   });
 
+  it('without a worktree, commits to the room branch and leaves the trunk alone', async () => {
+    // The bug this prevents: a room with no worktree used to stay on the trunk, so an
+    // approved round committed straight onto `main` and there was no branch to open a pull
+    // request from – the work was already on the branch you would have opened it against.
+    const dir = repo();
+    const trunkBefore = gitIn(dir, 'rev-parse', 'main');
+    script([workerTurn(1, 'Done.', { 'math.js': FIXED }), reviewTurn(1, verdict('approve'))]);
+
+    const engine = await RoomEngine.create(
+      { task: 'fix add()', cwd: dir, agents: ['echo', 'echo'], worktree: false },
+      engineOptions(),
+    );
+    expect(engine.room.roomBranch).toMatch(/^acr\//);
+    expect(engine.room.roomBranch).not.toBe(engine.room.baseBranch);
+
+    const outcome = await engine.run();
+    expect(outcome.state).toBe('approved');
+    expect(outcome.commit).toBeTruthy();
+
+    // The commit is on the room's branch, and `main` is exactly where it was.
+    expect(gitIn(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(engine.room.roomBranch);
+    expect(gitIn(dir, 'rev-parse', 'main')).toBe(trunkBefore);
+    expect(gitIn(dir, 'rev-parse', engine.room.roomBranch)).not.toBe(trunkBefore);
+    // Which is the whole point: there is now something to open a PR from.
+    expect(gitIn(dir, 'rev-list', '--count', `main..${engine.room.roomBranch}`)).toBe('1');
+  });
+
   it('without a worktree, refuses to start on a dirty tree unless told to', async () => {
     const dir = repo();
     const { writeFileSync } = await import('node:fs');
@@ -590,14 +618,18 @@ describe('RoomEngine, the build-review loop', () => {
       gitIn(dir, 'rev-parse', 'master'),
     );
 
-    // Without a worktree the checkout itself is the workspace, and it has to be on the
-    // trunk – which is `master` here, so `main` is not demanded.
+    // Without a worktree the checkout itself is the workspace, and it has to start on the
+    // trunk – which is `master` here, so `main` is not demanded. It still gets a branch of
+    // its own, cut in that checkout, and the trunk stays the base to review against.
     const plain = await RoomEngine.create(
       { task: 'fix add()', cwd: dir, agents: ['echo', 'echo'], worktree: false },
       engineOptions(),
     );
     expect(plain.room.baseBranch).toBe('master');
-    expect(plain.room.roomBranch).toBe('master');
+    expect(plain.room.roomBranch).toMatch(/^acr\//);
+    // Not the branch the worktree room already took: two rooms never share one.
+    expect(plain.room.roomBranch).not.toBe(engine.room.roomBranch);
+    expect(gitIn(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(plain.room.roomBranch);
   });
 
   it('prefers the trunk the remote advertises over the conventional names', async () => {
@@ -615,15 +647,30 @@ describe('RoomEngine, the build-review loop', () => {
     expect(engine.room.baseBranch).toBe('trunk');
   });
 
-  it('requires main when isolation is explicitly disabled', async () => {
+  it('starts from the trunk without a worktree, whatever branch you were standing on', async () => {
+    // This used to be refused outright – "switch to main first" – which made opening a room
+    // a chore mid-feature. The room branch is cut at the fetched base instead, so the
+    // branch you were on is neither required nor disturbed.
     const dir = repo();
     gitIn(dir, 'switch', '-q', '-c', 'feature/in-progress');
-    await expect(
-      RoomEngine.create(
-        { task: 'x', cwd: dir, agents: ['echo', 'echo'], worktree: false },
-        engineOptions(),
-      ),
-    ).rejects.toThrow(/Switch to main or use an isolated worktree/);
+    writeFileSync(join(dir, 'feature-only.txt'), 'wip\n');
+    gitIn(dir, 'add', '-A');
+    gitIn(dir, 'commit', '-qm', 'feature work');
+    const featureSha = gitIn(dir, 'rev-parse', 'feature/in-progress');
+    const trunkSha = gitIn(dir, 'rev-parse', 'main');
+
+    const engine = await RoomEngine.create(
+      { task: 'x', cwd: dir, agents: ['echo', 'echo'], worktree: false },
+      engineOptions(),
+    );
+
+    expect(engine.room.baseBranch).toBe('main');
+    expect(engine.room.roomBranch).toMatch(/^acr\//);
+    // Cut from the trunk, not from the feature branch: the room does not inherit its work.
+    expect(gitIn(dir, 'rev-parse', 'HEAD')).toBe(trunkSha);
+    expect(existsSync(join(dir, 'feature-only.txt'))).toBe(false);
+    // And the branch you were on is exactly where you left it.
+    expect(gitIn(dir, 'rev-parse', 'feature/in-progress')).toBe(featureSha);
   });
 });
 
@@ -940,15 +987,21 @@ describe('RoomEngine branch naming', () => {
     expect(engine.room.roomBranch).toBe(`acr/${condenseSlug(LONG_TASK)}`);
   });
 
-  it('does not ask for a name when the room has no branch of its own', async () => {
+  it('names and cuts a branch even when the room has no worktree', async () => {
+    // A room without a worktree used to stay on the trunk, which meant its commits landed
+    // on `main` and there was never a branch to open a pull request from. It now branches
+    // in the checkout itself, and earns a real name doing it.
     const dir = repo();
-    const spy = namer(null);
+    const spy = namer('checkout-branch');
     const engine = await RoomEngine.create(
       { task: LONG_TASK, cwd: dir, agents: ['echo', 'echo'], worktree: false },
       { ...engineOptions(), branchNamer: spy.fn },
     );
 
-    expect(engine.room.roomBranch).toBe('main');
-    expect(spy.calls).toHaveLength(0);
+    expect(engine.room.roomBranch).toBe('acr/checkout-branch');
+    expect(engine.room.baseBranch).toBe('main');
+    expect(spy.calls).toHaveLength(1);
+    // The checkout is standing on it: this is where the room's commits will go.
+    expect(await git.currentBranch(dir)).toBe('acr/checkout-branch');
   });
 });

@@ -462,8 +462,8 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 className={`block font-mono text-[11px] ${worktree ? 'text-question' : 'text-ink-faint'}`}
               >
                 {worktree
-                  ? `isolated branch ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
-                  : 'default · agents use your main checkout, including its installed dependencies and build artifacts'}
+                  ? `isolated worktree on ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
+                  : `default · agents work in your checkout, with its installed dependencies and build artifacts · the room still branches, so your checkout moves to ${branchHint} and the trunk is left alone`}
               </span>
             </span>
           </label>

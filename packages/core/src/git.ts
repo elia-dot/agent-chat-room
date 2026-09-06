@@ -131,15 +131,6 @@ async function isAncestor(cwd: string, ancestor: string, descendant: string): Pr
   }
 }
 
-/** Fast-forward the currently checked-out branch to `target`, surfacing git's explanation. */
-export async function fastForward(cwd: string, target: string): Promise<void> {
-  try {
-    await git(cwd, ['merge', '--ff-only', target]);
-  } catch (err) {
-    throw new Error(`could not fast-forward main: ${errText(err)}`);
-  }
-}
-
 /** Tracked modifications plus untracked files – the same thing `git status` calls dirty. */
 export async function isDirty(cwd: string): Promise<boolean> {
   const out = await gitOrUndefined(cwd, ['status', '--porcelain']);
@@ -206,13 +197,20 @@ export async function checkoutPaths(cwd: string, paths: readonly string[]): Prom
 }
 
 /**
- * Create `name` at HEAD and switch to it, carrying the working tree across.
+ * Create `name` and switch to it, carrying the working tree across. Starts at HEAD unless
+ * `startPoint` names something else.
  *
  * A room repo gets a worktree; an additional folder is the human's own checkout, so the
- * only way to give its commits somewhere of their own to live is to branch in place.
+ * only way to give its commits somewhere of their own to live is to branch in place. A
+ * room that opted out of a worktree branches in place too, and passes the freshly fetched
+ * base as `startPoint` so it does not inherit whichever branch you were standing on.
  */
-export async function checkoutNewBranch(cwd: string, name: string): Promise<void> {
-  await git(cwd, ['checkout', '-b', name]);
+export async function checkoutNewBranch(
+  cwd: string,
+  name: string,
+  startPoint?: string,
+): Promise<void> {
+  await git(cwd, ['checkout', '-b', name, ...(startPoint ? [startPoint] : [])]);
 }
 
 /** How many commits `head` has that `base` does not. Zero when either ref does not resolve. */

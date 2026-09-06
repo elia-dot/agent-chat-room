@@ -462,7 +462,15 @@ export class RoomEngine {
     let worktreePath: string | null = null;
     let baseSha = mainSha;
 
-    if (useWorktree) {
+    /**
+     * Every room gets a branch of its own, worktree or not.
+     *
+     * Without a worktree the branch is cut in the checkout you are standing in. That costs
+     * a `git checkout -b` in your own repository, and it buys the thing a room is for: the
+     * round's commits land somewhere that can be reviewed and opened as a pull request,
+     * instead of straight onto the trunk where the only way back is a reset.
+     */
+    const nameRoomBranch = async (): Promise<string> => {
       const slugSource = await branchSlugSource({
         task,
         title,
@@ -472,8 +480,11 @@ export class RoomEngine {
         model: roster[0]!.model,
         ...(opts.branchNamer ? { namer: opts.branchNamer } : {}),
       });
-      const slug = await uniqueSlug(repoRoot, slugSource, roomId.replace(/-/g, ''));
-      roomBranch = branchFor(slug);
+      return branchFor(await uniqueSlug(repoRoot, slugSource, roomId.replace(/-/g, '')));
+    };
+
+    if (useWorktree) {
+      roomBranch = await nameRoomBranch();
       const worktree = await createWorktree({
         repoRoot,
         roomId,
@@ -483,14 +494,12 @@ export class RoomEngine {
       worktreePath = worktree.path;
       baseSha = worktree.baseSha ?? baseSha;
     } else {
-      // Opting out of isolation cannot silently turn "start from main" back into "start
-      // from whichever branch is open". In this mode the checkout itself is the workspace.
+      // Opting out of isolation cannot silently turn "start from the trunk" back into
+      // "start from whichever branch is open". In this mode the checkout itself is the
+      // workspace, so the room branch is cut *at the freshly fetched base* rather than at
+      // HEAD. Standing on a feature branch is therefore fine and needs no ceremony: that
+      // branch is left exactly where it is, and the room starts from the trunk regardless.
       const checkoutBranch = await git.currentBranch(repoRoot);
-      if (checkoutBranch !== baseBranch) {
-        throw new EngineError(
-          `${repoRoot} is on ${checkoutBranch}. Switch to ${baseBranch} or use an isolated worktree.`,
-        );
-      }
       if (!input.allowDirty && (await git.isDirty(repoRoot))) {
         // Without a worktree the worker edits the checkout you are standing in, so a dirty
         // tree would make the room's diff unattributable. This is the M0 behaviour, kept as
@@ -499,7 +508,17 @@ export class RoomEngine {
           `${repoRoot} has uncommitted changes. Commit or stash them, drop --no-worktree, or pass --allow-dirty.`,
         );
       }
-      await git.fastForward(repoRoot, mainSha);
+      roomBranch = await nameRoomBranch();
+      try {
+        await git.checkoutNewBranch(repoRoot, roomBranch, mainSha);
+      } catch (err) {
+        // The realistic cause is `--allow-dirty` plus changes git cannot carry from the
+        // branch you are on across to the base. Say which branch it could not leave.
+        throw new EngineError(
+          `could not start ${roomBranch} from ${baseBranch} in ${repoRoot} while on ` +
+            `${checkoutBranch}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       baseSha = (await git.headSha(repoRoot)) ?? mainSha;
     }
 

@@ -53,7 +53,7 @@ M4 brings complete production-readiness and the next-generation feature set:
 - **`acr run`** – a whole room: the worker builds, every reviewer reviews in parallel, and the loop
   repeats until they all approve, someone asks you a question, or you pause or stop it. There is
   no round limit.
-- **Git worktrees.** Every room runs in its own worktree on branch `acr/<slug>`, so your checkout is
+- **Git worktrees.** Every room gets its own branch `acr/<slug>`, and by default its own worktree, so your checkout is
   never touched and a room's diff is attributable to that room by construction.
 - **Auto-commit on approve.** The round everyone approved is committed on the room branch with the
   worker's summary as the body, so a room's work is never sitting only in a working tree.
@@ -208,8 +208,7 @@ a default that quietly spends their tokens twice.
   room whose last round is real work sitting uncommitted.
 - **Open PR** pushes the room branch and runs `gh pr create`. It is the only thing `acr` does
   that leaves your machine, so it never happens implicitly: it needs an explicit press, it
-  names the remote and branch first, the button is absent (not merely disabled) when the repo
-  has no remote or the room ran with `--no-worktree`, and the push and the resulting url both
+  names the remote and branch first, and the push and the resulting url both
   land in the transcript. `gh` is an optional dependency – without it the button explains
   itself rather than failing on click. `acr` never reads your GitHub token either; `gh` finds
   its own login exactly the way the agent CLIs do.
@@ -226,8 +225,20 @@ extra call and always condense locally. That branch is what you merge or open a 
 removes the worktree and keeps the branch.
 
 Pass `--no-worktree` to work in the checkout instead (useful with submodules or tooling that dislikes
-worktrees). In that mode `acr` refuses to start on a dirty tree unless you also pass `--allow-dirty`,
-because otherwise a room's diff is not attributable to the room.
+worktrees, and the default in the web dialog, where a fresh worktree's missing `node_modules` is
+usually the bigger nuisance). In that mode `acr` refuses to start on a dirty tree unless you also pass
+`--allow-dirty`, because otherwise a room's diff is not attributable to the room.
+
+**A room branches either way.** Without a worktree the branch is cut in the checkout you are standing
+in – `git checkout -b acr/<slug> <fetched base>`, named the same way – so the round's commits land
+somewhere that can be reviewed and opened as a pull request rather than straight onto the trunk.
+
+It is cut _at the freshly fetched base_, not at your HEAD, so you do not have to be standing on the
+trunk to open a room: start one mid-feature and the room begins from the trunk while the branch you
+were on is left exactly where it is. Your checkout does move to the room's branch – `git switch -` puts
+you back. A dirty tree is still refused without `--allow-dirty`, because a room's diff has to be
+attributable to the room. Rooms opened before any of this existed have no branch of their own, and
+Open PR stays disabled for them and says so.
 
 Note that a fresh worktree has no `node_modules` and no build output. You can provide automated
 post-creation commands via the `"setup"` array in `.acr.json`.

@@ -76,6 +76,8 @@ Options for \`run\`:
                            writes the merged proposal – and nobody edits files.
   --room <id>              Resume an existing room instead of opening a new one.
   --no-worktree            Work in the checkout instead of a dedicated git worktree.
+                           The room still branches, cut from the fetched base, so you need
+                           not be standing on the trunk to start one.
   --allow-dirty            With --no-worktree: run even though the tree has changes.
   --title <text>           Room title (default: the first line of the task).
   --model-worker <model>   Model override for the worker.
