@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -52,7 +52,7 @@ export function repoRoutes(
     return supervisor.store.listRepos(limit ?? 20);
   });
 
-  app.get('/api/repos/browse', async (request): Promise<BrowseResult> => {
+  app.get('/api/repos/browse', (request): BrowseResult => {
     const query = BrowseQuery.parse(request.query);
     const path = resolve(query.path && query.path.trim() ? query.path : homedir());
 
@@ -68,15 +68,18 @@ export function repoRoutes(
       );
     }
 
-    // Marking repos is the whole point of the picker, and `git rev-parse` per child is
-    // cheap enough for one directory of subdirectories.
-    const entries = await Promise.all(
-      names.map(async (name): Promise<BrowseEntry> => {
-        const child = join(path, name);
-        const root = await git.repoRoot(child);
-        return { name, path: child, isRepo: root === child };
-      }),
-    );
+    // Marking repos is the whole point of the picker, and a repository root is exactly a
+    // directory with a `.git` in it – a stat, not a process.
+    //
+    // This used to ask git itself, one `rev-parse` per child, all at once. That is fine for
+    // a tidy home directory and pathological anywhere else: browsing macOS's shared temp
+    // directory meant ~8000 concurrent spawns, took ten seconds, and exhausted the process
+    // budget – and every spawn that lost reported its perfectly good repository as "not a
+    // repo". Asking the filesystem cannot fail that way.
+    const entries: BrowseEntry[] = names.map((name) => {
+      const child = join(path, name);
+      return { name, path: child, isRepo: existsSync(join(child, '.git')) };
+    });
 
     const parent = dirname(path);
     return { path, parent: parent === path ? null : parent, entries };

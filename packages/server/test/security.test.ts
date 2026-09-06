@@ -130,16 +130,30 @@ describe('startServer', () => {
   it('serves an explanation rather than a 404 when the web app is not built', async () => {
     const missing = `${config.dir}/no-such-build`;
     rmSync(missing, { recursive: true, force: true });
-    const server = await startServer({ store: h.store, webRoot: missing, port: 0 });
+    const server = await startServer({
+      store: h.store,
+      webRoot: missing,
+      port: 0,
+      token: 'test-token-123',
+    });
     started.push(server);
 
     const page = await fetch(`${server.url}/`);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('npm run build');
 
-    // The API still 404s properly – a missing route is not a missing page.
-    const api = await fetch(`${server.url}/api/nope`);
+    // The API still 404s properly – a missing route is not a missing page. Asked *with* the
+    // token, because auth runs first: an unauthenticated caller gets 401 for every route,
+    // which is deliberate. Answering 404 for the routes that do not exist and 401 for the
+    // ones that do would hand an anonymous prober the route table.
+    const api = await fetch(`${server.url}/api/nope`, {
+      headers: { Authorization: 'Bearer test-token-123' },
+    });
     expect(api.status).toBe(404);
+
+    // And without it, the same route is refused rather than described.
+    const anonymous = await fetch(`${server.url}/api/nope`);
+    expect(anonymous.status).toBe(401);
   });
 
   it('generates a capability token, redeems via cookie, and guards mutating endpoints', async () => {

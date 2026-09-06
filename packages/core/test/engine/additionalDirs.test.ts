@@ -139,7 +139,7 @@ describe('additional folders are part of the room', () => {
     expect(warning?.text).toContain(app);
   });
 
-  it('ignores a folder that is not in a repository, and one inside the room repo', async () => {
+  it('ignores a folder that is not in a repository', async () => {
     const dir = repo({ 'math.js': BROKEN });
     process.env.ACR_ECHO_SCRIPT = writeEchoScript({
       turns: [
@@ -152,9 +152,9 @@ describe('additional folders are part of the room', () => {
       ],
     });
 
-    // The room repo itself, granted a second time: its changes are already in the room diff
-    // and must not be collected or committed twice.
-    const engine = await open(dir, [dir, config.dir]);
+    // A folder with no repository contributes nothing: there is no diff to collect there
+    // and nothing to commit, so it is accepted and then simply never appears.
+    const engine = await open(dir, [config.dir]);
     const outcome = await engine.run();
 
     expect(outcome.state).toBe('approved');
@@ -232,13 +232,38 @@ describe('read-only additional folders', () => {
     expect(kept?.text).toContain('auth.js');
   });
 
-  it('refuses a folder inside the room repository', async () => {
+  it('refuses a folder inside the checkout an isolated room is kept out of', async () => {
+    // These rooms take a worktree, so the checkout is not where they work – granting it
+    // back would undo the isolation rather than merely repeat it.
     const dir = repo({ 'math.js': BROKEN });
     mkdirSync(join(dir, 'packages'));
     await expect(open(dir, [{ path: join(dir, 'packages'), access: 'read' }])).rejects.toThrow(
-      /inside the room's own repository/,
+      /keeps the agents out of/,
     );
-    await expect(open(dir, [dir])).rejects.toThrow(/inside the room's own repository/);
+    await expect(open(dir, [dir])).rejects.toThrow(/keeps the agents out of/);
+  });
+
+  it('drops, rather than refuses, a grant for the folder the room already works in', async () => {
+    // Without a worktree the checkout *is* the workspace, so naming it as an extra folder
+    // is redundant, not an escalation: its changes are already in the room's diff and
+    // collecting them again would commit them twice. A committed `.acr.json` that happens
+    // to name a path inside the repo must not hard-fail every room opened there.
+    const dir = repo({ 'math.js': BROKEN });
+    mkdirSync(join(dir, 'packages'));
+
+    const engine = await RoomEngine.create(
+      {
+        task: 'x',
+        cwd: dir,
+        agents: ['echo', 'echo'],
+        worktree: false,
+        additionalDirs: [dir, join(dir, 'packages')],
+      },
+      { store, adapters: { echo: spyEcho }, timeoutMs: 5000 },
+    );
+
+    expect(engine.room.worktreePath).toBeNull();
+    expect(engine.room.additionalDirs).toEqual([]);
   });
 
   it('refuses read-only access to a folder with no repository to revert against', async () => {

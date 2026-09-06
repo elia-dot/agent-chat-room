@@ -128,27 +128,49 @@ export const MAX_ADDITIONAL_DIRS = 20;
  * reads it as read *and* write, which is the only thing an additional folder ever was.
  * Read-only has to be asked for.
  */
+/**
+ * Directories a room already owns, and what granting one back means.
+ *
+ * The two cases are genuinely different, which is why they are named separately rather
+ * than lumped into one "the room's own paths" list.
+ */
+export interface RoomOwnedPaths {
+  /**
+   * Where the room's turns actually run – its worktree, or the checkout itself when it has
+   * none. Granting this adds nothing the room does not already have, so it is dropped
+   * rather than refused: a committed `.acr.json` naming a path inside the repo should not
+   * hard-fail every room opened there.
+   */
+  workspace?: string;
+  /**
+   * A repository the room owns but deliberately does *not* work in: the real checkout,
+   * when the room is isolated in a worktree. Granting this back is an escalation, not a
+   * duplicate – it hands the agents the very tree the worktree keeps them out of – so it
+   * is refused.
+   */
+  guarded?: string;
+}
+
 export async function validateAdditionalDirs(
   entries: readonly AdditionalDirInput[],
-  /**
-   * The room's own repository and worktree. A grant inside either is refused: the
-   * checkout is exactly what the worktree keeps the agents out of, and the revert that
-   * makes a read grant mean something skips the room's own repository.
-   */
-  within: readonly string[] = [],
+  owned: RoomOwnedPaths = {},
 ): Promise<AdditionalDir[]> {
   if (entries.length > MAX_ADDITIONAL_DIRS) {
     throw new EngineError(`a room can grant at most ${MAX_ADDITIONAL_DIRS} additional folders`);
   }
 
-  const owned: string[] = [];
-  for (const dir of within) {
+  const canonicalise = async (dir: string | undefined): Promise<string | undefined> => {
+    if (!dir) return undefined;
     try {
-      owned.push(await realpath(dir));
+      return await realpath(dir);
     } catch {
-      owned.push(dir);
+      return dir;
     }
-  }
+  };
+  const workspace = await canonicalise(owned.workspace);
+  const guarded = await canonicalise(owned.guarded);
+  const under = (path: string, root: string | undefined): boolean =>
+    root !== undefined && (path === root || path.startsWith(`${root}/`));
 
   const result: AdditionalDir[] = [];
   const seen = new Set<string>();
@@ -171,14 +193,17 @@ export async function validateAdditionalDirs(
       if (err instanceof EngineError) throw err;
       throw new EngineError(`additional folder does not exist or cannot be read: "${path}"`);
     }
-    const inside = owned.find((root) => canonical === root || canonical.startsWith(`${root}/`));
-    if (inside) {
+    if (under(canonical, guarded)) {
       throw new EngineError(
-        `"${path}" is inside the room's own repository (${inside}). The room already works ` +
-          'there, and granting it as an extra folder would hand the agents the checkout the ' +
-          'worktree keeps them out of.',
+        `"${path}" is inside ${guarded}, the checkout this room's worktree keeps the agents ` +
+          'out of. Granting it back would undo that isolation, so it is refused rather than ' +
+          'quietly accepted.',
       );
     }
+    // Inside the room's own workspace: the room already works there, its changes are already
+    // in the room's diff, and collecting them again would commit them twice. Redundant, not
+    // dangerous – so it is dropped without ceremony.
+    if (under(canonical, workspace)) continue;
     // A read grant is enforced by reverting the folder's repository after each turn. With
     // no repository there is nothing to revert against, and a grant the room cannot keep
     // is worse than one it refuses.
@@ -403,7 +428,14 @@ export class RoomEngine {
       ...(input.additionalDirs ? { additional_dirs: input.additionalDirs } : {}),
       ...(input.maxTurnRetries === undefined ? {} : { maxTurnRetries: input.maxTurnRetries }),
     });
-    const additionalDirs = await validateAdditionalDirs(settings.additional_dirs ?? [], [repoRoot]);
+    // The worktree does not exist yet, and nothing the human could name can be inside a
+    // directory that is about to be created – so at creation the only path worth naming is
+    // the checkout, and whether it is guarded or merely redundant is exactly the question of
+    // whether this room is going to be isolated from it.
+    const additionalDirs = await validateAdditionalDirs(
+      settings.additional_dirs ?? [],
+      settings.worktree ? { guarded: repoRoot } : { workspace: repoRoot },
+    );
 
     const mode: RoomMode = input.mode ?? 'build-review';
     const registry = opts.adapters ?? defaultAdapters;

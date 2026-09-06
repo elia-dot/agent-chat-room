@@ -226,10 +226,12 @@ export class RoomSupervisor {
       patch.additionalDirs === undefined
         ? undefined
         : carryOverDirState(
-            await validateAdditionalDirs(patch.additionalDirs, [
-              entry.engine.room.repoRoot,
-              ...(entry.engine.room.worktreePath ? [entry.engine.room.worktreePath] : []),
-            ]),
+            await validateAdditionalDirs(patch.additionalDirs, {
+              workspace: entry.engine.room.worktreePath ?? entry.engine.room.repoRoot,
+              // Only when the room is isolated is the checkout something it is kept out of;
+              // without a worktree the checkout *is* the workspace above.
+              ...(entry.engine.room.worktreePath ? { guarded: entry.engine.room.repoRoot } : {}),
+            }),
             entry.engine.room.additionalDirs,
           );
     this.opts.store.updateRoom(roomId, {
