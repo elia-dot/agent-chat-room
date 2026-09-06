@@ -170,18 +170,29 @@ describe('the REST surface', () => {
   it('creates and updates a room with additional folders', async () => {
     const first = repo();
     const second = repo();
+    const granted = (path: string, access: 'read' | 'write') => ({
+      path: realpathSync(path),
+      access,
+      branch: null,
+      baseBranch: null,
+      prUrl: null,
+    });
+
+    // A bare path is the shorthand an older client sends, and it means read *and* write.
     const created = await createRoom({ additionalDirs: [first, first] });
     expect(created.status).toBe(201);
-    expect(created.body.room.additionalDirs).toEqual([realpathSync(first)]);
+    expect(created.body.room.additionalDirs).toEqual([granted(first, 'write')]);
 
     const updated = await h.app.inject({
       method: 'PATCH',
       url: `/api/rooms/${created.body.room.id}`,
-      payload: { additionalDirs: [second] },
+      payload: { additionalDirs: [{ path: second, access: 'read' }] },
     });
     expect(updated.statusCode).toBe(200);
-    expect(updated.json<{ room: Room }>().room.additionalDirs).toEqual([realpathSync(second)]);
-    expect(h.store.getRoom(created.body.room.id)?.additionalDirs).toEqual([realpathSync(second)]);
+    expect(updated.json<{ room: Room }>().room.additionalDirs).toEqual([granted(second, 'read')]);
+    expect(h.store.getRoom(created.body.room.id)?.additionalDirs).toEqual([
+      granted(second, 'read'),
+    ]);
   });
 
   it('rejects an invalid additional folder', async () => {

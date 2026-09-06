@@ -166,17 +166,17 @@ describe('mechanical goalpost enforcement', () => {
       ' line11',
     ].join('\n');
 
-    // Cites untouched file untouched.ts:50 -> should downgrade
+    // Cites a line the diff covers but did not touch -> should downgrade
     const verdict = {
       decision: 'request-changes' as const,
-      blocking: ['untouched.ts:50 fix this old bug'],
+      blocking: ['src/worker.ts:400 fix this old bug'],
       nits: [],
     };
 
     const result = enforceGoalposts(verdict, diff);
     expect(result.downgraded).toHaveLength(1);
     expect(result.verdict.blocking).toEqual([]);
-    expect(result.verdict.nits).toEqual(['untouched.ts:50 fix this old bug']);
+    expect(result.verdict.nits).toEqual(['src/worker.ts:400 fix this old bug']);
     expect(result.verdict.decision).toBe('approve');
 
     // Cites touched line in src/worker.ts:12 -> remains blocking
@@ -189,5 +189,48 @@ describe('mechanical goalpost enforcement', () => {
     expect(result2.downgraded).toHaveLength(0);
     expect(result2.verdict.blocking).toEqual(['src/worker.ts:12 new syntax error']);
     expect(result2.verdict.decision).toBe('request-changes');
+  });
+
+  it('keeps a citation blocking when the diff says nothing about the file', async () => {
+    const { enforceGoalposts } = await import('../src/verdict.js');
+    const diff = [
+      'diff --git a/docs/review.md b/docs/review.md',
+      '@@ -1,2 +1,3 @@',
+      ' intro',
+      '+finding',
+    ].join('\n');
+
+    // The reviewer read a second repository the diff does not cover. "Not in this diff"
+    // is not evidence that the worker left the line alone, so the item stands.
+    const verdict = {
+      decision: 'request-changes' as const,
+      blocking: ['App repo - lib/auth/secure_storage.dart:107 credentials survive sign-out'],
+      nits: [],
+    };
+
+    const result = enforceGoalposts(verdict, diff);
+    expect(result.downgraded).toHaveLength(0);
+    expect(result.verdict.blocking).toHaveLength(1);
+    expect(result.verdict.decision).toBe('request-changes');
+  });
+
+  it('will not downgrade an item that also cites a file outside the diff', async () => {
+    const { enforceGoalposts } = await import('../src/verdict.js');
+    const diff = [
+      'diff --git a/src/worker.ts b/src/worker.ts',
+      '@@ -10,5 +10,6 @@',
+      ' line10',
+      '+newline',
+    ].join('\n');
+
+    const verdict = {
+      decision: 'request-changes' as const,
+      blocking: ['src/worker.ts:400 and app/lib/other.dart:12 disagree'],
+      nits: [],
+    };
+
+    const result = enforceGoalposts(verdict, diff);
+    expect(result.downgraded).toHaveLength(0);
+    expect(result.verdict.decision).toBe('request-changes');
   });
 });

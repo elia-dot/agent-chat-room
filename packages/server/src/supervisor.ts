@@ -1,4 +1,5 @@
 import type {
+  AdditionalDirInput,
   CreateRoomInput,
   EngineEvent,
   Message,
@@ -14,6 +15,7 @@ import type {
 import {
   EngineError,
   RoomEngine,
+  carryOverDirState,
   purgeRoomData,
   validateAdditionalDirs,
 } from '@agent-chat-room/core';
@@ -209,7 +211,10 @@ export class RoomSupervisor {
    * the store directly is what keeps a live engine from building its next prompt from a
    * stale row.
    */
-  async patch(roomId: string, patch: { title?: string; additionalDirs?: string[] }): Promise<Room> {
+  async patch(
+    roomId: string,
+    patch: { title?: string; additionalDirs?: AdditionalDirInput[] },
+  ): Promise<Room> {
     const entry = await this.entry(roomId);
     if (patch.additionalDirs !== undefined && entry.running) {
       throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
@@ -220,9 +225,12 @@ export class RoomSupervisor {
     const additionalDirs =
       patch.additionalDirs === undefined
         ? undefined
-        : await validateAdditionalDirs(patch.additionalDirs);
+        : carryOverDirState(
+            await validateAdditionalDirs(patch.additionalDirs),
+            entry.engine.room.additionalDirs,
+          );
     this.opts.store.updateRoom(roomId, {
-      ...patch,
+      ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(additionalDirs === undefined ? {} : { additionalDirs }),
     });
     return entry.engine.reload();

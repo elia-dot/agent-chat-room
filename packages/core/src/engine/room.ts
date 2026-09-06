@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute } from 'node:path';
 import { adapters as defaultAdapters } from '../adapters/index.js';
 import type { BranchNamer } from '../branchName.js';
 import { condenseSlug } from '../branchName.js';
-import type { LoadedRepoConfig } from '../config.js';
+import type { AdditionalDirInput, LoadedRepoConfig } from '../config.js';
 import { loadRepoConfig, resolveRoomDefaults } from '../config.js';
 import type { CreatePrResult, GhRunner } from '../gh.js';
 import { createPr, detectGh } from '../gh.js';
@@ -20,7 +20,15 @@ import { DEFAULT_MAX_INLINE_DIFF_BYTES, buildTurnPrompt } from '../prompt.js';
 import type { BrainstormPhase, Role } from '../roles.js';
 import { roleInstructions } from '../roles.js';
 import type { RoomStore } from '../store/rooms.js';
-import type { Message, Participant, Room, RoomMode, RoomState } from '../store/types.js';
+import type {
+  AdditionalDir,
+  AdditionalDirAccess,
+  Message,
+  Participant,
+  Room,
+  RoomMode,
+  RoomState,
+} from '../store/types.js';
 import type { AgentAdapter, Permission, TurnResult } from '../types.js';
 import type { ParsedVerdict, Verdict } from '../verdict.js';
 import { enforceGoalposts, parseVerdict, verdictJsonSchema } from '../verdict.js';
@@ -31,6 +39,17 @@ import {
   removeWorktree,
   uniqueSlug,
 } from '../worktree.js';
+import type { AdditionalRepo, AdditionalRepoChange, ReadOnlySnapshot } from './additionalDirs.js';
+import {
+  additionalRepos,
+  appendAdditionalDiffs,
+  appendAdditionalStats,
+  collectAdditionalRepoChanges,
+  qualifiedChangedFiles,
+  revertReadOnly,
+  snapshotReadOnly,
+  writableRepos,
+} from './additionalDirs.js';
 import type { EngineEvent, EngineEventSink } from './events.js';
 import { TurnStream } from './events.js';
 import type { AcquireLockOptions, LockHandle } from './lock.js';
@@ -59,7 +78,7 @@ export interface CreateRoomInput {
   task: string;
   cwd: string;
   /** Extra absolute workspace roots granted to every runtime in the room. */
-  additionalDirs?: string[];
+  additionalDirs?: AdditionalDirInput[];
   /** Runtime ids. The first is the worker, every other one reviews. */
   agents: string[];
   title?: string;
@@ -95,15 +114,26 @@ export interface RoomOutcome {
 
 export const MAX_ADDITIONAL_DIRS = 20;
 
-/** Validate and canonicalise workspace roots before they reach a CLI argument list. */
-export async function validateAdditionalDirs(paths: readonly string[]): Promise<string[]> {
-  if (paths.length > MAX_ADDITIONAL_DIRS) {
+/**
+ * Validate and canonicalise workspace roots before they reach a CLI argument list.
+ *
+ * Accepts the shorthand a `.acr.json` or an older client sends – a bare path string – and
+ * reads it as read *and* write, which is the only thing an additional folder ever was.
+ * Read-only has to be asked for.
+ */
+export async function validateAdditionalDirs(
+  entries: readonly AdditionalDirInput[],
+): Promise<AdditionalDir[]> {
+  if (entries.length > MAX_ADDITIONAL_DIRS) {
     throw new EngineError(`a room can grant at most ${MAX_ADDITIONAL_DIRS} additional folders`);
   }
 
-  const result: string[] = [];
+  const result: AdditionalDir[] = [];
   const seen = new Set<string>();
-  for (const raw of paths) {
+  for (const entry of entries) {
+    const raw = typeof entry === 'string' ? entry : entry.path;
+    const grant: AdditionalDirAccess =
+      typeof entry === 'string' ? 'write' : (entry.access ?? 'write');
     const path = raw.trim();
     if (!path) continue;
     if (!isAbsolute(path)) throw new EngineError(`additional folder must be absolute: "${path}"`);
@@ -121,7 +151,13 @@ export async function validateAdditionalDirs(paths: readonly string[]): Promise<
     }
     if (!seen.has(canonical)) {
       seen.add(canonical);
-      result.push(canonical);
+      result.push({
+        path: canonical,
+        access: grant,
+        branch: null,
+        baseBranch: null,
+        prUrl: null,
+      });
     }
   }
   return result;
@@ -448,6 +484,41 @@ export class RoomEngine {
       text: task,
     });
 
+    // What each additional folder means is a decision with consequences – commits and pull
+    // requests in a repository that is not this one – so the room says it out loud in the
+    // transcript rather than leaving it in a settings panel nobody reopens.
+    const repos = await additionalRepos(additionalDirs, [repoRoot, worktreePath ?? repoRoot]);
+    if (repos.length > 0) {
+      const lines = repos.map((repo) =>
+        repo.dir.access === 'write'
+          ? `  ${repo.root} – read & write: its changes join the room's diff, the room commits ` +
+            `them there on ${branchFor(slug)}, and Open PR opens a pull request in it too.`
+          : `  ${repo.root} – read only: the agents can read it, and anything they change ` +
+            'there is reverted at the end of the turn.',
+      );
+      // Write access stages everything in that repository, because there is no worktree out
+      // there keeping the room's work apart from yours.
+      const dirty: string[] = [];
+      for (const repo of repos) {
+        if (repo.dir.access === 'write' && (await git.isDirty(repo.root))) dirty.push(repo.root);
+      }
+      if (dirty.length > 0) {
+        lines.push(
+          '',
+          `Already uncommitted, and so included in the room's first commit there: ${dirty.join(', ')}. ` +
+            'Commit or stash it first to keep it separate.',
+        );
+      }
+      opts.store.addMessage({
+        roomId: room.id,
+        author: 'system',
+        role: 'system',
+        kind: 'system',
+        round: 0,
+        text: `folder access for this room:\n${lines.join('\n')}`,
+      });
+    }
+
     const engine = new RoomEngine(
       room,
       { ...opts, timeoutMs: opts.timeoutMs ?? settings.timeoutSeconds * 1000 },
@@ -708,9 +779,12 @@ export class RoomEngine {
 
     const cwd = this.workdir();
     const writes = canWrite(participant.permission);
-    const diffStat = await git.diffStat(cwd, this.baseSha());
-    const diff = writes ? '' : await git.diffSince(cwd, this.baseSha());
+    const before = await this.workspaceChanges(cwd);
+    const diffStat = before.diffStat;
+    // A writer is about to change the tree, so showing it the pre-turn diff is noise.
+    const diff = writes ? '' : before.diff;
 
+    const readOnlyBefore = await this.snapshotReadOnly();
     const lock = writes ? await this.acquireLock() : undefined;
     let turn: { result: TurnResult; stream: TurnStream; messageId: string };
     try {
@@ -726,8 +800,10 @@ export class RoomEngine {
 
     let error: string | undefined;
     if (turn.result.ok) {
-      const captured = writes ? await git.diffSince(cwd, this.baseSha()) : null;
-      if (writes) this.lastChangedFiles = await git.changedFiles(cwd, this.baseSha());
+      await this.enforceReadOnly(readOnlyBefore, round);
+      const after = writes ? await this.workspaceChanges(cwd) : null;
+      const captured = after ? after.diff : null;
+      if (after) this.lastChangedFiles = after.changed;
       const verdict =
         participant.role === 'reviewer'
           ? parseVerdict(turn.result.text, turn.result.structured)
@@ -999,17 +1075,24 @@ export class RoomEngine {
       throw new EngineError('a turn is in flight. Pause or stop the room before committing.');
     }
     const subject = message?.trim() || commitSubject(room.title);
-    const result = await git.commitAll(this.workdir(), subject, `Room: ${room.id}`);
-
+    const body = `Room: ${room.id}`;
+    const result = await git.commitAll(this.workdir(), subject, body);
     if (result.ok) {
       this.system(`committed ${result.shortSha} on ${room.roomBranch}: ${subject}`);
-      return { ok: true, ...(result.shortSha ? { sha: result.shortSha } : {}) };
+    } else if (!result.empty) {
+      this.system(`could not commit: ${result.error ?? 'unknown error'}`);
     }
+
+    // Always offered, even when the room repo had nothing staged: the work may be sitting
+    // entirely in an additional folder.
+    const extras = await this.commitAdditionalDirs(subject, body);
+
+    if (result.ok) return { ok: true, ...(result.shortSha ? { sha: result.shortSha } : {}) };
+    if (extras.length > 0) return { ok: true };
     if (result.empty) {
       this.system('nothing to commit: git reported no staged changes.');
       return { ok: false, error: 'nothing to commit' };
     }
-    this.system(`could not commit: ${result.error ?? 'unknown error'}`);
     return { ok: false, ...(result.error ? { error: result.error } : {}) };
   }
 
@@ -1027,53 +1110,89 @@ export class RoomEngine {
     if (room.state === 'running' || room.state === 'waiting-reviews') {
       throw new EngineError('a turn is in flight. Pause or stop the room before opening a PR.');
     }
-    if (room.roomBranch === room.baseBranch) {
+
+    // Every repository this room committed in, room repo first. A writable additional
+    // folder only appears once the room actually branched and committed there, which is
+    // also the only case in which it has anything to open a pull request from.
+    const targets: { cwd: string; base: string; head: string; dirPath?: string }[] = [];
+    if (room.roomBranch !== room.baseBranch) {
+      targets.push({ cwd: this.workdir(), base: room.baseBranch, head: room.roomBranch });
+    }
+    for (const repo of await this.writableExtras()) {
+      const { branch, baseBranch } = repo.dir;
+      if (!branch || !baseBranch || branch === baseBranch) continue;
+      if ((await git.aheadCount(repo.root, baseBranch, branch)) === 0) continue;
+      targets.push({ cwd: repo.root, base: baseBranch, head: branch, dirPath: repo.dir.path });
+    }
+
+    if (targets.length === 0) {
       throw new EngineError(
-        'this room ran in your checkout rather than on a room branch, so there is nothing to open a PR from.',
+        room.roomBranch === room.baseBranch
+          ? 'this room ran in your checkout rather than on a room branch, and it has not committed in any additional folder, so there is nothing to open a PR from.'
+          : 'this room has nothing to open a PR from.',
       );
     }
 
-    const remotes = await git.remotes(room.repoRoot);
-    const remote = opts.remote ?? (remotes.includes('origin') ? 'origin' : remotes[0]);
-    if (!remote) {
-      throw new EngineError(`${room.repoRoot} has no git remote, so there is nowhere to push.`);
-    }
     const gh = await detectGh();
     if (!gh.installed) {
       throw new EngineError(gh.note ?? '`gh` is not installed');
     }
 
-    const cwd = this.workdir();
-    this.system(`pushing ${room.roomBranch} to ${remote}…`);
-    const pushed = await git.push(cwd, remote, room.roomBranch);
-    if (!pushed.ok) {
-      this.system(`push failed: ${pushed.error ?? 'unknown error'}`);
-      return { ok: false, ...(pushed.error ? { error: pushed.error } : {}) };
-    }
-
     const title = opts.title?.trim() || commitSubject(room.title);
-    const result = await createPr(
-      {
-        cwd,
-        base: room.baseBranch,
-        head: room.roomBranch,
-        title,
-        body: opts.body ?? prBody(room),
-        ...(opts.draft ? { draft: true } : {}),
-      },
-      // `undefined` falls through to the real `gh`; tests always inject a fake.
-      opts.gh,
-    );
+    const body = opts.body ?? prBody(room);
+    let first: CreatePrResult | undefined;
 
-    if (result.ok && result.url) {
-      this.roomRow = this.store.updateRoom(room.id, { prUrl: result.url });
-      this.system(`opened ${result.url}`);
-    } else if (result.ok) {
-      this.system(`gh reported success but printed no url.`);
-    } else {
-      this.system(`could not open a pull request: ${result.error ?? 'unknown error'}`);
+    for (const target of targets) {
+      const remotes = await git.remotes(target.cwd);
+      const remote =
+        opts.remote && remotes.includes(opts.remote)
+          ? opts.remote
+          : remotes.includes('origin')
+            ? 'origin'
+            : remotes[0];
+      if (!remote) {
+        const error = `${target.cwd} has no git remote, so there is nowhere to push.`;
+        this.system(error);
+        first ??= { ok: false, error };
+        continue;
+      }
+
+      this.system(`pushing ${target.head} to ${remote} in ${target.cwd}…`);
+      const pushed = await git.push(target.cwd, remote, target.head);
+      if (!pushed.ok) {
+        this.system(`push failed in ${target.cwd}: ${pushed.error ?? 'unknown error'}`);
+        first ??= { ok: false, ...(pushed.error ? { error: pushed.error } : {}) };
+        continue;
+      }
+
+      const result = await createPr(
+        {
+          cwd: target.cwd,
+          base: target.base,
+          head: target.head,
+          title,
+          body,
+          ...(opts.draft ? { draft: true } : {}),
+        },
+        // `undefined` falls through to the real `gh`; tests always inject a fake.
+        opts.gh,
+      );
+
+      if (result.ok && result.url) {
+        if (target.dirPath) this.rememberExtra(target.dirPath, { prUrl: result.url });
+        else this.roomRow = this.store.updateRoom(room.id, { prUrl: result.url });
+        this.system(`opened ${result.url}`);
+      } else if (result.ok) {
+        this.system(`gh reported success but printed no url for ${target.cwd}.`);
+      } else {
+        this.system(
+          `could not open a pull request in ${target.cwd}: ${result.error ?? 'unknown error'}`,
+        );
+      }
+      first ??= result;
     }
-    return result;
+
+    return first ?? { ok: false, error: 'nothing was pushed' };
   }
 
   private async runRound(
@@ -1088,6 +1207,7 @@ export class RoomEngine {
     const cwd = this.workdir();
 
     // --- worker ------------------------------------------------------------
+    const readOnlyBefore = await this.snapshotReadOnly();
     const workerDiffStat = round > 1 ? await git.diffStat(cwd, this.baseSha()) : '';
     const workerTurn = await this.runParticipantTurn(worker, {
       round,
@@ -1110,9 +1230,10 @@ export class RoomEngine {
       return { done: true, error };
     }
 
-    const diffStat = await git.diffStat(cwd, this.baseSha());
-    const diff = await git.diffSince(cwd, this.baseSha());
-    const changed = await git.changedFiles(cwd, this.baseSha());
+    // Before anything reads the tree: a read-only folder has to look untouched.
+    await this.enforceReadOnly(readOnlyBefore, round);
+
+    const { diff, diffStat, changed } = await this.workspaceChanges(cwd);
     this.lastChangedFiles = changed;
 
     const workerMessage = this.postTurnMessage(worker, workerTurn, round, diff);
@@ -1291,14 +1412,15 @@ export class RoomEngine {
 
     if (result.ok) {
       this.system(`committed ${result.shortSha} on ${this.roomRow.roomBranch}: ${subject}`, round);
-      return result.shortSha;
+    } else if (!result.empty) {
+      this.system(`could not commit the approved round: ${result.error ?? 'unknown error'}`, round);
     }
-    if (result.empty) {
+
+    const extras = await this.commitAdditionalDirs(subject, body, round);
+    if (result.empty && extras.length === 0) {
       this.system('nothing to commit: git reported no staged changes.', round);
-      return undefined;
     }
-    this.system(`could not commit the approved round: ${result.error ?? 'unknown error'}`, round);
-    return undefined;
+    return result.ok ? result.shortSha : undefined;
   }
 
   // --- turns ---------------------------------------------------------------
@@ -1336,6 +1458,7 @@ export class RoomEngine {
       cwd: ctx.cwd,
       branch: room.roomBranch,
       task: room.task,
+      ...(room.additionalDirs.length > 0 ? { additionalDirs: room.additionalDirs } : {}),
       includeRoleInstructions: !(
         adapter.capabilities.systemAppendDelivery === 'every-turn' ||
         (adapter.capabilities.systemAppendDelivery === 'first-turn' && !participant.sessionId)
@@ -1375,7 +1498,9 @@ export class RoomEngine {
     const handle = adapter.run(
       {
         cwd: ctx.cwd,
-        ...(room.additionalDirs.length > 0 ? { additionalDirs: room.additionalDirs } : {}),
+        ...(room.additionalDirs.length > 0
+          ? { additionalDirs: room.additionalDirs.map((d) => d.path) }
+          : {}),
         prompt,
         permission: participant.permission,
         timeoutMs: this.timeoutMs,
@@ -1523,6 +1648,149 @@ export class RoomEngine {
   /** Where turns run: the room's worktree, or the checkout when the room opted out. */
   private workdir(): string {
     return this.roomRow.worktreePath ?? this.roomRow.repoRoot;
+  }
+
+  /** The repositories the room may write to, besides its own. */
+  private writableExtras(): Promise<AdditionalRepo[]> {
+    return writableRepos(this.roomRow.additionalDirs, [this.roomRow.repoRoot, this.workdir()]);
+  }
+
+  private readOnlyExclusions(): string[] {
+    return [this.roomRow.repoRoot, this.workdir()];
+  }
+
+  /**
+   * Everything the room has changed, in every repository it can write to.
+   *
+   * The room repo is measured against the room's base sha; an additional folder against
+   * its own `HEAD`, since the room did not create it and has no base of its own there.
+   * Reviewers, the goalpost check and the commit all read this, so a change made in an
+   * additional folder is no longer invisible to any of them.
+   */
+  private async workspaceChanges(cwd: string): Promise<{
+    diff: string;
+    diffStat: string;
+    changed: string[];
+    extras: AdditionalRepoChange[];
+  }> {
+    const extras = await collectAdditionalRepoChanges(
+      this.roomRow.additionalDirs,
+      this.readOnlyExclusions(),
+    );
+    return {
+      diff: appendAdditionalDiffs(await git.diffSince(cwd, this.baseSha()), extras),
+      diffStat: appendAdditionalStats(await git.diffStat(cwd, this.baseSha()), extras),
+      changed: [...(await git.changedFiles(cwd, this.baseSha())), ...qualifiedChangedFiles(extras)],
+      extras,
+    };
+  }
+
+  /** What the read-only folders looked like before a turn, so an edit can be told apart. */
+  private snapshotReadOnly(): Promise<ReadOnlySnapshot> {
+    return snapshotReadOnly(this.roomRow.additionalDirs, this.readOnlyExclusions());
+  }
+
+  /**
+   * Put the read-only folders back the way the turn found them, and say so.
+   *
+   * No runtime can be told "you may read this folder but not write it", so a room that
+   * offers read-only access has to make it true afterwards. The transcript gets the whole
+   * list: silently undoing an agent's work would be worse than not offering the mode.
+   */
+  private async enforceReadOnly(before: ReadOnlySnapshot, round: number): Promise<void> {
+    const violations = await revertReadOnly(
+      this.roomRow.additionalDirs,
+      before,
+      this.readOnlyExclusions(),
+    );
+    for (const violation of violations) {
+      if (violation.reverted.length > 0) {
+        this.system(
+          `${violation.root} is read-only in this room, so ${violation.reverted.length} ` +
+            `change(s) made there were reverted: ${violation.reverted.join(', ')}. ` +
+            'Grant it read & write access if the room is meant to work there.',
+          round,
+        );
+      }
+      if (violation.kept.length > 0) {
+        this.system(
+          `${violation.root} is read-only in this room, but these files could not be put ` +
+            `back and are left as they are: ${violation.kept.join(', ')}. They were already ` +
+            'modified before the turn, so there is no clean version to restore.',
+          round,
+        );
+      }
+    }
+  }
+
+  /**
+   * The branch a writable additional repository commits on, created on first use.
+   *
+   * An additional folder is the human's own checkout rather than a worktree the room made,
+   * so the only way to keep the room's commits off their branch – and to have something to
+   * open a pull request from – is to cut a branch there and stay on it. That is a visible
+   * change to a repository the room does not own, so it happens once, lazily, only when
+   * there is something to commit, and it is announced.
+   */
+  private async ensureExtraBranch(repo: AdditionalRepo, round?: number): Promise<AdditionalDir> {
+    if (repo.dir.branch) return repo.dir;
+
+    const baseBranch = await git.currentBranch(repo.root);
+    let name = branchFor(this.roomRow.slug);
+    for (let n = 2; await git.branchExists(repo.root, name); n += 1) {
+      name = `${branchFor(this.roomRow.slug)}-${n}`;
+    }
+    try {
+      await git.checkoutNewBranch(repo.root, name);
+    } catch (err) {
+      this.system(
+        `could not create ${name} in ${repo.root}: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Committing on ${baseBranch} instead.`,
+        round,
+      );
+      return this.rememberExtra(repo.dir.path, { branch: baseBranch, baseBranch });
+    }
+    this.system(`created ${name} in ${repo.root}, cut from ${baseBranch}.`, round);
+    return this.rememberExtra(repo.dir.path, { branch: name, baseBranch });
+  }
+
+  /** Persist per-folder state back into the room's `additional_dirs_json`. */
+  private rememberExtra(path: string, patch: Partial<AdditionalDir>): AdditionalDir {
+    const dirs = this.roomRow.additionalDirs.map((dir) =>
+      dir.path === path ? { ...dir, ...patch } : dir,
+    );
+    this.roomRow = this.store.updateRoom(this.roomRow.id, { additionalDirs: dirs });
+    return this.roomRow.additionalDirs.find((d) => d.path === path)!;
+  }
+
+  /**
+   * Commit the writable additional folders alongside the room repo.
+   *
+   * Work an agent did in an `--add-dir` folder used to be left in the working tree with
+   * nothing in the transcript saying so, which is how a whole round's implementation gets
+   * lost.
+   */
+  private async commitAdditionalDirs(
+    subject: string,
+    body: string,
+    round?: number,
+  ): Promise<{ root: string; sha: string }[]> {
+    const made: { root: string; sha: string }[] = [];
+    for (const repo of await this.writableExtras()) {
+      if (!(await git.isDirty(repo.root))) continue;
+      const dir = await this.ensureExtraBranch(repo, round);
+      const result = await git.commitAll(repo.root, subject, body);
+      if (result.ok) {
+        this.system(
+          `committed ${result.shortSha} in ${repo.root} on ${dir.branch}: ${subject}`,
+          round,
+        );
+        made.push({ root: repo.root, sha: result.shortSha ?? '' });
+      } else if (!result.empty) {
+        this.system(`could not commit ${repo.root}: ${result.error ?? 'unknown error'}`, round);
+      }
+    }
+    return made;
   }
 
   private baseSha(): string | undefined {

@@ -158,6 +158,32 @@ export async function shortSha(cwd: string, rev = 'HEAD'): Promise<string | unde
   return out?.trim() || undefined;
 }
 
+/**
+ * Restore tracked files to their `HEAD` content – how the room undoes an edit an agent
+ * made in a folder it was only granted read access to. Untracked files are the caller's
+ * problem: `checkout` has nothing to restore them from.
+ */
+export async function checkoutPaths(cwd: string, paths: readonly string[]): Promise<void> {
+  if (paths.length === 0) return;
+  await gitOrUndefined(cwd, ['checkout', 'HEAD', '--', ...paths]);
+}
+
+/**
+ * Create `name` at HEAD and switch to it, carrying the working tree across.
+ *
+ * A room repo gets a worktree; an additional folder is the human's own checkout, so the
+ * only way to give its commits somewhere of their own to live is to branch in place.
+ */
+export async function checkoutNewBranch(cwd: string, name: string): Promise<void> {
+  await git(cwd, ['checkout', '-b', name]);
+}
+
+/** How many commits `head` has that `base` does not. Zero when either ref does not resolve. */
+export async function aheadCount(cwd: string, base: string, head: string): Promise<number> {
+  const out = await gitOrUndefined(cwd, ['rev-list', '--count', `${base}..${head}`]);
+  return Number(out?.trim()) || 0;
+}
+
 /** True when `refs/heads/<name>` already exists. Used to keep room slugs unique. */
 export async function branchExists(cwd: string, name: string): Promise<boolean> {
   const out = await gitOrUndefined(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);

@@ -1,4 +1,11 @@
-import type { ModelCatalog, Participant, Role, Room, TurnRecord } from '@agent-chat-room/core';
+import type {
+  AdditionalDir,
+  ModelCatalog,
+  Participant,
+  Role,
+  Room,
+  TurnRecord,
+} from '@agent-chat-room/core';
 import { useState } from 'react';
 
 import type { ChangedFiles } from '../api/client.js';
@@ -20,7 +27,7 @@ export interface RoomOverlayProps {
   catalogs: Record<string, ModelCatalog>;
   onClose: () => void;
   onCloseDiff: () => void;
-  onSetAdditionalDirs: (paths: string[]) => void;
+  onSetAdditionalDirs: (dirs: AdditionalDir[]) => void;
   onSetParticipant: (runtime: string, patch: { role?: Role; model?: string }) => void;
 }
 
@@ -80,6 +87,23 @@ export function RoomOverlay(props: RoomOverlayProps): React.ReactElement {
             </a>
           </Fact>
         )}
+        {/* A room that writes to additional folders opens one pull request per repository,
+            so the panel lists them all rather than only the room repo's. */}
+        {room.additionalDirs
+          .filter((dir) => dir.prUrl)
+          .map((dir) => (
+            <Fact key={dir.path} label="pr">
+              <a
+                href={dir.prUrl!}
+                target="_blank"
+                rel="noreferrer"
+                className="text-live hover:underline"
+                title={dir.path}
+              >
+                {dir.prUrl}
+              </a>
+            </Fact>
+          ))}
       </section>
 
       <Divider label="ROSTER" />
@@ -106,7 +130,7 @@ export function RoomOverlay(props: RoomOverlayProps): React.ReactElement {
 
       <Divider label="FOLDER ACCESS" />
       <AdditionalFolders
-        key={`${room.id}:${room.additionalDirs.join('\0')}`}
+        key={`${room.id}:${room.additionalDirs.map((d) => `${d.path}:${d.access}`).join('\0')}`}
         room={room}
         busy={props.busy}
         onSave={props.onSetAdditionalDirs}
@@ -170,20 +194,24 @@ function AdditionalFolders({
 }: {
   room: Room;
   busy: boolean;
-  onSave: (paths: string[]) => void;
+  onSave: (dirs: AdditionalDir[]) => void;
 }): React.ReactElement {
-  const [paths, setPaths] = useState(room.additionalDirs);
+  const [dirs, setDirs] = useState(room.additionalDirs);
 
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const locked = busy || running || room.closedAt !== null;
   const changed =
-    paths.length !== room.additionalDirs.length ||
-    paths.some((path, index) => path !== room.additionalDirs[index]);
+    dirs.length !== room.additionalDirs.length ||
+    dirs.some(
+      (dir, index) =>
+        dir.path !== room.additionalDirs[index]?.path ||
+        dir.access !== room.additionalDirs[index]?.access,
+    );
 
   return (
     <div className="mt-2">
-      <AdditionalDirsEditor value={paths} onChange={setPaths} disabled={locked} />
-      {paths.length === 0 && (
+      <AdditionalDirsEditor value={dirs} onChange={setDirs} disabled={locked} />
+      {dirs.length === 0 && (
         <p className="mt-1 font-mono text-[11px] text-ink-faint">
           Only the room repository is accessible.
         </p>
@@ -191,7 +219,7 @@ function AdditionalFolders({
       <button
         type="button"
         disabled={locked || !changed}
-        onClick={() => onSave(paths)}
+        onClick={() => onSave(dirs)}
         className="mt-2 rounded border border-line px-2 py-1 font-mono text-[11px] text-ink-dim hover:border-line-strong disabled:opacity-40"
       >
         save folder access

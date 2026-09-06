@@ -1,4 +1,5 @@
 import type {
+  AdditionalDir,
   Detection,
   Message,
   ModelCatalog,
@@ -26,7 +27,7 @@ export interface RoomDetail {
 export interface CreateRoomRequest {
   task: string;
   cwd: string;
-  additionalDirs?: string[];
+  additionalDirs?: AdditionalDir[];
   agents: string[];
   title?: string;
   mode?: RoomMode;
@@ -150,7 +151,7 @@ export const api = {
   resume: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/resume`),
   stop: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/stop`),
   close: (id: string) => post<{ room: Room }>(`/api/rooms/${id}/close`),
-  patchRoom: (id: string, body: { title?: string; additionalDirs?: string[] }) =>
+  patchRoom: (id: string, body: { title?: string; additionalDirs?: AdditionalDir[] }) =>
     request<{ room: Room }>(`/api/rooms/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),

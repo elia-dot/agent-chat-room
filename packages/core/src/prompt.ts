@@ -18,6 +18,11 @@ export interface BuildTurnPromptInput {
   cwd: string;
   branch: string;
   task: string;
+  /**
+   * Extra workspace roots the room granted. They are separate repositories, so their diff
+   * paths are relative to themselves and a citation into one has to name the folder.
+   */
+  additionalDirs?: { path: string; access: 'read' | 'write' }[];
   includeRoleInstructions?: boolean;
   newMessages?: PromptMessage[];
   diffStat?: string;
@@ -61,6 +66,25 @@ export function buildTurnPrompt(input: BuildTurnPromptInput): string {
     `You are ${input.runtime} acting as ${input.role.toUpperCase()} in room "${input.title}" (round ${input.round}).`,
   );
   parts.push(`Repo: ${input.cwd} on branch ${input.branch}.`);
+  if (input.additionalDirs?.length) {
+    const writable = input.additionalDirs.filter((d) => d.access === 'write').map((d) => d.path);
+    const readable = input.additionalDirs.filter((d) => d.access === 'read').map((d) => d.path);
+    if (writable.length > 0) {
+      parts.push(
+        `This room also covers ${writable.join(', ')}, and you may change files there. ` +
+          'Those changes are part of the room: they appear in the diff below under their own ' +
+          'heading, and the room commits them and opens a pull request for them. Their paths ' +
+          'are relative to their own folder, so cite them as `<folder>/<path>:<line>`.',
+      );
+    }
+    if (readable.length > 0) {
+      parts.push(
+        `You may read ${readable.join(', ')} but must not change anything there. ` +
+          'The room reverts any edit made in those folders at the end of the turn, so an edit ' +
+          'is wasted work – say what would need to change there instead.',
+      );
+    }
+  }
   parts.push('');
   parts.push('## Task');
   parts.push(input.task.trim());

@@ -197,6 +197,18 @@ export function parseModifiedHunks(
   return map;
 }
 
+/**
+ * Citations and diff headers rarely agree on how much of the path to write, so either one
+ * may be the tail of the other: `lib/foo.dart` matches `app/lib/foo.dart` and vice versa.
+ */
+function samePath(diffFile: string, normalized: string): boolean {
+  return (
+    diffFile === normalized ||
+    diffFile.endsWith(`/${normalized}`) ||
+    normalized.endsWith(`/${diffFile}`)
+  );
+}
+
 export function isLineInModifiedHunks(
   file: string,
   line: number,
@@ -204,17 +216,31 @@ export function isLineInModifiedHunks(
 ): boolean {
   const normalized = file.replace(/\\/g, '/');
   for (const [diffFile, ranges] of modifiedMap.entries()) {
-    if (
-      diffFile === normalized ||
-      diffFile.endsWith(`/${normalized}`) ||
-      normalized.endsWith(`/${diffFile}`)
-    ) {
+    if (samePath(diffFile, normalized)) {
       for (const range of ranges) {
         if (line >= range.start && line <= range.end) {
           return true;
         }
       }
     }
+  }
+  return false;
+}
+
+/**
+ * Whether the diff says anything at all about this file, whichever lines it touched.
+ *
+ * This is what separates "the worker did not touch that line" from "this diff cannot
+ * answer the question" – a file the diff never mentions could be untouched, or could be in
+ * a repository the diff does not cover.
+ */
+export function isFileInDiff(
+  file: string,
+  modifiedMap: Map<string, { start: number; end: number }[]>,
+): boolean {
+  const normalized = file.replace(/\\/g, '/');
+  for (const diffFile of modifiedMap.keys()) {
+    if (samePath(diffFile, normalized)) return true;
   }
   return false;
 }
@@ -228,6 +254,11 @@ export interface GoalpostEnforcementResult {
  * Mechanical Goalpost Enforcement (starting in Round 3):
  * Compare cited lines from blocking verdict items against git diff hunks.
  * If a blocking citation points to untouched code, downgrade it to a nit.
+ *
+ * Only a citation the diff can actually adjudicate counts. A file the diff never mentions
+ * is unknown, not untouched: it may live in a repository outside this diff, and silently
+ * calling that "untouched" is how a real blocking item – or a whole review – disappears.
+ * Unknown citations keep their item blocking and leave the decision alone.
  */
 export function enforceGoalposts(verdict: Verdict, diffText: string): GoalpostEnforcementResult {
   const modifiedMap = parseModifiedHunks(diffText);
@@ -239,7 +270,10 @@ export function enforceGoalposts(verdict: Verdict, diffText: string): GoalpostEn
     const citations = parseFileCitations(item);
     if (
       citations.length > 0 &&
-      citations.every((c) => !isLineInModifiedHunks(c.file, c.line, modifiedMap))
+      citations.every(
+        (c) =>
+          isFileInDiff(c.file, modifiedMap) && !isLineInModifiedHunks(c.file, c.line, modifiedMap),
+      )
     ) {
       downgraded.push({ item, citations });
       nits.push(item);

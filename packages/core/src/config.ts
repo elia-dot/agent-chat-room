@@ -14,6 +14,14 @@ export const ACR_CONFIG_FILENAME = '.acr.json';
 
 const PermissionSchema = z.enum(PERMISSION_LEVELS as unknown as [Permission, ...Permission[]]);
 
+/** `"/path"` or `{ "path": "/path", "access": "read" }`. */
+export const AdditionalDirSchema = z.union([
+  z.string().min(1),
+  z.object({ path: z.string().min(1), access: z.enum(['read', 'write']).optional() }),
+]);
+
+export type AdditionalDirInput = z.infer<typeof AdditionalDirSchema>;
+
 export const RepoConfigSchema = z.object({
   /** Runtime ids. The first is the worker; the rest review. */
   agents: z.array(z.string().min(1)).optional(),
@@ -27,8 +35,12 @@ export const RepoConfigSchema = z.object({
       reviewer: PermissionSchema.optional(),
     })
     .optional(),
-  /** Extra workspace roots to mount in agent turns. */
-  additional_dirs: z.array(z.string()).optional(),
+  /**
+   * Extra workspace roots to mount in agent turns. A bare string means read *and* write,
+   * which is what these folders always were; the object form is how a folder is granted
+   * read-only access instead.
+   */
+  additional_dirs: z.array(AdditionalDirSchema).optional(),
   /** Commands to execute in the worktree after creation. */
   setup: z.array(z.string()).optional(),
   /** Test command to run between worker and reviewer turns. */
@@ -109,7 +121,7 @@ export interface RoomDefaults {
   models: Record<string, string>;
   workerPermission: Permission;
   reviewerPermission: Permission;
-  additional_dirs?: string[];
+  additional_dirs?: AdditionalDirInput[];
   setup?: string[];
   testCommand?: string;
 }
@@ -129,7 +141,7 @@ export interface RoomOverrides {
   worktree?: boolean;
   timeoutSeconds?: number;
   models?: Record<string, string>;
-  additional_dirs?: string[];
+  additional_dirs?: AdditionalDirInput[];
   setup?: string[];
   testCommand?: string;
 }

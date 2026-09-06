@@ -33,10 +33,17 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
   const closed = room.closedAt !== null;
-  // The room ran in a worktree on `acr/<slug>`; with `--no-worktree` there is no room
-  // branch to push, which is what makes the PR button meaningless there.
-  const remote = room.roomBranch === room.baseBranch ? '' : 'origin';
   const ghReady = props.gh?.installed === true && props.gh.loggedIn !== false;
+  // The room ran in a worktree on `acr/<slug>`; with `--no-worktree` there is no room
+  // branch to push, so there is nothing to open a PR from. The button used to be removed
+  // in that case, which reads as a missing feature rather than as an answer – it stays
+  // now, disabled, and says which of the two reasons is stopping it.
+  const prBlocked =
+    room.roomBranch === room.baseBranch
+      ? `this room ran in your ${room.baseBranch} checkout rather than on a room branch, so there is no branch to open a PR from`
+      : ghReady
+        ? undefined
+        : (props.gh?.note ?? 'checking for gh…');
 
   return (
     <Overlay title="Actions" hint="⌥A" onClose={props.onClose}>
@@ -74,21 +81,16 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
             <Action onClick={props.onCommit} disabled={busy || running || closed}>
               commit
             </Action>
-            {/* Absent, not merely disabled, when there is nothing to push to: a button that
-                can never work is worse than no button. */}
-            {remote && (
-              <Action
-                onClick={() => props.onOpenPr(remote)}
-                disabled={busy || running || !ghReady || closed}
-                title={
-                  ghReady
-                    ? `pushes ${room.roomBranch} to ${remote}, then opens a PR into ${room.baseBranch}`
-                    : (props.gh?.note ?? 'checking for gh…')
-                }
-              >
-                {room.prUrl ? 'pr opened' : 'open pr'}
-              </Action>
-            )}
+            <Action
+              onClick={() => props.onOpenPr('origin')}
+              disabled={busy || running || closed || Boolean(prBlocked)}
+              title={
+                prBlocked ??
+                `pushes ${room.roomBranch} to origin, then opens a PR into ${room.baseBranch}`
+              }
+            >
+              {room.prUrl ? 'pr opened' : 'open pr'}
+            </Action>
           </div>
         )}
         <a

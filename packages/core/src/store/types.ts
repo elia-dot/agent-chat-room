@@ -17,6 +17,31 @@ export type RoomState =
  */
 export type RoomMode = 'build-review' | 'brainstorm';
 
+/**
+ * What a room may do with an extra workspace root.
+ *
+ * `read` is context only: the agents can open the files, and the room reverts anything they
+ * change there. `write` makes the folder part of the room – its changes join the diff the
+ * reviewers judge, the room commits them on a branch of its own, and "Open PR" opens one
+ * there too.
+ */
+export type AdditionalDirAccess = 'read' | 'write';
+
+export interface AdditionalDir {
+  /** Absolute, canonical path. */
+  path: string;
+  access: AdditionalDirAccess;
+  /**
+   * Branch the room cut in that repository to hold its commits, and the branch it was cut
+   * from. Both null until the room first commits there, so a folder nobody touched is left
+   * exactly as it was found.
+   */
+  branch: string | null;
+  baseBranch: string | null;
+  /** The pull request "Open PR" opened in that repository. */
+  prUrl: string | null;
+}
+
 export interface Room {
   id: string;
   slug: string;
@@ -26,7 +51,7 @@ export interface Room {
   /** The human's checkout. Turns run in `worktreePath` when the room has one. */
   repoRoot: string;
   /** Extra absolute workspace roots granted to every runtime in this room. */
-  additionalDirs: string[];
+  additionalDirs: AdditionalDir[];
   /** The branch the checkout was on when the room opened. */
   baseBranch: string;
   /** `acr/<slug>`. */

@@ -67,6 +67,13 @@ export {
   isTerminal,
   isResumable,
 } from './engine/state.js';
+export {
+  additionalRepos,
+  writableRepos,
+  carryOverDirState,
+  collectAdditionalRepoChanges,
+} from './engine/additionalDirs.js';
+export type { AdditionalRepo, AdditionalRepoChange } from './engine/additionalDirs.js';
 export { TurnStream } from './engine/events.js';
 export type { EngineEvent, EngineEventSink } from './engine/events.js';
 export {

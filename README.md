@@ -32,14 +32,21 @@ M4 brings complete production-readiness and the next-generation feature set:
 - **Autonomous Setup & Test Gatekeeper.** Runs `.acr.json` `setup` hooks in fresh worktrees, and runs
   `testCommand` between worker and reviewer turns with test failure diagnostics fed directly to reviewers.
 - **Mechanical Goalpost Enforcement.** In Round 3+, reviewer citations are validated against modified hunks from
-  the worker's diff; citations outside the diff are downgraded to non-blocking nits to prevent endless review loops.
+  the worker's diff; a citation on a line the diff covers but the worker did not touch is downgraded to a
+  non-blocking nit, to prevent endless review loops. A citation the diff says nothing about stays blocking –
+  "not in this diff" is not evidence that the line was left alone.
 - **Brainstorm mode.** Three rounds instead of a build loop: everyone answers in parallel,
   everyone reacts to the others, and the moderator writes a merged proposal. Nobody edits.
   One button turns the proposal into a `build-review` room.
 - **Roster editing.** Swap who builds mid-room and change any participant's model, without
   losing anyone's session.
 - **Commit, Open PR and Export markdown.** Commit the working tree on demand; push the room
-  branch and open a PR through your own `gh` login; save the whole room as a markdown file.
+  branch and open a PR through your own `gh` login – one per repository the room committed in;
+  save the whole room as a markdown file.
+- **Additional folders, read or read & write.** Grant a room extra repositories. `read` is context
+  only, and an edit made there is reverted at the end of the turn. `read & write` makes the folder
+  part of the room: its changes join the diff the reviewers judge, the room commits them on an
+  `acr/<slug>` branch it cuts there, and Open PR opens a pull request in it too.
 - **Purge Room Data.** Cleanly remove worktrees, spilled diffs, turn logs, and database records via
   `acr rooms purge <id>` or the web UI.
 - **`acr doctor`** – which runtimes are installed, new enough and logged in.
@@ -55,7 +62,8 @@ M4 brings complete production-readiness and the next-generation feature set:
 - **Restart recovery.** A turn that died with its process is marked, its round is rolled back and
   re-run, and each agent keeps its own runtime session – so only the turn is repeated, not the
   conversation.
-- **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs`, `setup`, and `testCommand`.
+- **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs` (with per-folder
+  `access`), `setup`, and `testCommand`.
 - **Governance & CI.** MIT License, Denly attribution `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
   and GitHub Actions CI across macOS and Linux.
 
@@ -208,7 +216,8 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
   "timeoutSeconds": 1800,
   "models": { "claude": "opus", "cursor": "auto" },
   "permissions": { "worker": "edits" },
-  "additional_dirs": ["/path/to/shared/lib"], // additional directories mounted into the agent's context
+  // Extra folders. A bare path means read & write; use the object form for read-only.
+  "additional_dirs": ["/path/to/app", { "path": "/path/to/shared/lib", "access": "read" }],
   "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
   "testCommand": "npm test", // run between worker and reviewer turns; results injected under ## Test Results
 }

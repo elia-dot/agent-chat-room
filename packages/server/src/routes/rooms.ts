@@ -1,5 +1,11 @@
 import type { Message, Room } from '@agent-chat-room/core';
-import { EngineError, git, listModels, roomToMarkdown } from '@agent-chat-room/core';
+import {
+  AdditionalDirSchema,
+  EngineError,
+  git,
+  listModels,
+  roomToMarkdown,
+} from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -9,7 +15,7 @@ import type { RoomSupervisor } from '../supervisor.js';
 const CreateRoomBody = z.object({
   task: z.string().min(1, 'a room needs a task'),
   cwd: z.string().min(1),
-  additionalDirs: z.array(z.string().min(1)).max(20).optional(),
+  additionalDirs: z.array(AdditionalDirSchema).max(20).optional(),
   agents: z.array(z.string().min(1)).min(2, 'a room needs a worker and at least one reviewer'),
   title: z.string().optional(),
   mode: z.enum(['build-review', 'brainstorm']).optional(),
@@ -69,7 +75,7 @@ const StartBody = z
 const PatchBody = z
   .object({
     title: z.string().min(1).optional(),
-    additionalDirs: z.array(z.string().min(1)).max(20).optional(),
+    additionalDirs: z.array(AdditionalDirSchema).max(20).optional(),
   })
   .refine((v) => v.title !== undefined || v.additionalDirs !== undefined, {
     message: 'nothing to change',

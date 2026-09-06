@@ -1,4 +1,10 @@
-import type { ModelCatalog, RepoRecord, RoomMode, RuntimeReportEntry } from '@agent-chat-room/core';
+import type {
+  AdditionalDir,
+  ModelCatalog,
+  RepoRecord,
+  RoomMode,
+  RuntimeReportEntry,
+} from '@agent-chat-room/core';
 import { useEffect, useState } from 'react';
 
 import type { CreateRoomRequest } from '../api/client.js';
@@ -38,7 +44,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [repoHint, setRepoHint] = useState<{ text: string; useRoot?: string } | null>(null);
 
   const [cwd, setCwd] = useState('');
-  const [additionalDirs, setAdditionalDirs] = useState<string[]>([]);
+  const [additionalDirs, setAdditionalDirs] = useState<AdditionalDir[]>([]);
   const [showFolders, setShowFolders] = useState(false);
   const [task, setTask] = useState('');
   const [title, setTitle] = useState('');
@@ -287,6 +293,39 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             </ul>
           )}
 
+          {/* A second repository is a property of the workspace the room opens on, so it
+              belongs with the folder it extends rather than three sections further down. */}
+          <button
+            type="button"
+            onClick={() => setShowFolders((v) => !v)}
+            aria-expanded={showFolders}
+            className="mt-2.5 flex w-full items-center gap-2 rounded border border-line px-2.5 py-1.5 text-left hover:border-line-strong"
+          >
+            <span className="font-mono text-[11.5px] text-ink-dim">
+              {showFolders ? '▾' : '+'} grant additional folders
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint">
+              {additionalDirs.length === 0
+                ? 'other repositories this room may read, or work in'
+                : additionalDirs
+                    .map(
+                      (dir) =>
+                        `${basename(dir.path)} · ${dir.access === 'read' ? 'read' : 'read & write'}`,
+                    )
+                    .join(', ')}
+            </span>
+            {additionalDirs.length > 0 && (
+              <span className="shrink-0 font-mono text-[11px] text-ink-faint">
+                {additionalDirs.length}
+              </span>
+            )}
+          </button>
+          {showFolders && (
+            <div className="mt-2">
+              <AdditionalDirsEditor value={additionalDirs} onChange={setAdditionalDirs} />
+            </div>
+          )}
+
           <Divider label="TASK" />
           <textarea
             value={task}
@@ -426,25 +465,6 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
               </span>
             </span>
           </label>
-
-          <button
-            type="button"
-            onClick={() => setShowFolders((v) => !v)}
-            className="mt-2.5 font-mono text-[11px] text-ink-faint hover:text-ink"
-          >
-            {showFolders ? '▾' : '+'} grant additional folders
-            <span className="ml-1.5">
-              {additionalDirs.length > 0 ? `(${additionalDirs.length})` : ''}
-            </span>
-          </button>
-          {showFolders && (
-            <div className="mt-2">
-              <AdditionalDirsEditor value={additionalDirs} onChange={setAdditionalDirs} />
-              <p className="mt-1 font-mono text-[11px] text-ink-faint">
-                read-only paths outside the repo, granted to every agent in the room
-              </p>
-            </div>
-          )}
 
           {error && (
             <p className="mt-3 rounded border border-error-line bg-error-bg px-3 py-2 font-mono text-[11.5px] text-error">

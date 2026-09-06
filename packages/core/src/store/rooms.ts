@@ -9,6 +9,7 @@ import type { Verdict } from '../verdict.js';
 import type { Db } from './db.js';
 import { openDb } from './db.js';
 import type {
+  AdditionalDir,
   Message,
   MessageKind,
   Participant,
@@ -32,7 +33,7 @@ export interface CreateRoomInput {
   task: string;
   mode?: RoomMode;
   repoRoot: string;
-  additionalDirs?: string[];
+  additionalDirs?: AdditionalDir[];
   baseBranch: string;
   roomBranch: string;
   baseSha?: string | null;
@@ -569,11 +570,33 @@ function parseJson<T>(value: unknown): T | null {
   }
 }
 
-function parseStringArray(value: unknown): string[] {
+/**
+ * Additional folders, tolerating the bare strings written before access modes existed.
+ *
+ * A string is a folder from a room that predates the read/write distinction, and those
+ * rooms could and did write to their extra folders, so a string reads back as `write`.
+ */
+function parseAdditionalDirs(value: unknown): AdditionalDir[] {
   const parsed = parseJson<unknown>(value);
-  return Array.isArray(parsed)
-    ? parsed.filter((entry): entry is string => typeof entry === 'string')
-    : [];
+  if (!Array.isArray(parsed)) return [];
+  const dirs: AdditionalDir[] = [];
+  for (const entry of parsed) {
+    if (typeof entry === 'string') {
+      dirs.push({ path: entry, access: 'write', branch: null, baseBranch: null, prUrl: null });
+      continue;
+    }
+    if (!entry || typeof entry !== 'object') continue;
+    const row = entry as Record<string, unknown>;
+    if (typeof row.path !== 'string' || !row.path) continue;
+    dirs.push({
+      path: row.path,
+      access: row.access === 'read' ? 'read' : 'write',
+      branch: typeof row.branch === 'string' ? row.branch : null,
+      baseBranch: typeof row.baseBranch === 'string' ? row.baseBranch : null,
+      prUrl: typeof row.prUrl === 'string' ? row.prUrl : null,
+    });
+  }
+  return dirs;
 }
 
 /**
@@ -604,7 +627,7 @@ function toRoom(row: Row): Room {
     task: asText(row.task),
     mode: asText(row.mode) as RoomMode,
     repoRoot: asText(row.repo_root),
-    additionalDirs: parseStringArray(row.additional_dirs_json),
+    additionalDirs: parseAdditionalDirs(row.additional_dirs_json),
     baseBranch: asText(row.base_branch),
     roomBranch: asText(row.room_branch),
     baseSha: str(row.base_sha),

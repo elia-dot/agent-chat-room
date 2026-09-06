@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MAX_INLINE_DIFF_BYTES, RoomStore } from '../../src/store/rooms.js';
+import type { AdditionalDir } from '../../src/store/types.js';
 import { useTempConfigDir } from '../helpers.js';
 
 let store: RoomStore;
@@ -33,13 +34,33 @@ afterEach(() => {
 
 describe('RoomStore', () => {
   it('round-trips and updates additional folders', () => {
-    const created = room({ additionalDirs: ['/shared/docs', '/shared/data'] });
-    expect(created.additionalDirs).toEqual(['/shared/docs', '/shared/data']);
-    expect(store.getRoom(created.id)?.additionalDirs).toEqual(['/shared/docs', '/shared/data']);
+    const dir = (path: string, access: 'read' | 'write'): AdditionalDir => ({
+      path,
+      access,
+      branch: null,
+      baseBranch: null,
+      prUrl: null,
+    });
+    const dirs = [dir('/shared/docs', 'write'), dir('/shared/data', 'read')];
+    const created = room({ additionalDirs: dirs });
+    expect(created.additionalDirs).toEqual(dirs);
+    expect(store.getRoom(created.id)?.additionalDirs).toEqual(dirs);
 
-    const updated = store.updateRoom(created.id, { additionalDirs: ['/other'] });
-    expect(updated.additionalDirs).toEqual(['/other']);
-    expect(store.getRoom(created.id)?.additionalDirs).toEqual(['/other']);
+    const next = [{ ...dir('/other', 'write'), branch: 'acr/x', baseBranch: 'main' }];
+    const updated = store.updateRoom(created.id, { additionalDirs: next });
+    expect(updated.additionalDirs).toEqual(next);
+    expect(store.getRoom(created.id)?.additionalDirs).toEqual(next);
+  });
+
+  it('reads a folder written before access modes existed as read & write', () => {
+    const created = room({});
+    // The shape older builds wrote: a bare path string, and those rooms could write there.
+    store.updateRoom(created.id, {
+      additionalDirs: ['/legacy/path'] as unknown as AdditionalDir[],
+    });
+    expect(store.getRoom(created.id)?.additionalDirs).toEqual([
+      { path: '/legacy/path', access: 'write', branch: null, baseBranch: null, prUrl: null },
+    ]);
   });
 
   it('round-trips the pause flag and the next speaker', () => {
