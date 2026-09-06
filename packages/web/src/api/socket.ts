@@ -47,7 +47,6 @@ export class RoomSocket {
   private roomId: string | undefined;
   private retryMs = FIRST_RETRY_MS;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private closedByUs = false;
   private everConnected = false;
 
   private state: ConnectionState = 'connecting';
@@ -58,7 +57,6 @@ export class RoomSocket {
   constructor(private readonly opts: RoomSocketOptions) {}
 
   connect(): void {
-    this.closedByUs = false;
     this.open();
   }
 
@@ -83,7 +81,6 @@ export class RoomSocket {
     this.timer = undefined;
     this.nextRetryAt = null;
     this.retryMs = FIRST_RETRY_MS;
-    this.closedByUs = false;
     this.open();
   }
 
@@ -98,10 +95,20 @@ export class RoomSocket {
   }
 
   close(): void {
-    this.closedByUs = true;
     if (this.timer) clearTimeout(this.timer);
-    this.socket?.close();
+    this.timer = undefined;
+    this.nextRetryAt = null;
+    const socket = this.socket;
+    // Cleared before closing: that is what stops this socket's own `close` listener from
+    // scheduling a retry. It also means the listener's ownership check fails, so the event
+    // never reports anything – which is why the state is reported from here instead. It
+    // used to be left to a `closedByUs` branch in the listener that could never run, and
+    // `state` went on saying `open` long after the socket had gone.
     this.socket = undefined;
+    socket?.close();
+    // Guarded so closing twice does not tell the caller twice. Callers wire this to render,
+    // and a second identical state is a re-render that says nothing.
+    if (this.state !== 'closed') this.report('closed');
   }
 
   private endpoint(): string {
@@ -156,11 +163,9 @@ export class RoomSocket {
     socket.addEventListener('close', () => {
       // A socket that was replaced must not schedule a retry of its own: only the current
       // one owns the timer, or a replaced socket would keep reopening after `close()`.
+      // A socket we closed on purpose has already been cleared above and reported by
+      // `close()`, so this check covers both that and a socket replaced by a reconnect.
       if (socket !== this.socket) return;
-      if (this.closedByUs) {
-        this.report('closed');
-        return;
-      }
       this.attempt += 1;
       this.nextRetryAt = Date.now() + this.retryMs;
       this.report('closed');

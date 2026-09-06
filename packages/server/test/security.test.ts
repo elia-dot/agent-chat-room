@@ -218,4 +218,45 @@ describe('startServer', () => {
     });
     expect(authCookiePost.status).not.toBe(401);
   });
+
+  it('redeems `?token=` in constant time, and only on a loopback host', async () => {
+    const server = await startServer({
+      store: h.store,
+      webRoot: false,
+      port: 0,
+      token: 'test-token-123',
+    });
+    started.push(server);
+
+    // A wrong token of the same length is refused, and so is one of a different length –
+    // the length check is what lets `timingSafeEqual` be called at all.
+    for (const wrong of ['test-token-124', 'nope']) {
+      const res = await fetch(`${server.url}/?token=${wrong}`, { redirect: 'manual' });
+      expect(res.headers.get('set-cookie')).toBeNull();
+    }
+
+    // The right one still redeems, so the guard has not simply broken redemption.
+    const ok = await fetch(`${server.url}/?token=test-token-123`, { redirect: 'manual' });
+    expect(ok.headers.get('set-cookie')).toContain('acr_token=test-token-123');
+
+    // This hands out a cookie, so it must not be reachable on a request claiming to have
+    // arrived at some other name – the shape a DNS-rebinding attempt has. Injected rather
+    // than fetched: `Host` is a forbidden header for `fetch`, which drops it silently, so a
+    // fetch-based version of this assertion would pass without testing anything.
+    const rebound = await server.app.inject({
+      method: 'GET',
+      url: '/?token=test-token-123',
+      headers: { host: 'evil.example.com' },
+    });
+    expect(rebound.headers['set-cookie']).toBeUndefined();
+
+    // The same request on a loopback host does redeem, so the guard is the host and not
+    // some accident of injection.
+    const injected = await server.app.inject({
+      method: 'GET',
+      url: '/?token=test-token-123',
+      headers: { host: '127.0.0.1:4321' },
+    });
+    expect(String(injected.headers['set-cookie'])).toContain('acr_token=test-token-123');
+  });
 });

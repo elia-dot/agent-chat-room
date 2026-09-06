@@ -52,6 +52,20 @@ export async function currentBranch(cwd: string): Promise<string> {
   return !name || name === 'HEAD' ? 'detached HEAD' : name;
 }
 
+/** Which branch a room starts from, and how confidently that was decided. */
+export interface BaseBranchChoice {
+  branch: string;
+  /**
+   * `remote` is the remote's own answer and `conventional` is a local `main`/`master`;
+   * both are the repository telling us. `checkout` is the last resort: nothing said which
+   * branch is the trunk, so the one that happened to be open was taken. That is right in a
+   * repository whose only branch is the one you are on, and wrong in one whose trunk is
+   * called `develop` while you stand on a feature branch – so callers say it out loud
+   * rather than letting a room quietly base itself on a guess.
+   */
+  source: 'remote' | 'conventional' | 'checkout';
+}
+
 /**
  * The branch rooms are cut from: what `origin/HEAD` points at when the remote says, else
  * `main` or `master` when one exists locally, else the branch that is checked out.
@@ -60,19 +74,19 @@ export async function currentBranch(cwd: string): Promise<string> {
  * every room of a `master` repository to a branch that does not exist, so the remote's
  * own answer is preferred and the two conventional names are only a fallback.
  */
-export async function defaultBranch(cwd: string): Promise<string> {
+export async function defaultBranch(cwd: string): Promise<BaseBranchChoice> {
   const advertised = (
     await gitOrUndefined(cwd, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
   )?.trim();
   if (advertised) {
     const name = advertised.replace(/^origin\//, '');
-    if (await branchExists(cwd, name)) return name;
+    if (await branchExists(cwd, name)) return { branch: name, source: 'remote' };
   }
   for (const name of ['main', 'master']) {
-    if (await branchExists(cwd, name)) return name;
+    if (await branchExists(cwd, name)) return { branch: name, source: 'conventional' };
   }
   const current = await currentBranch(cwd);
-  if (current !== 'detached HEAD') return current;
+  if (current !== 'detached HEAD') return { branch: current, source: 'checkout' };
   throw new Error(
     'could not tell which branch this repository starts from: no origin/HEAD, no main or ' +
       'master, and HEAD is detached',

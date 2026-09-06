@@ -503,7 +503,8 @@ export class RoomEngine {
     // New rooms always cut from an up-to-date base branch, independent of the branch the
     // launcher is standing on. `freshBaseSha` fetches the remote's copy without switching
     // that checkout. The base is whatever the repository calls its trunk, not always `main`.
-    const baseBranch = await git.defaultBranch(repoRoot);
+    const base = await git.defaultBranch(repoRoot);
+    const baseBranch = base.branch;
     const mainSha = await git.freshBaseSha(repoRoot, baseBranch);
     const title = input.title?.trim() || deriveTitle(task, repoRoot);
     const useWorktree = settings.worktree;
@@ -604,6 +605,25 @@ export class RoomEngine {
       round: 0,
       text: task,
     });
+
+    // Nothing in the repository said which branch is its trunk, so the one that happened to
+    // be checked out was taken as the base. That is right in a repository whose only branch
+    // is the one you were on, and wrong in one whose trunk is `develop` while you stand on a
+    // feature branch – and the room's whole diff is measured against this choice, so it says
+    // so rather than letting the guess pass unremarked.
+    if (base.source === 'checkout') {
+      opts.store.addMessage({
+        roomId: room.id,
+        author: 'system',
+        role: 'system',
+        kind: 'system',
+        round: 0,
+        text:
+          `this repository has no origin/HEAD and no local main or master, so ${baseBranch} ` +
+          'is being treated as its base branch. Every diff and pull request in this room is ' +
+          'measured against it.',
+      });
+    }
 
     // What each additional folder means is a decision with consequences – commits and pull
     // requests in a repository that is not this one – so the room says it out loud in the

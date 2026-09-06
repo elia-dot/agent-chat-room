@@ -11,7 +11,13 @@ import type { FolderPicker } from './picker.js';
 import { repoRoutes } from './routes/repos.js';
 import { roomRoutes } from './routes/rooms.js';
 import { runtimeRoutes } from './routes/runtimes.js';
-import { isAllowed, isLocalHost, isLocalOrigin, validateCapabilityToken } from './security.js';
+import {
+  isAllowed,
+  isLocalHost,
+  isLocalOrigin,
+  tokensMatch,
+  validateCapabilityToken,
+} from './security.js';
 import { ConflictError, type RoomSupervisor } from './supervisor.js';
 import { websocketRoute } from './ws.js';
 
@@ -60,8 +66,18 @@ export async function createApp(opts: CreateAppOptions): Promise<FastifyInstance
     const searchParams = new URLSearchParams(query ?? '');
     const queryToken = searchParams.get('token');
 
-    // Token redemption via redirect with HttpOnly cookie
-    if (opts.token && queryToken && queryToken === opts.token) {
+    // Token redemption via redirect with HttpOnly cookie.
+    //
+    // Compared in constant time, like every other check of this secret, and gated on a
+    // loopback `Host` first: this hands out a cookie, so it should not be reachable on a
+    // request that claims to have arrived at some other name.
+    const host = request.headers.host;
+    if (
+      opts.token &&
+      queryToken &&
+      isLocalHost(typeof host === 'string' ? host : undefined) &&
+      tokensMatch(queryToken, opts.token)
+    ) {
       searchParams.delete('token');
       const cleanQuery = searchParams.toString();
       const target = (path || '/') + (cleanQuery ? `?${cleanQuery}` : '');

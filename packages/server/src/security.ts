@@ -122,14 +122,28 @@ export function extractToken(
   return undefined;
 }
 
+/**
+ * Constant-time comparison of a presented token against the real one.
+ *
+ * Exported so that every place a token is checked uses the same comparison. The header
+ * path and the `?token=` redemption path guard the same secret, and one of them comparing
+ * with `===` would make the pair only as good as its weaker half.
+ */
+export function tokensMatch(
+  provided: string | undefined,
+  expectedToken: string | undefined,
+): boolean {
+  if (!expectedToken) return true;
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expectedToken);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function validateCapabilityToken(
   headers: Record<string, string | string[] | undefined>,
   expectedToken: string | undefined,
 ): boolean {
   if (!expectedToken) return true;
-  const provided = extractToken(headers);
-  if (!provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expectedToken);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return tokensMatch(extractToken(headers), expectedToken);
 }

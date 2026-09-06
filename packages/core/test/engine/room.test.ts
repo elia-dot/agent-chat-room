@@ -647,6 +647,39 @@ describe('RoomEngine, the build-review loop', () => {
     expect(engine.room.baseBranch).toBe('trunk');
   });
 
+  it('says so when nothing in the repo names a trunk and it fell back to the checkout', async () => {
+    // No origin/HEAD, no main, no master: the branch that happens to be open is the only
+    // candidate left. That is right in a repository whose only branch is this one, and
+    // wrong in one whose trunk is `develop` – and the room's whole diff is measured against
+    // the choice, so it has to be visible rather than inferred from a branch name later.
+    const dir = repo();
+    gitIn(dir, 'branch', '-m', 'main', 'develop');
+    gitIn(dir, 'switch', '-q', '-c', 'feature/in-progress');
+
+    const engine = await RoomEngine.create(
+      { task: 'x', cwd: dir, agents: ['echo', 'echo'] },
+      engineOptions(),
+    );
+
+    expect(engine.room.baseBranch).toBe('feature/in-progress');
+    const said = engine.messages.find(
+      (m) => m.kind === 'system' && m.text.includes('no origin/HEAD'),
+    );
+    expect(said?.text).toContain('feature/in-progress');
+  });
+
+  it('says nothing when the repository does name its trunk', async () => {
+    const dir = repo();
+    const engine = await RoomEngine.create(
+      { task: 'x', cwd: dir, agents: ['echo', 'echo'] },
+      engineOptions(),
+    );
+    expect(engine.room.baseBranch).toBe('main');
+    // A confident answer needs no disclaimer, and a room that warns every time trains
+    // people to stop reading the warnings.
+    expect(engine.messages.some((m) => m.text.includes('no origin/HEAD'))).toBe(false);
+  });
+
   it('starts from the trunk without a worktree, whatever branch you were standing on', async () => {
     // This used to be refused outright – "switch to main first" – which made opening a room
     // a chore mid-feature. The room branch is cut at the fetched base instead, so the
