@@ -26,6 +26,13 @@ export { roomToMarkdown } from './export.js';
 export type { RoomExportInput } from './export.js';
 export * from './config.js';
 export * from './worktree.js';
+export {
+  agentBranchNamer,
+  buildBranchNamePrompt,
+  cleanBranchSuggestion,
+  condenseSlug,
+} from './branchName.js';
+export type { BranchNameContext, BranchNamer } from './branchName.js';
 export * from './store/types.js';
 export { RoomStore, MAX_INLINE_DIFF_BYTES } from './store/rooms.js';
 export type {

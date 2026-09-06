@@ -9,6 +9,7 @@ import {
   EngineError,
   RoomEngine,
   RoomStore,
+  agentBranchNamer,
   isTerminal,
   parseVerdict,
 } from '@agent-chat-room/core';
@@ -126,6 +127,8 @@ export async function run(opts: RunOptions): Promise<RunSummary> {
 async function open(opts: RunOptions, store: RoomStore): Promise<RoomEngine> {
   const engineOptions = {
     store,
+    // Only reached when the room is opened without --title.
+    branchNamer: agentBranchNamer,
     ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
   };
 

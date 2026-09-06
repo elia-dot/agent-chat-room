@@ -184,7 +184,10 @@ first prompt of a session.
 ### Worktrees
 
 Each room gets `~/.config/agent-chat-room/worktrees/<roomId>` on branch `acr/<slug>`, created from
-the HEAD your checkout was on. That branch is what you merge or open a PR from; `acr rooms close`
+the HEAD your checkout was on. The slug comes from the room title when you give one; without a title
+the worker runtime is asked for a short name in one read-only turn, falling back to a condensed
+version of the task when it is unavailable or unhelpful. Set `ACR_NO_AUTO_BRANCH_NAME=1` to skip that
+extra call and always condense locally. That branch is what you merge or open a PR from; `acr rooms close`
 removes the worktree and keeps the branch.
 
 Pass `--no-worktree` to work in the checkout instead (useful with submodules or tooling that dislikes

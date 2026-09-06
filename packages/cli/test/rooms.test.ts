@@ -41,6 +41,8 @@ function repo(): string {
 beforeEach(() => {
   config = useTempConfigDir();
   process.env.ACR_NO_TURN_LOG = '1';
+  // As in run.test.ts: the branch-naming turn would eat a scripted echo turn.
+  process.env.ACR_NO_AUTO_BRANCH_NAME = '1';
   store = RoomStore.open();
   resetEchoAdapter();
   stdout = [];
@@ -56,6 +58,7 @@ afterEach(() => {
   store.close();
   delete process.env.ACR_ECHO_SCRIPT;
   delete process.env.ACR_NO_TURN_LOG;
+  delete process.env.ACR_NO_AUTO_BRANCH_NAME;
   for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
   resetEchoAdapter();
   config.restore();

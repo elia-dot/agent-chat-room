@@ -5,6 +5,8 @@ import { access, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute } from 'node:path';
 
 import { adapters as defaultAdapters } from '../adapters/index.js';
+import type { BranchNamer } from '../branchName.js';
+import { condenseSlug } from '../branchName.js';
 import type { LoadedRepoConfig } from '../config.js';
 import { loadRepoConfig, resolveRoomDefaults } from '../config.js';
 import type { CreatePrResult, GhRunner } from '../gh.js';
@@ -45,6 +47,12 @@ export interface RoomEngineOptions {
   /** Per-turn stall timeout. */
   timeoutMs?: number;
   lock?: AcquireLockOptions;
+  /**
+   * Asked for the branch slug when a room is opened without a title. Absent by default –
+   * the engine then condenses the task locally – so no caller pays for a naming turn it did
+   * not opt into. `agentBranchNamer` is the real implementation.
+   */
+  branchNamer?: BranchNamer;
 }
 
 export interface CreateRoomInput {
@@ -369,7 +377,16 @@ export class RoomEngine {
     let baseSha = mainSha;
 
     if (useWorktree) {
-      const slug = await uniqueSlug(repoRoot, title, roomId.replace(/-/g, ''));
+      const slugSource = await branchSlugSource({
+        task,
+        title,
+        titled: Boolean(input.title?.trim()),
+        repoRoot,
+        adapter: registry[roster[0]!.runtime]!,
+        model: roster[0]!.model,
+        ...(opts.branchNamer ? { namer: opts.branchNamer } : {}),
+      });
+      const slug = await uniqueSlug(repoRoot, slugSource, roomId.replace(/-/g, ''));
       roomBranch = branchFor(slug);
       const worktree = await createWorktree({
         repoRoot,
@@ -1676,6 +1693,37 @@ export class RoomEngine {
       }
     }
   }
+}
+
+/**
+ * What `acr/<slug>` is built from.
+ *
+ * A title the human typed wins, unchanged and with no extra latency. Without one the task
+ * itself is a poor branch name – it is usually a paragraph – so the room's first runtime is
+ * asked for a short one, and anything short of a usable answer falls back to condensing the
+ * task locally. `uniqueSlug` still owns slugification, the length cap and collisions.
+ */
+async function branchSlugSource(ctx: {
+  task: string;
+  title: string;
+  /** Whether `title` came from the human rather than from the task's first line. */
+  titled: boolean;
+  repoRoot: string;
+  adapter: AgentAdapter;
+  model: string | null;
+  namer?: BranchNamer;
+}): Promise<string> {
+  if (ctx.titled) return ctx.title;
+  const named = ctx.namer
+    ? await ctx.namer({
+        task: ctx.task,
+        title: ctx.title,
+        repoRoot: ctx.repoRoot,
+        adapter: ctx.adapter,
+        ...(ctx.model ? { model: ctx.model } : {}),
+      })
+    : null;
+  return named || condenseSlug(ctx.task);
 }
 
 /** The first line of the task, trimmed to something that reads as a room name. */
