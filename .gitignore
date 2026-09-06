@@ -7,3 +7,4 @@ coverage/
 .acr-tmp/
 .DS_Store
 *.log
+.codegraph/
