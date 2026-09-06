@@ -6,6 +6,8 @@ import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { echoAdapter, resetEchoAdapter } from '../../src/adapters/echo.js';
+import type { BranchNameContext, BranchNamer } from '../../src/branchName.js';
+import { condenseSlug } from '../../src/branchName.js';
 import { claudeAdapter, buildClaudeArgs } from '../../src/adapters/claude.js';
 import { codexAdapter, buildCodexPrompt } from '../../src/adapters/codex.js';
 import { cursorAdapter, buildCursorPrompt } from '../../src/adapters/cursor.js';
@@ -821,5 +823,96 @@ describe('RoomEngine interactivity, the part the browser needs', () => {
     expect(readFileSync(join(engine.room.worktreePath!, 'math.js'), 'utf8')).toBe(FIXED);
 
     await expect(engine.run({ directTurn: 'gemini' })).rejects.toThrow(/nobody called "gemini"/);
+  });
+});
+
+describe('RoomEngine branch naming', () => {
+  const LONG_TASK =
+    'right now the name of the branch created in build room is the entire task text, ' +
+    'it should be either the title, or a short summary';
+
+  /** Records what the namer was asked, so a test can assert it was not asked at all. */
+  function namer(answer: string | null | Promise<never>): {
+    calls: BranchNameContext[];
+    fn: BranchNamer;
+  } {
+    const calls: BranchNameContext[] = [];
+    return {
+      calls,
+      fn: (ctx) => {
+        calls.push(ctx);
+        return answer instanceof Promise ? answer : Promise.resolve(answer);
+      },
+    };
+  }
+
+  it('names the branch from the title, without asking a runtime', async () => {
+    const dir = repo();
+    const spy = namer('never-used');
+    const engine = await RoomEngine.create(
+      { task: LONG_TASK, cwd: dir, agents: ['echo', 'echo'], title: 'Shorten room branches' },
+      { ...engineOptions(), branchNamer: spy.fn },
+    );
+
+    expect(engine.room.roomBranch).toBe('acr/shorten-room-branches');
+    expect(spy.calls).toHaveLength(0);
+  });
+
+  it('asks the first runtime for a name when the room has no title', async () => {
+    const dir = repo();
+    const spy = namer('fix-flaky-login');
+    const engine = await RoomEngine.create(
+      { task: LONG_TASK, cwd: dir, agents: ['echo', 'echo2'], modelWorker: 'opus' },
+      { ...engineOptions(), branchNamer: spy.fn },
+    );
+
+    expect(engine.room.roomBranch).toBe('acr/fix-flaky-login');
+    expect(engine.room.slug).toBe('fix-flaky-login');
+    expect(gitIn(engine.room.worktreePath!, 'branch', '--show-current')).toBe(
+      'acr/fix-flaky-login',
+    );
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0]!.adapter.id).toBe('echo');
+    expect(spy.calls[0]!.model).toBe('opus');
+    expect(spy.calls[0]!.task).toBe(LONG_TASK);
+    // The room itself is still titled after the task, as it always was.
+    expect(engine.room.title).toContain('right now the name of the branch');
+  });
+
+  it('condenses the task when the namer has nothing to offer', async () => {
+    const dir = repo();
+    const spy = namer(null);
+    const engine = await RoomEngine.create(
+      { task: LONG_TASK, cwd: dir, agents: ['echo', 'echo'] },
+      { ...engineOptions(), branchNamer: spy.fn },
+    );
+
+    expect(engine.room.roomBranch).toBe(`acr/${condenseSlug(LONG_TASK)}`);
+    expect(engine.room.roomBranch.length).toBeLessThan(`acr/${LONG_TASK}`.length);
+    expect(gitIn(engine.room.worktreePath!, 'branch', '--show-current')).toBe(
+      engine.room.roomBranch,
+    );
+  });
+
+  it('condenses the task when no namer is injected at all', async () => {
+    const dir = repo();
+    const engine = await RoomEngine.create(
+      { task: LONG_TASK, cwd: dir, agents: ['echo', 'echo'] },
+      engineOptions(),
+    );
+
+    expect(engine.room.roomBranch).toBe(`acr/${condenseSlug(LONG_TASK)}`);
+  });
+
+  it('does not ask for a name when the room has no branch of its own', async () => {
+    const dir = repo();
+    const spy = namer(null);
+    const engine = await RoomEngine.create(
+      { task: LONG_TASK, cwd: dir, agents: ['echo', 'echo'], worktree: false },
+      { ...engineOptions(), branchNamer: spy.fn },
+    );
+
+    expect(engine.room.roomBranch).toBe('main');
+    expect(spy.calls).toHaveLength(0);
   });
 });

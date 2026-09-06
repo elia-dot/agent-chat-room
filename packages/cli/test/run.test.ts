@@ -37,6 +37,10 @@ function repo(files: Record<string, string> = { 'math.js': BROKEN }): string {
 beforeEach(() => {
   config = useTempConfigDir();
   process.env.ACR_NO_TURN_LOG = '1';
+  // `acr run` asks the worker runtime to name the branch when no --title is given. Left on,
+  // that turn would consume a scripted echo turn in every case below; the branch these tests
+  // assert on is the condensed-task fallback, which is what a real run gets without a runtime.
+  process.env.ACR_NO_AUTO_BRANCH_NAME = '1';
   store = RoomStore.open();
   resetEchoAdapter();
 });
@@ -45,6 +49,7 @@ afterEach(() => {
   store.close();
   delete process.env.ACR_ECHO_SCRIPT;
   delete process.env.ACR_NO_TURN_LOG;
+  delete process.env.ACR_NO_AUTO_BRANCH_NAME;
   for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
   resetEchoAdapter();
   config.restore();
@@ -85,7 +90,8 @@ describe('acr run, driving the room engine', () => {
     expect(summary.rounds).toBe(1);
     expect(summary.state).toBe('approved');
     expect(summary.changedFiles).toEqual(['math.js']);
-    expect(summary.branch).toMatch(/^acr\//);
+    // The branch is named from the task, not the whole task text.
+    expect(summary.branch).toBe('acr/fix-add');
     expect(summary.commit).toBeTruthy();
 
     // The room edited its worktree, not the repo the human is standing in.

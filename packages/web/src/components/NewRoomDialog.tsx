@@ -169,7 +169,9 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const tints = agentTints(agents);
   const workers = mode === 'build-review' ? Math.min(agents.length, 1) : 0;
   const rest = agents.length - workers;
-  const slug = title.trim() || task.trim().split('\n')[0] || 'room';
+  // Without a title the branch is named by the worker runtime at creation time, so the
+  // only honest preview is that it will be named from the task.
+  const branchHint = title.trim() ? `acr/${slugify(title.trim())}` : 'acr/<named from your task>';
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-6">
@@ -419,7 +421,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 className={`block font-mono text-[11px] ${worktree ? 'text-question' : 'text-ink-faint'}`}
               >
                 {worktree
-                  ? `isolated branch acr/${slugify(slug)} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
+                  ? `isolated branch ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
                   : 'default · agents use your main checkout, including its installed dependencies and build artifacts'}
               </span>
             </span>

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { RoomStore } from '@agent-chat-room/core';
+import { RoomStore, agentBranchNamer } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
 
 import { createApp } from './app.js';
@@ -50,7 +50,8 @@ export interface RunningServer {
 export async function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   const store = opts.store ?? new RoomStore();
   const ownsStore = opts.store === undefined;
-  const supervisor = new RoomSupervisor({ store });
+  // Rooms opened without a title get their branch name from the worker runtime.
+  const supervisor = new RoomSupervisor({ store, engine: { branchNamer: agentBranchNamer } });
   const webRoot = opts.webRoot === false ? undefined : (opts.webRoot ?? defaultWebRoot());
   const token =
     opts.token === false
