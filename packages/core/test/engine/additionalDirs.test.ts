@@ -243,6 +243,29 @@ describe('read-only additional folders', () => {
     await expect(open(dir, [dir])).rejects.toThrow(/keeps the agents out of/);
   });
 
+  it('refuses a folder that contains the room repo, not only one inside it', async () => {
+    // The containment test used to look only downwards. Granting an *ancestor* was accepted,
+    // which is the worse half of the same hole: that folder contains the checkout, so every
+    // agent gets write access to the tree the worktree exists to protect – and since the
+    // parent is usually not a repository itself, `additionalRepos` then drops it, so nothing
+    // is diffed, committed or reverted there either. Silent, total access.
+    const dir = repo({ 'math.js': BROKEN });
+    const parent = dirname(dir);
+
+    await expect(open(dir, [parent])).rejects.toThrow(/overlaps/);
+    await expect(open(dir, [{ path: parent, access: 'read' }])).rejects.toThrow(/overlaps/);
+  });
+
+  it('still accepts a sibling folder, which overlaps nothing', async () => {
+    // The guard has to refuse containment, not proximity: the ordinary case is another
+    // repository next door, and that must keep working.
+    const dir = repo({ 'math.js': BROKEN });
+    const sibling = repo({ 'auth.js': APP_BEFORE });
+
+    const engine = await open(dir, [sibling]);
+    expect(engine.room.additionalDirs.map((d) => d.path)).toEqual([sibling]);
+  });
+
   it('drops, rather than refuses, a grant for the folder the room already works in', async () => {
     // Without a worktree the checkout *is* the workspace, so naming it as an extra folder
     // is redundant, not an escalation: its changes are already in the room's diff and

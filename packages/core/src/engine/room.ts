@@ -171,6 +171,15 @@ export async function validateAdditionalDirs(
   const guarded = await canonicalise(owned.guarded);
   const under = (path: string, root: string | undefined): boolean =>
     root !== undefined && (path === root || path.startsWith(`${root}/`));
+  /**
+   * Containment in *either* direction. Checking only downwards misses the worse half: a
+   * grant for an ancestor of the room's own tree (`/Users/me` when the repo is
+   * `/Users/me/proj`) contains the checkout, hands every agent write access to it, and –
+   * because that parent is usually not a repository itself – is then dropped by
+   * `additionalRepos`, so nothing is diffed, committed or reverted there either.
+   */
+  const overlaps = (path: string, root: string | undefined): boolean =>
+    under(path, root) || (root !== undefined && under(root, path));
 
   const result: AdditionalDir[] = [];
   const seen = new Set<string>();
@@ -193,10 +202,10 @@ export async function validateAdditionalDirs(
       if (err instanceof EngineError) throw err;
       throw new EngineError(`additional folder does not exist or cannot be read: "${path}"`);
     }
-    if (under(canonical, guarded)) {
+    if (overlaps(canonical, guarded)) {
       throw new EngineError(
-        `"${path}" is inside ${guarded}, the checkout this room's worktree keeps the agents ` +
-          'out of. Granting it back would undo that isolation, so it is refused rather than ' +
+        `"${path}" overlaps ${guarded}, the checkout this room's worktree keeps the agents ` +
+          'out of. Granting it would undo that isolation, so it is refused rather than ' +
           'quietly accepted.',
       );
     }
@@ -204,6 +213,16 @@ export async function validateAdditionalDirs(
     // in the room's diff, and collecting them again would commit them twice. Redundant, not
     // dangerous – so it is dropped without ceremony.
     if (under(canonical, workspace)) continue;
+    // Containing it is a different thing entirely: broader than the room's own tree rather
+    // than a subset of it, so it cannot just be dropped as a duplicate, and accepting it
+    // would put the room's own repository inside an additional folder.
+    if (overlaps(canonical, workspace)) {
+      throw new EngineError(
+        `"${path}" contains ${workspace}, which is where this room already works. Grant the ` +
+          'folders beside it rather than the one above it, or the room would collect and ' +
+          'commit its own changes twice.',
+      );
+    }
     // A read grant is enforced by reverting the folder's repository after each turn. With
     // no repository there is nothing to revert against, and a grant the room cannot keep
     // is worse than one it refuses.
@@ -719,7 +738,22 @@ export class RoomEngine {
     this.stopping = false;
     this.stopReason = undefined;
     if (!(await this.ensureSetup())) return this.outcome({});
-    if (opts.directTurn) return await this.runDirectTurn(opts.directTurn);
+    // Both of these used to return before the guarded loop below, so a throw inside either
+    // escaped `run()` with the room still `running` – the exact state the round guard
+    // exists to prevent, reachable through two of the three ways a room can be driven.
+    if (opts.directTurn) {
+      // Resolved before the guard, not inside it: naming somebody who is not in the room is
+      // the caller's mistake and has to stay a thrown `EngineError`. Nothing has started at
+      // this point, so there is nothing to abort and no room to hand back.
+      const runtime = this.requireParticipant(opts.directTurn).runtime;
+      try {
+        return await this.runDirectTurn(runtime);
+      } catch (err) {
+        // A direct turn is a side conversation rather than a round: it consumes no round,
+        // so nothing is rewound and no transcript is deleted. Only the room is handed back.
+        return this.abortWithoutRound(err);
+      }
+    }
     if (this.roomRow.mode === 'brainstorm') return await this.runBrainstormRounds();
 
     let lastError: string | undefined;
@@ -774,6 +808,19 @@ export class RoomEngine {
   }
 
   /**
+   * A direct turn that threw. There is no round to rewind – a side conversation consumes
+   * none – so this only stops what is still running and hands the room back, rather than
+   * deleting a round of transcript the direct turn did not create.
+   */
+  private abortWithoutRound(err: unknown): RoomOutcome {
+    const error = err instanceof Error ? err.message : String(err);
+    for (const handle of this.active) handle.cancel(`turn aborted: ${error}`);
+    this.system(`the turn was aborted: ${error}`);
+    this.setState(this.stopping ? 'stopped' : 'needs-you');
+    return this.outcome({ error });
+  }
+
+  /**
    * A round that threw rather than failed. Cancel whatever is still running, tell the
    * transcript, and hand the room over: the round counter rewinds so the human's Continue
    * retries it, the same as a failed worker turn.
@@ -781,11 +828,22 @@ export class RoomEngine {
   private abortRound(round: number, err: unknown): { done: boolean; error: string } {
     const error = err instanceof Error ? err.message : String(err);
     for (const handle of this.active) handle.cancel(`round ${round} aborted: ${error}`);
-    this.system(`round ${round} aborted: ${error}`, round);
     if (this.stopping) {
+      this.system(`round ${round} aborted: ${error}`, round);
       this.setState('stopped');
     } else {
+      // Drop the half-finished round before rewinding, exactly as `recover()` does for a
+      // round that died with its process. A round aborted in `waiting-reviews` has already
+      // posted the worker's message and any review that did finish; leaving those behind
+      // means Continue re-runs round N and the transcript ends up holding two of each.
+      //
+      // The watermarks those turns advanced are left alone on purpose: `messagesAfter`
+      // COALESCEs an id it can no longer find to -1, so a participant whose watermark
+      // pointed into the deleted round is simply shown the transcript again.
+      this.store.deleteMessagesFromRound(this.roomRow.id, round);
       this.roomRow = this.store.updateRoom(this.roomRow.id, { round: round - 1 });
+      // Said after the delete, so the explanation is not swept away with the round.
+      this.system(`round ${round} aborted: ${error}`, round);
       this.setState('needs-you');
     }
     return { done: true, error };
@@ -892,10 +950,7 @@ export class RoomEngine {
    * read-only turn changes nothing there is a diff of.
    */
   private async runDirectTurn(runtime: string): Promise<RoomOutcome> {
-    const participant = this.participants.find((p) => p.runtime === runtime);
-    if (!participant) {
-      throw new EngineError(`nobody called "${runtime}" is in this room`);
-    }
+    const participant = this.requireParticipant(runtime);
 
     // A direct turn is a side conversation, not a review cycle, so it does not consume a
     // round. Round 0 only happens before the loop has run at all.
@@ -1015,7 +1070,14 @@ export class RoomEngine {
         break;
       }
 
-      const result = await this.runBrainstormRound(round);
+      let result: { done: boolean; error?: string };
+      try {
+        result = await this.runBrainstormRound(round);
+      } catch (err) {
+        // Same guard the build loop has: a phase that throws aborts its round instead of
+        // stranding the room in `running`.
+        result = this.abortRound(round, err);
+      }
       if (result.error) lastError = result.error;
       if (result.done) break;
     }
@@ -1062,7 +1124,12 @@ export class RoomEngine {
       watermark: this.store.latestMessageId(this.roomRow.id),
     }));
 
-    const results = await Promise.all(
+    // `allSettled` for the same reason the reviewer fan-out uses it: one speaker's crash
+    // must not abandon the others mid-turn with their CLIs still running, and with
+    // `Promise.all` their rejections would go unobserved – which Node answers by killing
+    // the process. The first rejection is rethrown once every turn has ended, and the
+    // brainstorm loop turns that into an aborted round.
+    const settled = await Promise.allSettled(
       requests.map(async ({ participant, newMessages, watermark }) => {
         const turn = await this.runParticipantTurn(participant, {
           round,
@@ -1075,6 +1142,9 @@ export class RoomEngine {
         return { participant, result: turn.result };
       }),
     );
+    const rejection = settled.find((entry) => entry.status === 'rejected');
+    if (rejection && rejection.status === 'rejected') throw rejection.reason;
+    const results = settled.flatMap((entry) => (entry.status === 'fulfilled' ? [entry.value] : []));
 
     const failed = results.filter((r) => !r.result.ok);
     for (const { participant, result } of failed) {
@@ -1887,6 +1957,13 @@ export class RoomEngine {
     } catch {
       return undefined;
     }
+  }
+
+  /** The participant with this runtime id, or the caller's mistake said out loud. */
+  private requireParticipant(runtime: string): Participant {
+    const participant = this.participants.find((p) => p.runtime === runtime);
+    if (!participant) throw new EngineError(`nobody called "${runtime}" is in this room`);
+    return participant;
   }
 
   private requireWorker(): Participant {
