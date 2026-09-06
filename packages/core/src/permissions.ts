@@ -84,6 +84,42 @@ export function agyPermissionArgs(permission: Permission): string[] {
   }
 }
 
+/**
+ * opencode. The odd one out: `opencode run` has no permission flags at all, so this table
+ * returns the `permission` block of a config document rather than argv. The adapter hands
+ * it over in `OPENCODE_CONFIG_CONTENT`, which is why it is a plain object here.
+ *
+ * Each row probed against opencode 1.18.20 by asking one turn to write a file *and* run a
+ * shell command in a throwaway directory:
+ *
+ *  - `deny` does not merely refuse a call, it removes the tool from the model's toolset:
+ *    the probe answered "Model tried to call unavailable tool 'write'. Available tools:
+ *    glob, grep, invalid, read, ..." and nothing reached disk.
+ *  - the default with no config at all is `allow` for *both* edit and bash, so a turn that
+ *    forgets this table is a `full` turn. Every level therefore states its denials
+ *    explicitly rather than relying on a safe default, because there isn't one.
+ *  - `edits` denies bash for the same reason Antigravity's `accept-edits` does: a worker
+ *    that may edit is not automatically a worker that may run your shell.
+ *
+ * Two precedence facts this relies on, both probed rather than assumed:
+ *  - `--auto` does *not* override a `deny`. With `edit: deny` and `--auto` together the
+ *    write tool was still absent. The adapter passes `--auto` at every level so a turn can
+ *    never block on an approval prompt nobody is there to answer, and these denials still
+ *    hold the line.
+ *  - `OPENCODE_CONFIG_CONTENT` beats the target repo's own `opencode.json`. A repo that
+ *    sets `permission.edit: "allow"` cannot talk a `read-only` reviewer into writing.
+ */
+export function opencodePermissionConfig(permission: Permission): Record<string, string> {
+  switch (permission) {
+    case 'read-only':
+      return { edit: 'deny', bash: 'deny', webfetch: 'deny' };
+    case 'edits':
+      return { edit: 'allow', bash: 'deny', webfetch: 'deny' };
+    case 'full':
+      return { edit: 'allow', bash: 'allow', webfetch: 'allow' };
+  }
+}
+
 /** True when a permission level lets the runtime modify the working tree. */
 export function canWrite(permission: Permission): boolean {
   return permission !== 'read-only';

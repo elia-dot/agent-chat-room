@@ -22,6 +22,7 @@ const RUNTIME_COLOR: Record<string, number> = {
   codex: 42,
   cursor: 39,
   antigravity: 141,
+  opencode: 79,
   echo: 245,
 };
 

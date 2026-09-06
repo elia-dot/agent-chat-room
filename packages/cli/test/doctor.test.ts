@@ -48,6 +48,7 @@ describe('acr doctor', () => {
       'codex',
       'cursor',
       'antigravity',
+      'opencode',
       'echo',
     ]);
     expect(payload.runtimes.every((r) => r.installed === false)).toBe(true);

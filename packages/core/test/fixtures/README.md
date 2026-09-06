@@ -12,6 +12,8 @@ event shapes, one of these tests fails instead of a room silently going quiet.
 | `cursor_run.jsonl` | Cursor Agent | 2026.07.23 | `cursor-agent -p --output-format stream-json --stream-partial-output --mode ask --sandbox enabled --trust` |
 | `agy_run.jsonl` | Antigravity | 1.1.26 | `agy --output-format stream-json --input-format stream-json --disable-slash-commands --add-dir <dir> --print-timeout 300s --sandbox -p=` |
 | `agy_failed.jsonl` | Antigravity | 1.1.26 | same, plus `--model no-such-model-xyz` to force a real `ERROR` result |
+| `opencode_run.jsonl` | opencode | 1.18.20 | `opencode run --format json --auto -m opencode/mimo-v2.5-free`, with `OPENCODE_CONFIG_CONTENT={"permission":{"edit":"deny","bash":"deny","webfetch":"deny"}}` |
+| `opencode_failed.jsonl` | opencode | 1.18.20 | same, plus `-m opencode/does-not-exist-xyz` to force a real `error` event |
 | `claude_noise.jsonl` | hand written | - | events an adapter must survive rather than parse |
 
 All of them come from a throwaway repo containing a single `math.js` whose `add()` subtracts.
@@ -31,11 +33,30 @@ in it are worth reading before touching the parser – the closing `DONE` of an 
 step carries a `text_delta` too (so deltas have to be taken from both states to reassemble the
 message), and `result.usage` is cumulative for the whole run rather than for the last step.
 
+`opencode_run.jsonl` is the reviewer exercise once more, recorded live on 2026-09-06. Three things
+in it are worth reading before touching the parser. It is the only fixture whose events all carry a
+top-level `sessionID`, so the session is known from the first line rather than from an init event.
+Its `text` events are whole message parts rather than deltas – a separate probe that asked for the
+numbers 1 to 10 produced one event holding all ten lines – so the parser joins parts rather than
+concatenating characters. And `step_finish.part.tokens` is per step, not cumulative, which is why
+usage is added up across the three steps instead of read from the last one.
+
+The denied `bash` call in it is the recorded proof that `permission: deny` withholds a tool rather
+than refusing it: opencode reports the attempt as a synthetic tool named `invalid` whose `input`
+names the tool it wanted. It was recorded with `--auto` *and* the denials in place, which is the
+evidence that `--auto` cannot override a `deny`.
+
+`opencode_failed.jsonl` is the one recording here that documents a limitation rather than a shape:
+opencode answers an unusable model with a generic `UnknownError` / "Unexpected server error",
+indistinguishable from a gateway outage, so `modelHint.ts` cannot tell the user their `-m` was the
+problem. If a future release names the model, the test pinning that silence fails and tells us.
+
 The `system/init` event in `claude_run.jsonl` has had the recording machine's tool list, MCP
 servers, skills and home path replaced with neutral values. `cursor_run.jsonl` has had its
 session id, request id and recording path replaced the same way. `agy_run.jsonl` has had its
 `init` tool list narrowed to a neutral set, and its conversation id, recording path and the
-username inside a shell tool's output replaced. Nothing a parser looks at was
+username inside a shell tool's output replaced. Both `opencode` fixtures have had their session id
+and recording path replaced, and `opencode_failed.jsonl` its error `ref`. Nothing a parser looks at was
 touched; the point is that a fixture should not publish whatever the person who recorded it
 happened to have connected.
 

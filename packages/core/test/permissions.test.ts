@@ -8,6 +8,7 @@ import {
   codexPermissionArgs,
   cursorPermissionArgs,
   isPermission,
+  opencodePermissionConfig,
 } from '../src/permissions.js';
 
 describe('the permission table', () => {
@@ -17,6 +18,8 @@ describe('the permission table', () => {
       expect(codexPermissionArgs(level).length).toBeGreaterThan(0);
       expect(cursorPermissionArgs(level).length).toBeGreaterThan(0);
       expect(agyPermissionArgs(level).length).toBeGreaterThan(0);
+      // opencode expresses permission as config rather than argv, so it is keys not flags.
+      expect(Object.keys(opencodePermissionConfig(level)).length).toBeGreaterThan(0);
     }
   });
 
@@ -42,6 +45,29 @@ describe('the permission table', () => {
     expect(agyPermissionArgs('read-only')).not.toContain('--dangerously-skip-permissions');
     expect(agyPermissionArgs('edits')).not.toContain('--dangerously-skip-permissions');
     expect(agyPermissionArgs('full')).toContain('--dangerously-skip-permissions');
+    // Probed against opencode 1.18.20. `deny` does not just refuse a call, it withholds the
+    // tool: the probe answered "Model tried to call unavailable tool 'write'" and nothing
+    // reached disk. This is also the level that must survive `--auto`, which the adapter
+    // passes at every level so a headless turn cannot block on an approval prompt.
+    expect(opencodePermissionConfig('read-only')).toEqual({
+      edit: 'deny',
+      bash: 'deny',
+      webfetch: 'deny',
+    });
+    // A worker that may edit is still not a worker that may run your shell, exactly as with
+    // Antigravity's `accept-edits`.
+    expect(opencodePermissionConfig('edits').edit).toBe('allow');
+    expect(opencodePermissionConfig('edits').bash).toBe('deny');
+    expect(opencodePermissionConfig('full').bash).toBe('allow');
+    // Every level states its denials outright: with no config at all opencode allows both
+    // edit and bash, so there is no safe default to fall back on.
+    for (const level of PERMISSION_LEVELS) {
+      expect(Object.keys(opencodePermissionConfig(level)).sort()).toEqual([
+        'bash',
+        'edit',
+        'webfetch',
+      ]);
+    }
     expect(canWrite('read-only')).toBe(false);
     expect(canWrite('edits')).toBe(true);
     expect(canWrite('full')).toBe(true);

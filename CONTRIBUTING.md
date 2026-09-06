@@ -54,7 +54,13 @@ export interface AgentAdapter {
 ### Reference Implementations
 
 - **`echo.ts`** ([`packages/core/src/adapters/echo.ts`](packages/core/src/adapters/echo.ts)): The mock adapter used for hermetic testing. It demonstrates handling turns, emitting lifecycle events, reading prompt headers, and creating mock files.
-- **`claude.ts`**, **`codex.ts`**, **`cursor.ts`**, **`antigravity.ts`**: Production adapters driving real CLIs.
+- **`claude.ts`**, **`codex.ts`**, **`cursor.ts`**, **`antigravity.ts`**, **`opencode.ts`**: Production adapters driving real CLIs.
+
+### Adding a Runtime
+
+Registering one is a single line in [`packages/core/src/adapters/index.ts`](packages/core/src/adapters/index.ts) plus a file next to it. Everything downstream is data-driven off `adapterList`: the web model picker, `GET /api/runtimes` and `acr doctor` all pick a new runtime up without changes. In practice a new adapter also wants a permission mapping in [`permissions.ts`](packages/core/src/permissions.ts), a colour in `packages/cli/src/render.ts`, and a recorded JSONL fixture under [`packages/core/test/fixtures`](packages/core/test/fixtures) so a CLI that changes its event shapes fails a test instead of silently going quiet.
+
+Probe the real CLI rather than trusting `--help`, and write down what you found: every permission row in `permissions.ts` records an actual probe, because the difference between a flag that refuses a write and one that merely says it will is the difference between a reviewer that can be trusted and one that cannot. `opencode.ts` is the adapter to copy when a runtime expresses permissions as configuration instead of flags; `cursor.ts` when it has no system-prompt flag; `codex.ts` when resuming uses a different subcommand.
 
 ---
 

@@ -26,7 +26,7 @@ M4 brings complete production-readiness and the next-generation feature set:
 - **Interrupt any time.** Posting a message holds the loop and points the next turn at whoever you
   `@mention`; Continue picks the round loop back up.
 - **macOS notifications** when a room reaches `approved` or `needs-you` (`ACR_NO_NOTIFY=1` to skip).
-- **Adapters** for Claude Code, Codex CLI, Cursor Agent and Antigravity: `detect()`, argv
+- **Adapters** for Claude Code, Codex CLI, Cursor Agent, Antigravity and opencode: `detect()`, argv
   building, streaming `run()`, session resume, and a permission model with exactly three levels
   (`read-only`, `edits`, `full`).
 - **Autonomous Setup & Test Gatekeeper.** Runs `.acr.json` `setup` hooks in fresh worktrees, and runs
@@ -172,8 +172,8 @@ same step, so there is never briefly more than one writer.
 Sessions are kept, which is the point of swapping rather than opening a new room. That does
 mean a swapped agent's session still remembers being the other role, so the engine prepends a
 "your role has changed" block to its next prompt: Claude would notice on its own through
-`--append-system-prompt`, but Codex, Cursor and Antigravity only see role instructions on the
-first prompt of a session.
+`--append-system-prompt`, but Codex, Cursor, Antigravity and opencode only see role instructions
+on the first prompt of a session.
 
 ### Commit, Open PR, Export
 
@@ -328,6 +328,15 @@ Every adapter maps the engine's 3 permission tiers to CLI flags:
 | Codex CLI    | `codex`       | `-s read-only`                                  | `-s workspace-write`            | `--dangerously-bypass-approvals-and-sandbox` |
 | Cursor Agent | `cursor`      | `--mode ask --sandbox enabled --trust`          | `--trust`                       | `--force --trust`                            |
 | Antigravity  | `antigravity` | `--sandbox`                                     | `--mode accept-edits`           | `--dangerously-skip-permissions`             |
+| opencode     | `opencode`    | `permission.edit/bash: deny`                    | `edit: allow`, `bash: deny`     | `edit/bash: allow`                           |
+
+opencode is the one runtime with no permission flags at all, so its row is the `permission`
+block of a config document handed over in `OPENCODE_CONFIG_CONTENT` rather than argv. Two
+things make that safe, both probed rather than assumed: `deny` withholds the tool from the
+model instead of merely refusing the call, and the environment beats the target repo's own
+`opencode.json`, so a repository cannot widen the permission level of a room pointed at it.
+Note also that with no config at all opencode allows both edits and shell, so every level
+states its denials outright – there is no safe default to fall back on.
 
 `packages/core/src/process/runTurn.ts` is the only place in the project that spawns an agent
 process, so adapters stay a pair of pure pieces: an argv builder and a stream parser.

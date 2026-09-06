@@ -4,6 +4,7 @@ import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { cursorAdapter } from './cursor.js';
 import { echoAdapter } from './echo.js';
+import { opencodeAdapter } from './opencode.js';
 
 export { claudeAdapter, ClaudeParser, buildClaudeArgs } from './claude.js';
 export {
@@ -30,6 +31,15 @@ export {
   buildAgyListModelsArgs,
   parseAgyModels,
 } from './antigravity.js';
+export {
+  opencodeAdapter,
+  OpencodeParser,
+  buildOpencodeArgs,
+  buildOpencodeEnv,
+  buildOpencodePrompt,
+  buildOpencodeListModelsArgs,
+  parseOpencodeModels,
+} from './opencode.js';
 export { echoAdapter, resetEchoAdapter, describeRequest } from './echo.js';
 export type { EchoScript, EchoTurn, EchoTurnSelector } from './echo.js';
 
@@ -45,6 +55,7 @@ export const adapters: Record<string, AgentAdapter> = {
   [codexAdapter.id]: codexAdapter,
   [cursorAdapter.id]: cursorAdapter,
   [antigravityAdapter.id]: antigravityAdapter,
+  [opencodeAdapter.id]: opencodeAdapter,
   [echoAdapter.id]: echoAdapter,
 };
 
@@ -54,6 +65,7 @@ export const adapterList: AgentAdapter[] = [
   codexAdapter,
   cursorAdapter,
   antigravityAdapter,
+  opencodeAdapter,
   echoAdapter,
 ];
 
