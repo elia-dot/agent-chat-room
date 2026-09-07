@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { EngineError } from '@agent-chat-room/core';
 import fastifyStatic from '@fastify/static';
@@ -21,7 +21,27 @@ import {
 import { ConflictError, type RoomSupervisor } from './supervisor.js';
 import { websocketRoute } from './ws.js';
 
-export const SERVER_VERSION = '0.0.0';
+function resolveVersion(): string {
+  const candidates = [
+    '../../package.json',
+    '../../../package.json',
+    '../../../../package.json',
+    '../package.json',
+  ];
+  for (const rel of candidates) {
+    try {
+      const content = readFileSync(new URL(rel, import.meta.url), 'utf8');
+      const parsed = JSON.parse(content) as { name?: string; version?: string };
+      if (parsed.name === 'agent-chat-room' && parsed.version) return parsed.version;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return process.env.npm_package_version ?? 'unknown';
+}
+
+/** The version `/api/health` reports. Read from the published root manifest, not hardcoded. */
+export const SERVER_VERSION = resolveVersion();
 
 /** The one API path the origin hook skips, because `verifyClient` guards it instead. */
 export const WS_PATH = '/api/ws';
