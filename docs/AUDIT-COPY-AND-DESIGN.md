@@ -196,6 +196,14 @@ colour code has no key at all.
 
 ### 2.3 Hold-to-confirm fires after you let go, and can fire more than once
 
+**Status: fixed.** `begin()` is guarded so at most one loop exists per press; teardown is
+split into `cancel` (used internally and on unmount) and `release` (bound to pointer/key
+up), with a `fired` ref between them so a hold longer than `HOLD_MS` cannot re-arm on the
+next key repeat and confirm twice; and the `keydown` handler calls `preventDefault()`. The
+description below is kept as the record of what was wrong. The four cases at the end of the section are the acceptance criteria; they have been
+reasoned through against the new code but not executed, because `packages/web` has no
+component test harness (see the note under case 4).
+
 `components/Confirm.tsx:24-62`. Holding Space or Enter fires `keydown` repeatedly, and
 each repeat calls `begin()`, which does two things: it resets `start.current` and it starts
 a fresh `requestAnimationFrame` loop, overwriting `frame.current` and orphaning the
@@ -232,9 +240,16 @@ Whatever the fix, it needs to be validated against all four cases, not just the 
 
 1. Hold past 900ms with the pointer → fires exactly once.
 2. Hold past 900ms with the keyboard, through key repeat → fires exactly once.
-3. **Release before 900ms → does not fire, then or later.** This is the case the current
-   code gets wrong, and the one a naive fix is most likely to leave broken.
+3. **Release before 900ms → does not fire, then or later.** This is the case the original
+   code got wrong, and the one a naive fix is most likely to leave broken.
 4. `pointerleave` mid-hold → same as 3.
+
+None of the four is covered by an automated test. `vitest.config.ts` runs the `web` project
+under Node rather than jsdom, and its `include` glob is `test/**/*.test.ts`, so there is no
+harness that can mount a component. Adding one means jsdom, a testing library, a `.tsx`
+glob and fake timers driving `requestAnimationFrame` – a reasonable thing to want, and a
+larger decision than this fix. Until then the gesture is verified by reading, which is
+exactly how the original defect survived.
 
 ### 2.4 No dialog semantics and no live regions anywhere
 

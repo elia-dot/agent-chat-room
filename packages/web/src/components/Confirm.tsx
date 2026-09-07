@@ -24,23 +24,48 @@ export function HoldToConfirm({
   const [progress, setProgress] = useState(0);
   const frame = useRef<number | null>(null);
   const start = useRef(0);
+  /** Set once a hold completes, cleared on release: one confirmation per press. */
+  const fired = useRef(false);
 
-  const stop = (): void => {
+  /** Tear down the loop. Used internally and on unmount; does not re-arm the gesture. */
+  const cancel = (): void => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = null;
     setProgress(0);
   };
 
-  useEffect(() => stop, []);
+  /** The pointer or key came up: tear down, and allow the next press to start a hold. */
+  const release = (): void => {
+    fired.current = false;
+    cancel();
+  };
 
+  useEffect(() => cancel, []);
+
+  /**
+   * At most one loop per press.
+   *
+   * Key repeat fires `keydown` every few tens of milliseconds while a key is held, and
+   * `begin` used to run on every one of them. Each repeat pushed `start.current` forward,
+   * so the bar never filled while you held, and orphaned the previous
+   * `requestAnimationFrame` loop behind the new one. Teardown cancels a single handle, so
+   * releasing the key left the orphans running: they crossed the threshold ~900ms *after*
+   * release and called `onConfirm()`, several of them in the same frame. Closing a room
+   * fired late, unattended, and more than once.
+   *
+   * `frame` keeps it to one loop, which makes `start.current` stable across repeats and
+   * makes teardown total. `fired` stops a hold longer than `HOLD_MS` from re-arming on the
+   * next repeat and confirming twice.
+   */
   const begin = (): void => {
-    if (disabled) return;
+    if (disabled || fired.current || frame.current !== null) return;
     start.current = performance.now();
     const tick = (): void => {
       const ratio = Math.min(1, (performance.now() - start.current) / HOLD_MS);
       setProgress(ratio);
       if (ratio >= 1) {
-        stop();
+        fired.current = true;
+        cancel();
         onConfirm();
         return;
       }
@@ -54,12 +79,16 @@ export function HoldToConfirm({
       type="button"
       disabled={disabled}
       onPointerDown={begin}
-      onPointerUp={stop}
-      onPointerLeave={stop}
+      onPointerUp={release}
+      onPointerLeave={release}
       onKeyDown={(e) => {
-        if (e.key === ' ' || e.key === 'Enter') begin();
+        if (e.key !== ' ' && e.key !== 'Enter') return;
+        // Space would otherwise scroll the overlay, and both keys synthesise a click on a
+        // button. The gesture is the hold, not the press.
+        e.preventDefault();
+        begin();
       }}
-      onKeyUp={stop}
+      onKeyUp={release}
       className="relative flex w-full items-center gap-2.5 overflow-hidden rounded px-1 py-1.5 text-left disabled:opacity-50"
     >
       <span className="text-[13.5px] text-error">{label}</span>
