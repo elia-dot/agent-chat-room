@@ -45,14 +45,30 @@ export function RoomsOverlay(props: RoomsOverlayProps): React.ReactElement {
   return (
     <Overlay title="Rooms" hint="⌘K" side="left" onClose={props.onClose}>
       <div className="flex flex-col gap-2">
-        <input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="filter rooms…"
-          aria-label="filter rooms"
-          className="w-full rounded border border-line bg-surface px-2.5 py-1.5 text-[13px] placeholder:text-ink-faint focus:border-line-strong"
-        />
+        {/* The list is the whole scroll container, so anything under it is a scroll away
+            once you have more than a screenful of rooms – and starting a room is the one
+            thing here that should never be. It sits beside the filter rather than above it
+            so the box `autoFocus` lands in stays where the eye already is. */}
+        <div className="flex gap-2">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="filter rooms…"
+            aria-label="filter rooms"
+            className="min-w-0 flex-1 rounded border border-line bg-surface px-2.5 py-1.5 text-[13px] placeholder:text-ink-faint focus:border-line-strong"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              props.onNewRoom();
+              props.onClose();
+            }}
+            className="shrink-0 rounded bg-ink px-3 py-1.5 font-mono text-[12px] text-ground"
+          >
+            + new room
+          </button>
+        </div>
         {repos.length > 1 && (
           <select
             value={repo}
@@ -106,17 +122,7 @@ export function RoomsOverlay(props: RoomsOverlayProps): React.ReactElement {
         ))}
       </ul>
 
-      <div className="mt-4 flex flex-col gap-2 border-t border-line pt-3">
-        <button
-          type="button"
-          onClick={() => {
-            props.onNewRoom();
-            props.onClose();
-          }}
-          className="w-full rounded bg-ink px-3 py-2 font-mono text-[12px] text-ground"
-        >
-          + new room
-        </button>
+      <div className="mt-4 border-t border-line pt-3">
         <div className="flex items-center justify-between px-1">
           <button
             type="button"
