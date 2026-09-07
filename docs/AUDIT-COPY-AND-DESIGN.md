@@ -3,7 +3,24 @@
 Scope: the web UI (`packages/web/src`) and the strings `acr` prints (`packages/cli/src`).
 Findings are ordered by consequence, not by file. Every one names the line it is about.
 
-Nothing in this document has been applied. It is a list of defects, not a changelog.
+**All findings below have been applied.** Line numbers therefore describe the code as it
+was when the audit was written, not as it is now; the descriptions are kept because the
+reasoning is the useful part, and because a fix is easier to review next to the defect it
+answers.
+
+Three things were deliberately left alone, and each is called out at the finding:
+
+- The capitalised destructive labels in `ActionsOverlay` (§1.7). The audit itself said the
+  emphasis may be deliberate, and it is the one place where breaking the lowercase voice
+  carries meaning.
+- The `ink-faint` contrast question (§2.8). It needs measured WCAG numbers, which this
+  environment could not produce, and demoting tokens on a guess would be worse than leaving
+  it flagged.
+- The em dash in `packages/core/src/export.ts:80`. It is in generated markdown rather than
+  interface copy, it was never in §1.5's scope, and `export.test.ts:128` pins it.
+
+One finding grew during implementation. §1.2 was reported as a dead ternary; the branch it
+was hiding turned out to say something false, which is recorded there.
 
 ---
 
@@ -33,7 +50,7 @@ Fix: pick one default, make `NewRoomDialog`'s initial state match `BUILTIN_DEFAU
 reword `main.ts:95` to "By default every room runs ... `--no-worktree` works in your
 checkout instead." Then reword the empty state to describe whichever default won.
 
-### 1.2 A ternary whose two branches are the same sentence
+### 1.2 A ternary whose two branches are the same sentence – and both were wrong
 
 `packages/web/src/components/Composer.tsx:184-188`
 
@@ -46,9 +63,23 @@ checkout instead." Then reword the empty state to describe whichever default won
 ```
 
 Someone intended the composer hint to differ while a turn is in flight and it never
-shipped. As written the `running` test is dead code. Either delete the branch or give the
-running case the line it was reaching for ("a turn is running – your message lands after
-it" would be the honest one, since `api.say` holds the loop).
+shipped. As written the `running` test is dead code.
+
+Fixing it turned up the larger problem: the sentence itself is false. `postUserMessage`
+(`packages/core/src/engine/room.ts:962`) ends with
+
+```ts
+this.roomRow = this.store.updateRoom(this.roomRow.id, { paused: true, nextSpeaker: next });
+```
+
+so sending a message *pauses the room*. The turn in flight finishes; the round after it
+does not start until you press continue. "The room keeps working" told the user the
+opposite of what the button they just pressed does, in both branches.
+
+Now: `sending holds the room after this turn – continue when you are ready` while running,
+and `your message picks who speaks next – continue to run it` when idle. The `offline`
+branch keeps its "the room keeps working", which is true there – the server is still going
+and it is the browser that lost the socket.
 
 ### 1.3 Backticks rendered as literal backticks
 
@@ -270,6 +301,33 @@ returns nothing.
 `role="alert"` on the banner, `role="status"` on the state bands, and `role="dialog"` +
 `aria-modal` + `aria-labelledby` on `Overlay` and `NewRoomDialog` cover most of this
 without restructuring anything.
+
+**The focus half of this is subtler than it looks**, and the first implementation got it
+wrong in a way worth writing down, because the obvious version of this hook is wrong.
+
+Saving the opener in a `useEffect` is too late. React implements `autoFocus` by calling
+`focus()` during the commit phase, and passive effects run after that, so in `RoomsOverlay`
+– the one modal with an `autoFocus` child – `document.activeElement` was already the
+overlay's own filter box. The hook recorded a node *inside* the modal as the opener, then
+moved focus off that box onto the panel. Two symptoms: ⌘K no longer let you type straight
+into the filter, and closing tried to restore focus to a node that no longer existed, which
+drops it to `<body>`.
+
+So the opener is captured during the first render, which is the last moment
+`activeElement` is still the control outside. Acquisition is conditional: take focus only
+if nothing inside the panel already has it.
+
+That is still not enough, because `StrictMode` is on (`main.tsx:16`). React double-invokes
+effects in development, and the simulated teardown runs the restore, handing focus back to
+the opener – so the re-run finds nothing focused inside and grabs the panel, defeating
+`autoFocus` again in dev only. The teardown therefore records which descendant held focus,
+and a remount restores that rather than taking the panel.
+
+Three cases to check by hand, since none of this is covered by a test:
+
+1. ⌘K, then type → the filter receives the keystrokes.
+2. ⌥R / ⌥A (no `autoFocus` inside) → the panel takes focus and Tab is trapped.
+3. Escape from any of them → focus returns to the control that was focused before it opened.
 
 ### 2.5 Focus is invisible on every text input
 

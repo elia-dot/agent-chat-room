@@ -155,6 +155,18 @@ function summarise(group: Group): string {
   return `${tally}${who}`;
 }
 
+/**
+ * The first 160 characters of a message, on one line, marked when there is more.
+ *
+ * Without the ellipsis a truncated line is indistinguishable from a message that simply
+ * ended there, which in a folded round is the difference between "they said this" and
+ * "they said this and more you cannot see".
+ */
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 160 ? `${flat.slice(0, 160).trimEnd()}…` : flat;
+}
+
 /** A folded round: who spoke and how they voted, one line each. */
 function FoldedMessage({
   message,
@@ -173,7 +185,7 @@ function FoldedMessage({
       </span>
       <span className={`shrink-0 font-mono text-[12px] ${tone.text}`}>{message.author}</span>
       <span className="min-w-0 flex-1 truncate text-[13px] text-ink-faint">
-        {message.text.replace(/\s+/g, ' ').slice(0, 160)}
+        {excerpt(message.text)}
       </span>
       {message.verdict && <VerdictPill decision={message.verdict.decision} size="digest" />}
     </div>

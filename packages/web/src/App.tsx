@@ -259,7 +259,11 @@ export function App(): React.ReactElement {
     ? {
         author: pending.author,
         action: pending.role === 'reviewer' ? 'reviewing' : 'writing',
-        elapsed: elapsedOf(view.turns, pending.author, now),
+        elapsed: elapsedOf(
+          view.turns,
+          view.participants.find((p) => p.runtime === pending.author)?.id,
+          now,
+        ),
       }
     : null;
 
@@ -463,15 +467,10 @@ export function App(): React.ReactElement {
           onContinue={() => void act(() => api.start(room.id))}
           onStop={() => void act(() => api.stop(room.id))}
           onCommit={() => void act(() => api.commit(room.id))}
+          // The confirmation lives in the overlay, in the app's own voice, rather than in a
+          // `window.confirm` the app cannot style or dismiss with its own Escape handling.
           onOpenPr={(remote) =>
             void act(async () => {
-              if (
-                !window.confirm(
-                  `Push ${room.roomBranch} to ${remote} and open a pull request into ${room.baseBranch}?\n\nThis is the only thing acr does that leaves your machine.`,
-                )
-              ) {
-                return;
-              }
               const { room: updated } = await api.openPr(room.id, { remote });
               store.merge({ room: updated });
             })
@@ -519,23 +518,42 @@ function Banner({
       ? 'border-error-line bg-error-bg text-error'
       : 'border-question-line bg-question-bg text-question';
   return (
-    <div className={`flex shrink-0 items-center gap-3 border-b px-4 py-1.5 text-[12px] ${style}`}>
+    <div
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={`flex shrink-0 items-center gap-3 border-b px-4 py-1.5 text-[12px] ${style}`}
+    >
       <span className="min-w-0 flex-1">{children}</span>
-      <button type="button" onClick={onDismiss} className="font-mono text-[11px] hover:underline">
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 rounded border border-current/40 px-2 py-0.5 font-mono text-[11px] hover:border-current"
+      >
         dismiss
       </button>
     </div>
   );
 }
 
-/** `m:ss` since the named runtime's newest unfinished turn started. */
+/**
+ * `m:ss` since the given participant's newest unfinished turn started.
+ *
+ * Which participant matters. In `waiting-reviews` several reviewer turns are open at once,
+ * and this used to ignore its author argument and return the newest open turn whatever it
+ * was, so the command bar paired one agent's name with another agent's clock. `TurnRecord`
+ * keys on the participant id rather than the runtime, so the caller resolves it.
+ *
+ * Falls back to the newest open turn when nothing matches, which is the reconnect case: the
+ * turn rows may not have arrived yet, and a slightly wrong clock beats a frozen `0:00`.
+ */
 function elapsedOf(
   turns: { participantId: string; startedAt: string; endedAt: string | null }[],
-  _author: string,
+  participantId: string | undefined,
   now: number,
 ): string {
   const open = turns.filter((t) => !t.endedAt);
-  const started = open.length > 0 ? Date.parse(open[open.length - 1]!.startedAt) : NaN;
+  const mine = open.filter((t) => t.participantId === participantId);
+  const from = mine.length > 0 ? mine : open;
+  const started = from.length > 0 ? Date.parse(from[from.length - 1]!.startedAt) : NaN;
   if (Number.isNaN(started)) return '0:00';
   const seconds = Math.max(0, Math.round((now - started) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;

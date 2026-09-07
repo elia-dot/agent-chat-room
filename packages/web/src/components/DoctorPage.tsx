@@ -26,60 +26,61 @@ export function DoctorPage({ onClose }: { onClose: () => void }): React.ReactEle
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl p-6">
         <header className="mb-4 flex items-center justify-between">
-          <h1 className="text-lg font-medium">Doctor</h1>
-          <button type="button" onClick={onClose} className="text-sm text-zinc-500 hover:underline">
+          <h1 className="font-mono text-[11px] tracking-[0.14em] text-ink-dim uppercase">Doctor</h1>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-line px-2 py-0.5 font-mono text-[11px] text-ink-dim hover:border-line-strong hover:text-ink"
+          >
             back to rooms
           </button>
         </header>
 
-        {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-        {!report && !error && <p className="text-sm text-zinc-500">detecting…</p>}
+        {error && <p className="text-[13px] text-error">{error}</p>}
+        {!report && !error && <p className="font-mono text-[11px] text-ink-faint">detecting…</p>}
 
         {report && (
           <>
-            <table className="w-full text-sm">
+            <table className="w-full text-[13px]">
               <thead>
-                <tr className="border-b border-zinc-200 text-left text-xs text-zinc-500 dark:border-zinc-800">
-                  <th className="py-1.5 font-medium">runtime</th>
-                  <th className="font-medium">installed</th>
-                  <th className="font-medium">version</th>
-                  <th className="font-medium">min</th>
-                  <th className="font-medium">login</th>
-                  <th className="font-medium">note</th>
+                <tr className="border-b border-line text-left font-mono text-[10px] tracking-[0.12em] text-ink-faint">
+                  <th className="py-1.5 font-normal">RUNTIME</th>
+                  <th className="font-normal">INSTALLED</th>
+                  <th className="font-normal">VERSION</th>
+                  <th className="font-normal">MIN</th>
+                  <th className="font-normal">LOGIN</th>
+                  <th className="font-normal">NOTE</th>
                 </tr>
               </thead>
               <tbody>
                 {report.runtimes.map((runtime) => (
-                  <tr
-                    key={runtime.id}
-                    className="border-b border-zinc-100 last:border-0 dark:border-zinc-900"
-                  >
+                  <tr key={runtime.id} className="border-b border-line last:border-0">
                     <td className="py-1.5">
                       {runtime.displayName}
-                      <span className="ml-1.5 font-mono text-[11px] text-zinc-500">
+                      <span className="ml-1.5 font-mono text-[11px] text-ink-faint">
                         {runtime.id}
                       </span>
                     </td>
                     <td>{runtime.installed ? 'yes' : 'no'}</td>
-                    <td className="font-mono text-xs">{runtime.version ?? '–'}</td>
+                    <td className="font-mono text-[11px]">{runtime.version ?? '–'}</td>
                     <td>{runtime.installed ? (runtime.minVersionOk ? 'ok' : 'too old') : '–'}</td>
                     <td>
                       {/* `undefined` is "this adapter cannot tell without spawning the CLI",
                           which detection never does. It is not the same as "no". */}
                       {runtime.loggedIn === undefined ? '?' : runtime.loggedIn ? 'yes' : 'no'}
                     </td>
-                    <td className="text-xs text-zinc-500">{runtime.note ?? ''}</td>
+                    <td className="text-[11px] text-ink-faint">{runtime.note ?? ''}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            <p className="mt-4 text-xs text-zinc-500">node {report.node}</p>
+            <p className="mt-4 font-mono text-[11px] text-ink-faint">node {report.node}</p>
             {usable < 2 && (
-              <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+              <p className="mt-2 text-[13px] text-question">
                 Only {usable} usable runtime{usable === 1 ? '' : 's'} detected. A room needs two:
-                one to build and at least one to review. `acr` never reads your credentials – it
-                only checks that each CLI has a login on disk.
+                one to build and at least one to review. <span className="font-mono">acr</span>{' '}
+                never reads your credentials – it only checks that each CLI has a login on disk.
               </p>
             )}
           </>

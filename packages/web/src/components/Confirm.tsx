@@ -113,11 +113,14 @@ export function HoldToConfirm({
 export function TypeToConfirm({
   label,
   expect,
+  hint = 'type room name',
   disabled = false,
   onConfirm,
 }: {
   label: string;
   expect: string;
+  /** What the closed control says you will be asked for. */
+  hint?: string;
   disabled?: boolean;
   onConfirm: () => void;
 }): React.ReactElement {
@@ -136,7 +139,7 @@ export function TypeToConfirm({
         <span className="text-[13.5px] text-error">{label}</span>
         <span className="flex-1" />
         <span className="rounded border border-error-line px-2 py-[3px] font-mono text-[10.5px] text-error">
-          type room name
+          {hint}
         </span>
       </button>
     );
@@ -165,7 +168,7 @@ export function TypeToConfirm({
           onChange={(e) => setTyped(e.target.value)}
           placeholder={expect}
           aria-label={`type ${expect} to confirm`}
-          className="min-w-0 flex-1 rounded border border-error-line bg-ground px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:outline-none"
+          className="min-w-0 flex-1 rounded border border-error-line bg-ground px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-faint"
         />
         <button
           type="button"

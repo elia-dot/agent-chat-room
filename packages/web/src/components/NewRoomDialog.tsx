@@ -5,7 +5,7 @@ import type {
   RoomMode,
   RuntimeReportEntry,
 } from '@agent-chat-room/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import type { CreateRoomRequest } from '../api/client.js';
 import { api } from '../api/client.js';
@@ -15,7 +15,7 @@ import { filterRepos } from '../lib/repos.js';
 import { AdditionalDirsEditor } from './AdditionalDirsEditor.js';
 import { FolderPickerButton } from './FolderPickerButton.js';
 import { ModelSelect } from './ModelSelect.js';
-import { Divider } from './Overlay.js';
+import { Divider, useModalFocus } from './Overlay.js';
 
 /** Enough recents to cover a normal week of projects; past that, filter instead of scroll. */
 const RECENT_LIMIT = 8;
@@ -34,6 +34,10 @@ export interface NewRoomDialogProps {
  * access column shows what that choice actually grants the process.
  */
 export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.ReactElement {
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useModalFocus(panel, onClose);
+
   const [repos, setRepos] = useState<RepoRecord[]>([]);
   const [runtimes, setRuntimes] = useState<RuntimeReportEntry[]>([]);
   const [catalogs, setCatalogs] = useState<Record<string, ModelCatalog>>({});
@@ -51,7 +55,10 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const [agents, setAgents] = useState<string[]>([]);
   const [mode, setMode] = useState<RoomMode>('build-review');
   const [models, setModels] = useState<Record<string, string>>({});
-  const [worktree, setWorktree] = useState(false);
+  // `true`, matching `BUILTIN_DEFAULTS.worktree` in core. The dialog used to open on
+  // `false` and label that "default", which contradicted the CLI, `.acr.json` and the
+  // empty state's own description of what a room does.
+  const [worktree, setWorktree] = useState(true);
   const [maxTurnRetries, setMaxTurnRetries] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -161,9 +168,10 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
     }
   };
 
+  // Escape and the focus trap live in `useModalFocus`; this is only the submit shortcut,
+  // which needs a fresh closure over the form state and so is deliberately undeped.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         void submit();
@@ -182,10 +190,21 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   const branchHint = title.trim() ? `acr/${slugify(title.trim())}` : 'acr/<named from your task>';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-6">
-      <div className="w-full max-w-3xl overflow-hidden rounded-lg border border-line bg-ground shadow-2xl">
-        <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
-          <h2 className="font-mono text-[11px] tracking-[0.14em] text-ink-dim">NEW ROOM</h2>
+    // One scroll container, not two: the body below owns the overflow, so the wheel does
+    // not behave differently depending on which of the two the pointer is over.
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6">
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line bg-ground shadow-2xl"
+      >
+        <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-3">
+          <h2 id={titleId} className="font-mono text-[11px] tracking-[0.14em] text-ink-dim">
+            NEW ROOM
+          </h2>
           <div className="flex overflow-hidden rounded border border-line">
             {(['build-review', 'brainstorm'] as const).map((option) => (
               <button
@@ -215,7 +234,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
           </button>
         </header>
 
-        <div className="max-h-[70vh] overflow-y-auto px-4 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <Divider label="REPO" />
           <div className="mt-2 flex gap-2">
             <input
@@ -225,7 +244,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 setRepoHint(null);
               }}
               placeholder="/Users/you/code/your-repo"
-              className="min-w-0 flex-1 rounded border border-line bg-surface px-2.5 py-1.5 font-mono text-[12.5px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="min-w-0 flex-1 rounded border border-line bg-surface px-2.5 py-1.5 font-mono text-[12.5px] placeholder:text-ink-faint focus:border-line-strong"
             />
             {nativePicker && (
               <FolderPickerButton
@@ -334,7 +353,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             onChange={(e) => setTask(e.target.value)}
             rows={4}
             placeholder="The login test is flaky. Find out why and fix it."
-            className="mt-2 w-full resize-y rounded border border-line bg-surface px-2.5 py-2 text-[14px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            className="mt-2 w-full resize-y rounded border border-line bg-surface px-2.5 py-2 text-[14px] placeholder:text-ink-faint focus:border-line-strong"
           />
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <span className="font-mono text-[11px] text-ink-faint">markdown ok</span>
@@ -344,7 +363,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
               onChange={(e) => setTitle(e.target.value)}
               placeholder="title (optional)"
               aria-label="room title"
-              className="w-56 rounded border border-line bg-surface px-2 py-1 font-mono text-[11.5px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="w-56 rounded border border-line bg-surface px-2 py-1 font-mono text-[11.5px] placeholder:text-ink-faint focus:border-line-strong"
             />
           </div>
 
@@ -371,7 +390,10 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 const role = on ? roleFor(mode, index, agents.length) : 'off';
                 const tone = tintOf(tints[runtime.id]);
                 return (
-                  <tr key={runtime.id} className={`border-t border-line ${on ? '' : 'opacity-55'}`}>
+                  // "Off" is said by the role select, the dashed model cell and the neutral
+                  // avatar. A blanket alpha on top of that took `ink-faint`, already the
+                  // lightest ink, to about a third of its contrast.
+                  <tr key={runtime.id} className="border-t border-line">
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-2">
                         <span
@@ -418,7 +440,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                           onChange={(value) => setModels((m) => ({ ...m, [runtime.id]: value }))}
                         />
                       ) : (
-                        <span className="font-mono text-[11px] text-ink-faint">—</span>
+                        <span className="font-mono text-[11px] text-ink-faint">–</span>
                       )}
                     </td>
                     <td className="px-2 py-2">
@@ -458,12 +480,14 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
             />
             <span>
               <span className="block text-[13.5px] text-ink">Work in an isolated git worktree</span>
+              {/* Amber marks the choice that departs from the default, which is now the
+                  unchecked one: working in your own checkout is the consequential pick. */}
               <span
-                className={`block font-mono text-[11px] ${worktree ? 'text-question' : 'text-ink-faint'}`}
+                className={`block font-mono text-[11px] ${worktree ? 'text-ink-faint' : 'text-question'}`}
               >
                 {worktree
-                  ? `isolated worktree on ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
-                  : `default · agents work in your checkout, with its installed dependencies and build artifacts · the room still branches, so your checkout moves to ${branchHint} and the trunk is left alone`}
+                  ? `default · isolated worktree on ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
+                  : `agents work in your checkout, with its installed dependencies and build artifacts · the room still branches, so your checkout moves to ${branchHint} and the trunk is left alone`}
               </span>
             </span>
           </label>
@@ -500,7 +524,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
           )}
         </div>
 
-        <footer className="flex items-center gap-2 border-t border-line bg-surface px-4 py-3">
+        <footer className="flex shrink-0 items-center gap-2 border-t border-line bg-surface px-4 py-3">
           <span className="min-w-0 flex-1 font-mono text-[11px] text-ink-faint">
             {mode === 'build-review'
               ? `${workers} worker · ${rest} reviewer${rest === 1 ? '' : 's'} · unanimous approval commits the round`
@@ -541,7 +565,7 @@ function rolesFor(mode: RoomMode): string[] {
 
 /** What the role actually grants the spawned process – the thing worth showing. */
 function access(mode: RoomMode, role: string): string {
-  if (role === 'off') return '—';
+  if (role === 'off') return '–';
   if (mode === 'brainstorm') return 'READ';
   return role === 'worker' ? 'EDITS' : 'READ';
 }
