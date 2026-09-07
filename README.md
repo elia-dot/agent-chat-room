@@ -36,8 +36,6 @@ CI covers macOS and Linux; Windows has platform-specific support but is not in t
 
 ## Install and start
 
-Once the package is published to npm:
-
 ```sh
 npx agent-chat-room
 ```
@@ -49,7 +47,7 @@ npm install -g agent-chat-room
 acr
 ```
 
-To run this checkout, including before the first npm release:
+To run this checkout:
 
 ```sh
 git clone https://github.com/elia-dot/agent-chat-room.git
