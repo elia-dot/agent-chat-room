@@ -43,7 +43,7 @@ describe('role instructions', () => {
   });
 
   it('lets the phase win over the role, so the moderator answers before it merges', () => {
-    // The moderator takes part in rounds 1 and 2 like everyone else (PLAN.md section 3);
+    // The moderator takes part in rounds 1 and 2 like everyone else;
     // merging is only what it does in round 3.
     expect(roleInstructions('moderator', { phase: 'answer' })).toBe(BRAINSTORM_ANSWER_INSTRUCTIONS);
     expect(roleInstructions('moderator', { phase: 'merge' })).toBe(MODERATOR_INSTRUCTIONS);

@@ -1,5 +1,5 @@
 /**
- * `@runtime` mentions in the composer (PLAN.md section 5.3).
+ * `@runtime` mentions in the composer.
  *
  * Pure and exported so it can be unit-tested without a DOM – the composer itself is a
  * textarea and three buttons, and this is the only part of it worth pinning.

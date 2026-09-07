@@ -1,6 +1,6 @@
 /**
- * Role instructions. These are the rules from PLAN.md section 3 that keep the loop from
- * spinning: single writer, reviewers cite `file:line`, every review ends in a verdict.
+ * Role instructions. These are the rules that keep the loop from spinning: single writer,
+ * reviewers cite `file:line`, every review ends in a verdict.
  */
 
 export type Role = 'worker' | 'reviewer' | 'owner' | 'moderator';
@@ -32,7 +32,7 @@ export const REVIEWER_INSTRUCTIONS = `You are a REVIEWER. You must not edit, cre
 genuinely cannot judge the change without an answer from the human.`;
 
 /**
- * PLAN.md section 3: a reviewer may not raise a *new* blocking item on a line the worker
+ * A reviewer may not raise a *new* blocking item on a line the worker
  * did not touch once the room is past round 2. Enforced in the prompt for now – checking
  * it mechanically needs diff-line attribution, and every round's blocking items are
  * already persisted so that check is cheap to add later.
@@ -42,7 +42,7 @@ code the worker has not touched in this room. Judge the change in front of you: 
 items you already raised are addressed, or say precisely which one is not.`;
 
 /**
- * Brainstorm mode (PLAN.md section 3) is three phases, not a build loop: everybody answers,
+ * Brainstorm mode is three phases, not a build loop: everybody answers,
  * everybody reacts, the moderator merges. Nobody edits, so there is no single-writer rule
  * and no verdict – the room ends with a proposal for the human, not with an approval.
  */

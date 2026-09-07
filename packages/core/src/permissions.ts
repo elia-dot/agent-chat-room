@@ -1,7 +1,7 @@
 import type { Permission } from './types.js';
 
 /**
- * The permission table from PLAN.md section 4.1.
+ * The permission table: how `read-only | edits | full` maps onto each vendor's flags.
  *
  * Keeping every vendor flag in this one file is deliberate: the engine only ever talks
  * about `read-only | edits | full`, so adding a runtime never means teaching the room

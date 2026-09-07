@@ -10,7 +10,7 @@ import { RoomSupervisor } from './supervisor.js';
 
 export const DEFAULT_PORT = 4321;
 
-/** Loopback only. PLAN.md section 7: "Local only... Public trust depends on it." */
+/** Loopback only: local by design, because public trust depends on it. */
 export const HOST = '127.0.0.1';
 
 export interface ServerOptions {

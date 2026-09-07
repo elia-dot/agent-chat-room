@@ -76,7 +76,7 @@ function describeAttachment(attachment: PromptAttachment): string {
 }
 
 /**
- * The per-turn prompt layout from PLAN.md section 4.2.
+ * The per-turn prompt layout.
  *
  * Sessions are resumed rather than replayed, so this only ever carries what the agent has
  * not seen: the task, the messages since its last turn, and the current state of the diff.

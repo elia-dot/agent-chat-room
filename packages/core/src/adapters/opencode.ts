@@ -337,8 +337,8 @@ export const opencodeAdapter: AgentAdapter = {
       cwd: req.cwd,
       // `opencode run` takes its message as a trailing positional *or* on stdin. Probed: with
       // no positional it reads stdin and answers normally. Stdin is what this adapter uses,
-      // for the reason PLAN.md section 9 gives – room transcripts can exceed a comfortable
-      // argv size, and macOS `ARG_MAX` is about a megabyte.
+      // because room transcripts can exceed a comfortable argv size, and macOS
+      // `ARG_MAX` is about a megabyte.
       stdin: buildOpencodePrompt(req),
       timeoutMs: req.timeoutMs,
       parser: new OpencodeParser(req.model),

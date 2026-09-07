@@ -113,7 +113,7 @@ describe('startServer', () => {
     const address = first.app.server.address();
     expect(typeof address === 'object' && address?.address).toBe('127.0.0.1');
 
-    // Nothing listens on the network: PLAN.md section 7, "Public trust depends on it."
+    // Nothing listens on the network beyond loopback; public trust depends on it.
     expect(await (await fetch(`${first.url}/api/health`)).json()).toMatchObject({ ok: true });
 
     const second = await startServer({ store: h.store, webRoot: false, port: first.port });

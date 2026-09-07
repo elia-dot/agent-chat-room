@@ -35,7 +35,7 @@ export function getOrCreateServerToken(token?: string): string {
  * `GET /api/repos/browse` reads arbitrary directories and `POST /api/rooms` spawns an agent
  * CLI with `edits` permission. Any page you happen to have open can POST to
  * `127.0.0.1:4321`, and DNS rebinding gets it a same-origin read too. Checking `Origin` is
- * what makes PLAN.md section 7's "nothing listens on the network" promise actually hold, so
+ * what makes the "nothing listens on the network" promise actually hold, so
  * it is a required part of the server rather than a hardening extra.
  *
  * A request with no `Origin` at all is allowed: that is `curl`, the CLI and the test suite,

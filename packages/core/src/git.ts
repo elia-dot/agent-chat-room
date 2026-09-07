@@ -249,7 +249,7 @@ export interface WorktreeAddOptions {
 }
 
 /**
- * `git worktree add` – the isolation every room gets (PLAN.md section 7). The room's work
+ * `git worktree add` – the isolation every room gets. The room's work
  * happens here, so the checkout the human is standing in is never touched.
  */
 export async function worktreeAdd(
@@ -289,7 +289,7 @@ export interface CommitResult {
 
 /**
  * Stage everything in `cwd` and commit it. The engine commits after an approved round, so
- * a room's work is never sitting only in a working tree (PLAN.md section 7).
+ * a room's work is never sitting only in a working tree.
  *
  * Returns a result rather than throwing: "the repo has no committer identity configured"
  * is something the room has to render, not something that should take the process down.
@@ -369,7 +369,7 @@ export interface MergeResult {
  * Merge `branch` into the branch `cwd` is standing on.
  *
  * This is the one thing in the project that writes to the human's own checkout, which is
- * exactly why the worktree design avoided it for so long (PLAN.md section 10). So it is
+ * exactly why the worktree design avoided it for so long. So it is
  * deliberately unhelpful: it refuses unless the checkout is already on `into`, clean, and
  * not part-way through an operation of its own, rather than switching branches or stashing
  * on someone's behalf, and a merge *it started* that conflicts is aborted rather than left

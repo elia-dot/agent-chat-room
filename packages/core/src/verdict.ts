@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Every reviewer message ends with a fenced ```verdict block (PLAN.md section 2).
+ * Every reviewer message ends with a fenced ```verdict block.
  *
  * The fence works for every runtime. Runtimes that support schema-constrained output also
  * return the same verdict separately; that validated value wins when prose escaping damages

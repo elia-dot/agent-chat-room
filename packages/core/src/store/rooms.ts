@@ -95,7 +95,7 @@ type Row = Record<string, unknown>;
  * Every SQL statement in the project lives here.
  *
  * That is deliberate rather than tidy-minded: `better-sqlite3` is the one native
- * dependency `acr` has, and PLAN.md flags it as the biggest install risk. Keeping the
+ * dependency `acr` has, and so its biggest install risk. Keeping the
  * engine ignorant of SQL means swapping it for `node:sqlite` later is one file, not a
  * refactor.
  */

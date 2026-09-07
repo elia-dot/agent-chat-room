@@ -28,9 +28,9 @@ export interface RoomsOptions {
 }
 
 /**
- * `acr rooms ls | show | resume | close | purge` – the terminal view of the store (PLAN.md
- * section 5). M2 puts the same data behind REST; this is what makes M1's persistence
- * usable before then.
+ * `acr rooms ls | show | resume | close | purge` – the terminal view of the store. The
+ * server puts the same data behind REST; this is the same persistence reached without a
+ * browser.
  */
 export async function rooms(opts: RoomsOptions): Promise<ExitCode> {
   const r = opts.renderer ?? new Renderer();
@@ -166,7 +166,7 @@ async function resumeRoom(
 }
 
 /**
- * `acr rooms export <id>` – the room as markdown (PLAN.md section 4.3), from the same pure
+ * `acr rooms export <id>` – the room as markdown, from the same pure
  * function the browser's Export button calls, so the two cannot disagree.
  */
 function exportRoom(store: RoomStoreType, r: Renderer, opts: RoomsOptions): ExitCode {

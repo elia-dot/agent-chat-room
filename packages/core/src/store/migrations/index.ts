@@ -1,8 +1,8 @@
 /**
  * Schema migrations, applied in order and tracked in `PRAGMA user_version`.
  *
- * PLAN.md section 4.3 says "numbered SQL files". These are numbered TypeScript constants
- * instead, because the build is a bare `tsc -b` with no asset-copy step – loose `.sql`
+ * These are numbered TypeScript constants rather than the more usual numbered `.sql`
+ * files, because the build is a bare `tsc -b` with no asset-copy step – loose `.sql`
  * files would never reach `dist/` and the published package would fail to open its own
  * database. The numbering and the forward-only rule are unchanged.
  */

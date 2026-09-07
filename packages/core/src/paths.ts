@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * State lives in `~/.config/agent-chat-room/` (PLAN.md section 4). `XDG_CONFIG_HOME` is
+ * State lives in `~/.config/agent-chat-room/`. `XDG_CONFIG_HOME` is
  * honoured because plenty of Linux users move it, and `ACR_CONFIG_DIR` exists so tests
  * (and anyone with two checkouts) can point somewhere disposable.
  */

@@ -1,8 +1,8 @@
 # Adapter fixtures
 
-Recorded output from the real CLIs, used as contract tests. PLAN.md section 8 names these as
-the mitigation for "CLI output formats change between versions": when a runtime changes its
-event shapes, one of these tests fails instead of a room silently going quiet.
+Recorded output from the real CLIs, used as contract tests. They are the mitigation for
+"CLI output formats change between versions": when a runtime changes its event shapes, one
+of these tests fails instead of a room silently going quiet.
 
 | File | Recorded from | Version | Command |
 |---|---|---|---|

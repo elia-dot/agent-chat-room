@@ -16,7 +16,7 @@ export interface OpenDbOptions {
 }
 
 /**
- * Open the room database (PLAN.md section 4.3).
+ * Open the room database.
  *
  * WAL so a reader – the future server, or a second `acr` – never blocks the engine mid
  * turn; `foreign_keys` on because the whole cascade-delete story depends on it; a busy

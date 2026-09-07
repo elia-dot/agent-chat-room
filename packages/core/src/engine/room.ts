@@ -256,7 +256,7 @@ export async function validateAdditionalDirs(
 export interface RunOptions {
   /**
    * Run exactly one turn, by this runtime, instead of the round loop. This is the
-   * "the next turn is whoever you @mention" rule from PLAN.md section 3: the room lands
+   * "the next turn is whoever you @mention" rule: the room lands
    * back in `idle` afterwards and the human decides what happens next.
    */
   directTurn?: string;
@@ -299,7 +299,7 @@ interface ReviewOutcome {
 const DEFAULT_TIMEOUT_MS = 1800_000;
 
 /**
- * Brainstorm mode is exactly three rounds (PLAN.md section 3): answer, react, merge. It is
+ * Brainstorm mode is exactly three rounds: answer, react, merge. It is
  * a fixed shape, so `maxRounds` on a brainstorm room is this. A build-review room has no
  * round limit at all – it runs until every reviewer approves, someone asks you a question,
  * or you pause or stop it – and stores `0` there.
@@ -332,7 +332,7 @@ const RETRY_BACKOFF_MS = 2000;
 /**
  * The roster rules, in one place, checked on creation *and* on every edit.
  *
- * The single-writer rule (PLAN.md section 3) is the one invariant that protects the
+ * The single-writer rule is the one invariant that protects the
  * human's repo, so it is checked against the roster rather than trusted from the flag
  * mapping – and a role swap has to go through the same gate a fresh room does.
  */
@@ -391,7 +391,7 @@ export function assertRoster(
 }
 
 /**
- * The room engine: the round loop from PLAN.md section 3, persisted after every transition.
+ * The room engine: the round loop, persisted after every transition.
  *
  * The loop itself is small – worker writes, reviewers read, tally, repeat – and almost all
  * of the code here is about the two things that make it survivable: every state change
@@ -944,7 +944,7 @@ export class RoomEngine {
 
   /**
    * Post a message from the human into the room and hold the loop so they can decide who
-   * answers (PLAN.md section 3: "You can interrupt any time").
+   * answers – you can interrupt any time.
    *
    * Nothing has to be threaded into a prompt here: every participant carries a
    * `lastSeenMessageId`, so `unseenFor` picks this message up on the next turn for free.
@@ -1166,7 +1166,7 @@ export class RoomEngine {
   // --- brainstorm ----------------------------------------------------------
 
   /**
-   * The three phases from PLAN.md section 3, mapped onto the round counter so the store,
+   * The three brainstorm phases, mapped onto the round counter so the store,
    * the state machine, the WebSocket and the transcript all keep working unchanged:
    *
    *   round 1  everyone answers, in parallel, read-only
@@ -1312,8 +1312,8 @@ export class RoomEngine {
   // --- roster, commit and PR ------------------------------------------------
 
   /**
-   * Change one participant's role or model mid-room (PLAN.md section 3: "swap roles between
-   * rounds without losing sessions").
+   * Change one participant's role or model mid-room: roles swap between rounds without
+   * losing sessions.
    *
    * Refused while a turn is in flight: the permission a child was spawned with is baked into
    * that process, so a swap mid-turn would be a lie. Promoting a reviewer *swaps* – the old
@@ -1579,9 +1579,9 @@ export class RoomEngine {
   /**
    * Merge the room branch into the branch the room was cut from, in the human's own checkout.
    *
-   * PLAN.md section 4.2 asks for this next to "Open PR"; section 10 held it back from M3
-   * because it writes to the branch the human is standing on, which every other part of the
-   * design avoids. It lands here with that objection answered rather than waived: it refuses
+   * This belongs next to "Open PR", and was held back for a long time because it writes to
+   * the branch the human is standing on, which every other part of the design avoids. It
+   * lands here with that objection answered rather than waived: it refuses
    * a room with uncommitted work, `git.mergeBranch` refuses a checkout that is not on the
    * base branch, is not clean, or is part-way through a merge of its own, and a conflicted
    * merge it started is aborted instead of left open.
@@ -1888,7 +1888,7 @@ export class RoomEngine {
 
   /**
    * Commit the approved round on the room branch, so a room's work is never sitting only
-   * in a working tree (PLAN.md section 7). A commit that fails is reported into the
+   * in a working tree. A commit that fails is reported into the
    * transcript rather than thrown: the changes are still in the worktree either way.
    */
   private async commitRound(

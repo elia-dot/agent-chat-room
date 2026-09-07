@@ -7,12 +7,12 @@ import type { Verdict } from '../verdict.js';
  * camelCase here; `rooms.ts` is the only file that knows about the translation.
  */
 
-/** PLAN.md section 4.2: `idle → running(turn) → waiting-reviews → needs-you | approved | stopped`. */
+/** `idle → running(turn) → waiting-reviews → needs-you | approved | stopped`. */
 export type RoomState =
   'idle' | 'running' | 'waiting-reviews' | 'approved' | 'needs-you' | 'stopped';
 
 /**
- * `build-review` is the loop from PLAN.md section 3; `brainstorm` is the three-phase
+ * `build-review` is the worker/reviewer loop; `brainstorm` is the three-phase
  * discussion below it – everybody answers, everybody reacts, the moderator merges.
  */
 export type RoomMode = 'build-review' | 'brainstorm';

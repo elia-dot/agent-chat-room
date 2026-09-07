@@ -19,11 +19,11 @@ export interface ServeOptions {
 }
 
 /**
- * `acr serve` – the web UI (PLAN.md section 5).
+ * `acr serve` – the web UI.
  *
  * The process stays in the foreground and holds the room engines, so a room the browser
  * started is running *here*: closing the tab does not stop it, but Ctrl-C does. That is the
- * "single Node process" shape from PLAN.md section 4, not an accident of implementation.
+ * intended "single Node process" shape, not an accident of implementation.
  */
 export async function serve(opts: ServeOptions = {}): Promise<ExitCode> {
   const r = opts.renderer ?? new Renderer();

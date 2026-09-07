@@ -14,7 +14,7 @@ import type {
 import { decisionLabel } from '@agent-chat-room/core';
 
 /**
- * Runtime brand colours from PLAN.md section 5: Claude orange, Codex green, Cursor blue,
+ * Runtime brand colours, matching the web UI: Claude orange, Codex green, Cursor blue,
  * Antigravity violet.
  */
 const RUNTIME_COLOR: Record<string, number> = {
@@ -35,7 +35,7 @@ const BRAINSTORM_ROUND_LABEL: Record<number, string> = {
   3: 'the moderator merges',
 };
 
-/** The status dots from PLAN.md section 5, in their terminal form. */
+/** The status dots the web UI shows, in their terminal form. */
 const STATE_DOT: Record<RoomState, string> = {
   idle: 'o',
   running: '*',

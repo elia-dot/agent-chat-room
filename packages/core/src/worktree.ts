@@ -7,7 +7,7 @@ import type { RoomStore } from './store/rooms.js';
 import type { Room } from './store/types.js';
 
 /**
- * Every room runs in its own git worktree (PLAN.md section 7, decided 2026-09-03).
+ * Every room runs in its own git worktree.
  *
  * Two things fall out of that and both matter: the human's checkout is never touched, so
  * `acr` no longer has to refuse a dirty tree, and the room's diff is attributable to the

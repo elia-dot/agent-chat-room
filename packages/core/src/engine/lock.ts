@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { locksDir, roomLockPath } from '../paths.js';
 
 /**
- * The per-repo write lock from PLAN.md section 3 ("two agents editing at once").
+ * The per-repo write lock, so that two agents are never editing at once.
  *
  * Two layers, because there are two ways it can go wrong:
  *

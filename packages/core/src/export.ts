@@ -2,7 +2,7 @@ import type { Message, Participant, Room, TurnRecord } from './store/types.js';
 import { decisionLabel } from './verdict.js';
 
 /**
- * A room as markdown (PLAN.md section 4.3).
+ * A room as markdown.
  *
  * Pure on purpose: the CLI, the server route and the tests all call this one function, so
  * `acr rooms export` and the browser's "Export markdown" button cannot drift apart, and the

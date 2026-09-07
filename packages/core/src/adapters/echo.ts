@@ -15,9 +15,9 @@ import type {
 /**
  * A fake runtime that replays a script instead of spawning anything.
  *
- * This is what lets the CLI – and, from M1, the room engine – be tested end to end without
- * spending a subscription turn or depending on a network. PLAN.md schedules it for the
- * contributor guide in M4; it is here now because every test above the adapter layer needs it.
+ * This is what lets the CLI and the room engine be tested end to end without spending a
+ * subscription turn or depending on a network. `CONTRIBUTING.md` points new adapter authors
+ * at it; it is here because every test above the adapter layer needs it.
  *
  * The script comes from `ACR_ECHO_SCRIPT` (a path to a JSON file) so a test can drive the
  * real `acr run` code path.

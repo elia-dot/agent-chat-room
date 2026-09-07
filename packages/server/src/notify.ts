@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 
 /**
- * macOS notifications (PLAN.md section 5.7). `osascript` rather than a dependency: it is
+ * macOS notifications. `osascript` rather than a dependency: it is
  * already on every Mac, it needs no permission prompt for `display notification`, and the
  * cross-platform story is `node-notifier` in a later milestone.
  */

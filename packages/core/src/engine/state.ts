@@ -1,7 +1,7 @@
 import type { RoomState } from '../store/types.js';
 
 /**
- * The room state machine from PLAN.md section 4.2:
+ * The room state machine:
  *
  *   idle -> running(worker) -> waiting-reviews -> approved | needs-you | running(round+1)
  *                                              -> stopped (from anywhere)

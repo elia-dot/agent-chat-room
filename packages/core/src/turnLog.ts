@@ -5,7 +5,7 @@ import { turnLogPath } from './paths.js';
 
 /**
  * Appends every raw line a runtime emitted to `~/.config/agent-chat-room/turns/<turnId>.jsonl`
- * (PLAN.md section 4.2). This is the first thing you read when an adapter misbehaves, so it
+ * This is the first thing you read when an adapter misbehaves, so it
  * records the bytes as they arrived rather than the parsed events.
  *
  * Logging is strictly best effort: a full disk or a read-only home must never take a turn down.

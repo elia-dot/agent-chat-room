@@ -1,7 +1,7 @@
 /**
- * The published adapter contract. These declarations are the ones written down in
- * `docs/PLAN.md` section 4.1 – a contributor adding a runtime implements `AgentAdapter`
- * and nothing else. Changing anything here means changing the plan too.
+ * The published adapter contract: a contributor adding a runtime implements `AgentAdapter`
+ * and nothing else. `CONTRIBUTING.md` walks through it, so changing anything here means
+ * changing that guide too.
  */
 
 /** What an adapter is allowed to do during a turn. Mapped to vendor flags in `permissions.ts`. */

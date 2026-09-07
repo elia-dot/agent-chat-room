@@ -322,7 +322,7 @@ export class RoomSupervisor {
 
   /**
    * Turn a finished brainstorm into a build room: the moderator's proposal becomes the task
-   * of a fresh `build-review` room on the same repo (PLAN.md section 3, "with one click").
+   * of a fresh `build-review` room on the same repo, in one click.
    */
   async promote(
     roomId: string,

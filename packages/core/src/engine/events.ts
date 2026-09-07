@@ -2,9 +2,9 @@ import type { Message, Participant, RoomState } from '../store/types.js';
 import type { TurnEvent } from '../types.js';
 
 /**
- * The event names in PLAN.md section 4.4, defined in the engine rather than in the server
- * so that M2's WebSocket is a pass-through: the CLI renderer and the future web client
- * consume one shape, and nothing has to be re-derived when the socket lands.
+ * The room event names, defined in the engine rather than in the server so that the
+ * WebSocket is a pass-through: the CLI renderer and the web client consume one shape,
+ * and nothing has to be re-derived on the way out of the socket.
  */
 export type EngineEvent =
   | {
@@ -20,13 +20,13 @@ export type EngineEvent =
       byYou?: boolean;
     }
   /**
-   * Not in PLAN.md section 4.4, because pausing is not a state. A browser watching a room
+   * Deliberately not a room state, because pausing is not a state. A browser watching a room
    * that another client paused has to learn about it without polling, and the sidebar dot
    * reads the flag rather than the state.
    */
   | { type: 'room.paused'; roomId: string; paused: boolean }
   /**
-   * The roster changed: a role swap or a model change. Also not in PLAN.md section 4.4, and
+   * The roster changed: a role swap or a model change. Also not a room state, and
    * there for the same reason `room.paused` is – a second tab has to learn that the worker
    * is now somebody else without polling.
    */

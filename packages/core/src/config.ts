@@ -8,7 +8,7 @@ import type { Permission } from './types.js';
 
 /**
  * `.acr.json` – optional per-repo defaults, committed alongside the code so a team shares
- * one roster (PLAN.md section 4). Precedence is CLI flags > `.acr.json` > built-ins.
+ * one roster. Precedence is CLI flags > `.acr.json` > built-ins.
  */
 export const ACR_CONFIG_FILENAME = '.acr.json';
 

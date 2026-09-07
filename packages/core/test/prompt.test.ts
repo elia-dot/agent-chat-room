@@ -74,7 +74,7 @@ describe('buildTurnPrompt', () => {
     expect(buildTurnPrompt({ ...base, phase })).toContain(roleInstructions('worker', { phase }));
   });
 
-  it('matches the layout in PLAN.md section 4.2', () => {
+  it('matches the documented per-turn prompt layout', () => {
     expect(buildTurnPrompt(base)).toMatchInlineSnapshot(`
       "You are claude acting as WORKER in room "fix the flaky login test" (round 1).
       Repo: /repo on branch acr/flaky-login.

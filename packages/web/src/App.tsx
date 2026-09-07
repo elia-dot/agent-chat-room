@@ -391,8 +391,8 @@ export function App(): React.ReactElement {
               busy={busy}
               offline={offline}
               rooms={referenceableRooms}
-              // Posting holds the loop on purpose (PLAN.md section 3: "You can interrupt any
-              // time"), so continuing is a separate, deliberate click.
+              // Posting holds the loop on purpose – you can interrupt any time – so
+              // continuing is a separate, deliberate click.
               onSend={(text, mention, extra) =>
                 void act(() => api.say(room.id, text, mention ?? undefined, extra))
               }

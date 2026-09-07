@@ -12,7 +12,7 @@ import { Renderer } from '../src/render.js';
 import { Capture, gitIn, makeRepo, useTempConfigDir } from './helpers.js';
 
 /**
- * The M1 acceptance criterion, verbatim from PLAN.md section 6:
+ * The acceptance criterion this suite exists to prove:
  *
  *   "Done when: `acr run` completes a full approve cycle unattended and can be resumed
  *    after the process restarts."

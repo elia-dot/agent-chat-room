@@ -7,7 +7,7 @@ import type { Detection } from './types.js';
 /**
  * "Open PR" shells out to GitHub's own `gh`.
  *
- * The alternative is asking for a token, which PLAN.md section 7 rules out: spawning the
+ * The alternative is asking for a token, which the design rules out: spawning the
  * CLI the human already logged in with is the entire subscription mechanism, and it keeps
  * `acr` out of the credentials business for pull requests too. So `gh` is an optional
  * dependency – present and the button works, absent and the button says why.

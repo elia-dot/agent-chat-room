@@ -1,6 +1,6 @@
 import type { RoomMode, RoomState } from '@agent-chat-room/core';
 
-/** The runtime palette from PLAN.md section 5.2. Anything unknown gets the neutral chip. */
+/** The runtime palette. Anything unknown gets the neutral chip. */
 /**
  * Agent identity, per the design.
  *

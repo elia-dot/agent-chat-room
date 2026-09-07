@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 
 /**
- * PLAN.md section 5.6. The same `runtimeReport()` payload `acr doctor --json` prints, so
+ * The browser's doctor view: the same `runtimeReport()` payload `acr doctor --json` prints, so
  * the browser and the terminal can never disagree about which runtimes you have.
  */
 export function DoctorPage({ onClose }: { onClose: () => void }): React.ReactElement {

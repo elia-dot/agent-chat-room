@@ -53,7 +53,7 @@ describe('the permission table', () => {
       '-s',
       'read-only',
     ]);
-    // PLAN.md section 4.1, confirmed by a live probe against cursor-agent 2026.07.23: a
+    // Confirmed by a live probe against cursor-agent 2026.07.23: a
     // turn in `ask` mode refuses to create a file and its shell calls come back denied.
     expect(cursorPermissionArgs('read-only')).toEqual([
       '--mode',

@@ -1,7 +1,7 @@
 import type { TurnEvent } from '@agent-chat-room/core';
 import { useState } from 'react';
 
-/** The collapsible tool log under an agent message (PLAN.md section 5.2). */
+/** The collapsible tool log under an agent message. */
 export function ActivityDrawer({ activity }: { activity: TurnEvent[] }): React.ReactElement | null {
   const [open, setOpen] = useState(false);
   const entries = activity.filter((e) => e.type === 'tool' || e.type === 'file');

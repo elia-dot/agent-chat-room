@@ -56,9 +56,9 @@ export function buildCursorArgs(req: TurnRequest): string[] {
   // overriding config, so a user setting cannot widen a reviewer.
   const args = ['-p', '--output-format', 'stream-json', '--stream-partial-output'];
   args.push(...cursorPermissionArgs(req.permission));
-  // The spawn already sets the working directory; naming it as the workspace as well is
-  // what PLAN.md section 4.1 documents and it removes any doubt about which repo a turn
-  // is looking at when `acr run` was pointed at a subdirectory.
+  // The spawn already sets the working directory; naming it as the workspace as well
+  // removes any doubt about which repo a turn is looking at when `acr run` was pointed
+  // at a subdirectory.
   args.push('--workspace', req.cwd);
   for (const path of req.additionalDirs ?? []) args.push('--add-dir', path);
   if (req.model) args.push('--model', req.model);
@@ -301,8 +301,8 @@ export const cursorAdapter: AgentAdapter = {
       cwd: req.cwd,
       // `cursor-agent -p` takes the prompt as a trailing positional argument *or* on stdin.
       // Probed: with no positional it reads stdin and answers normally. Stdin is what this
-      // adapter uses, for the reason PLAN.md section 9 gives – room transcripts can exceed
-      // a comfortable argv size, and macOS `ARG_MAX` is about a megabyte.
+      // adapter uses: room transcripts can exceed a comfortable argv size, and macOS
+      // `ARG_MAX` is about a megabyte.
       stdin: buildCursorPrompt(req),
       timeoutMs: req.timeoutMs,
       parser: new CursorParser(req.model),
