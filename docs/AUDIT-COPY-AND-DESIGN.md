@@ -313,9 +313,15 @@ moved focus off that box onto the panel. Two symptoms: ⌘K no longer let you ty
 into the filter, and closing tried to restore focus to a node that no longer existed, which
 drops it to `<body>`.
 
-So the opener is captured during the first render, which is the last moment
-`activeElement` is still the control outside. Acquisition is conditional: take focus only
-if nothing inside the panel already has it.
+Capturing during the first render is early enough, and was the first fix, but it is a ref
+write plus an impure global read in the render phase –
+`eslint-plugin-react-hooks@7` ships the React Compiler rules, and `react-hooks/refs` and
+`react-hooks/purity` both reject it. CI catches this at the `Lint` step.
+
+The answer is not to race the commit phase at all. A module-level `focusin` listener tracks
+the last element focused *outside* any `[role="dialog"]`, so a modal's own `autoFocus` can
+never overwrite it, and the hook reads that on mount. Acquisition stays conditional: take
+focus only if nothing inside the panel already has it.
 
 That is still not enough, because `StrictMode` is on (`main.tsx:16`). React double-invokes
 effects in development, and the simulated teardown runs the restore, handing focus back to

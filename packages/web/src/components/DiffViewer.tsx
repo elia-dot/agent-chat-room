@@ -22,7 +22,9 @@ export function DiffViewer({
 
   if (loading) return <p className="p-3 font-mono text-[11px] text-ink-faint">loading the diff…</p>;
   if (files.length === 0) {
-    return <p className="p-3 font-mono text-[11px] text-ink-faint">this message changed no files</p>;
+    return (
+      <p className="p-3 font-mono text-[11px] text-ink-faint">this message changed no files</p>
+    );
   }
 
   return (

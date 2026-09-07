@@ -14,6 +14,32 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
+ * The last thing focused outside a dialog: what a modal should hand focus back to.
+ *
+ * A modal cannot work this out for itself once it is mounted. React honours `autoFocus` by
+ * calling `focus()` during commit, before passive effects and before an ancestor's layout
+ * effect (host mounts run bottom-up), so by the time any hook in `Overlay` runs,
+ * `document.activeElement` in `RoomsOverlay` is already its own filter box rather than the
+ * control behind it. Reading it during render would be early enough but is a ref write and
+ * an impure global read in the render phase, which `react-hooks/refs` and
+ * `react-hooks/purity` both reject.
+ *
+ * Tracking it continuously sidesteps the ordering question entirely. Anything inside a
+ * dialog is ignored, so a modal's own `autoFocus` never overwrites the answer.
+ */
+let lastFocusedOutsideDialog: Element | null = null;
+document.addEventListener(
+  'focusin',
+  (event) => {
+    const target = event.target;
+    if (target instanceof Element && !target.closest('[role="dialog"]')) {
+      lastFocusedOutsideDialog = target;
+    }
+  },
+  true,
+);
+
+/**
  * Trap Tab inside a container and hand focus back to whatever opened it.
  *
  * Shared by the two modal surfaces. Split into two effects on purpose: the keydown handler
@@ -25,24 +51,15 @@ export function useModalFocus<T extends HTMLElement>(
   container: React.RefObject<T | null>,
   onClose: () => void,
 ): void {
-  /*
-   * Captured during the first render, which is the last moment `document.activeElement` is
-   * still the control that opened this.
-   *
-   * An effect is too late. React implements `autoFocus` by calling `focus()` in the commit
-   * phase, and passive effects run after that, so reading `activeElement` from an effect in
-   * `RoomsOverlay` returns its own `autoFocus` filter box rather than the button behind it.
-   * The overlay would then record a node inside itself as the opener and try to restore
-   * focus to it after unmount, which silently drops focus to the body.
-   */
-  const opener = useRef<Element | null>(null);
-  opener.current ??= document.activeElement;
   /** Whatever inside the panel held focus when this effect last tore down. */
   const inside = useRef<HTMLElement | null>(null);
+  /** Resolved on mount rather than during render: see `lastFocusedOutsideDialog`. */
+  const opener = useRef<Element | null>(null);
 
   useEffect(() => {
     const node = container.current;
     if (!node) return;
+    opener.current ??= lastFocusedOutsideDialog;
     const previous = inside.current?.isConnected === true ? inside.current : null;
     if (previous) {
       // A remount. StrictMode does one of these on every mount in development, and its
