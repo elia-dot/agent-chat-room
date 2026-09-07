@@ -1,558 +1,289 @@
 # agent-chat-room
 
-Turn the "two terminals, one Claude, one Codex, ping-pong until it's done" workflow into a room:
-you post a task, one agent builds, the others review, and they iterate until they agree or you
-step in.
+A local web app and CLI where your installed coding agents build and review code together.
+Post a task, choose a worker and reviewers, and follow their conversation, tool activity and
+diffs. The worker edits; reviewers give structured verdicts; the loop continues until they
+approve, need your input, or you stop it. A separate brainstorm mode produces a shared proposal.
 
-Every agent runs through the CLI you already have installed and logged in, so it works on your
-existing subscriptions. **No API keys.** `acr` never reads your credentials – it only checks that
-a credentials file exists, and lets each CLI find its own login the way it normally does.
+<a href="https://denly.dev"><img src="https://raw.githubusercontent.com/elia-dot/agent-chat-room/main/packages/web/public/denly-logo.png" alt="Denly logo" width="48" height="48"></a>
 
-The full design lives in [`docs/PLAN.md`](docs/PLAN.md).
-Token-saving options and quality safeguards live in [`docs/TOKEN_EFFICIENCY.md`](docs/TOKEN_EFFICIENCY.md).
+Built with the help of [Denly](https://denly.dev).
 
-## Status: milestone M4 (Production-Ready)
+## Requirements
 
-M4 brings complete production-readiness and the next-generation feature set:
+- **Node.js >= 20.19**, npm, and Git on your `PATH`.
+- A local Git repository with at least one commit and a configured Git author identity
+  (`git config user.name` and `git config user.email`) for room commits.
+- Installed, authenticated agent CLIs. A room needs at least two participants; they may use
+  the same runtime. The terminal default is `claude,codex`.
+- Optional: an authenticated GitHub CLI (`gh`) and permission to push for **Open PR**.
 
-- **`acr`** – with no arguments, starts the server on `http://127.0.0.1:4321` and opens the browser.
-  Rooms list, live transcript, composer with `@mentions` and pause/continue, right panel with
-  participants, changed files and a diff viewer with deep-linking to Cursor and VS Code, a new-room dialog and a doctor page.
-- **Strict localhost & capability boundary.** The server binds `127.0.0.1` only, validates localhost `Origin`,
-  and requires a capability token (`~/.config/agent-chat-room/server.token`, mode `0600`) via session cookie
-  (`GET /?token=...`) or `Authorization: Bearer <token>` for all mutating requests and WebSocket upgrades.
-- **Robust Subprocess Management.** Spawns detached process groups and cleanly terminates entire process trees
-  (`process.kill(-pid)` on POSIX, `taskkill` on Windows) with Windows `PATHEXT` binary resolution.
-- **Interrupt any time.** Posting a message holds the loop and points the next turn at whoever you
-  `@mention`; Continue picks the round loop back up.
-- **macOS notifications** when a room reaches `approved` or `needs-you` (`ACR_NO_NOTIFY=1` to skip).
-- **Adapters** for Claude Code, Codex CLI, Cursor Agent, Antigravity and opencode: `detect()`, argv
-  building, streaming `run()`, session resume, and a permission model with exactly three levels
-  (`read-only`, `edits`, `full`).
-- **Autonomous Setup & Test Gatekeeper.** Runs `.acr.json` `setup` hooks in fresh worktrees, and runs
-  `testCommand` between worker and reviewer turns with test failure diagnostics fed directly to reviewers.
-- **Mechanical Goalpost Enforcement.** In Round 3+, reviewer citations are validated against modified hunks from
-  the worker's diff; a citation on a line the diff covers but the worker did not touch is downgraded to a
-  non-blocking nit, to prevent endless review loops. A citation the diff says nothing about stays blocking –
-  "not in this diff" is not evidence that the line was left alone.
-- **Brainstorm mode.** Three rounds instead of a build loop: everyone answers in parallel,
-  everyone reacts to the others, and the moderator writes a merged proposal. Nobody edits.
-  One button turns the proposal into a `build-review` room.
-- **Roster editing.** Swap who builds mid-room and change any participant's model, without
-  losing anyone's session.
-- **Commit, Merge, Open PR and Export markdown.** Commit the working tree on demand; merge the
-  room branch into the branch it was cut from, in your own checkout; push the room branch and
-  open a PR through your own `gh` login – one per repository the room committed in; save the
-  whole room as a markdown file.
-- **Additional folders, read or read & write.** Grant a room extra repositories. `read` is context
-  only, and an edit made there is reverted at the end of the turn. `read & write` makes the folder
-  part of the room: its changes join the diff the reviewers judge, the room commits them on an
-  `acr/<slug>` branch it cuts there, and Open PR opens a pull request in it too.
-- **Purge Room Data.** Cleanly remove worktrees, spilled diffs, turn logs, and database records via
-  `acr rooms purge <id>` or the web UI.
-- **`acr doctor`** – which runtimes are installed, new enough and logged in.
-- **`acr run`** – a whole room: the worker builds, every reviewer reviews in parallel, and the loop
-  repeats until they all approve, someone asks you a question, or you pause or stop it. There is
-  no round limit.
-- **Git worktrees.** Every room gets its own branch `acr/<slug>`, and by default its own worktree, so your checkout is
-  never touched and a room's diff is attributable to that room by construction.
-- **Auto-commit on approve.** The round everyone approved is committed on the room branch with the
-  worker's summary as the body, so a room's work is never sitting only in a working tree.
-- **SQLite persistence.** Rooms, participants, messages, turns and recent repos live in
-  `~/.config/agent-chat-room/acr.db` (schema v5), and `acr rooms` reads them back.
-- **Restart recovery.** A turn that died with its process is marked, its round is rolled back and
-  re-run, and each agent keeps its own runtime session – so only the turn is repeated, not the
-  conversation.
-- **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs` (with per-folder
-  `access`), `setup`, `testCommand`, `maxTurnRetries`, and `userConfig`.
-- **Terminal parity.** Turns load your own skills, plugins and MCP servers by default, so a room
-  runs the agent you configured rather than a stripped-down one. Permission levels are pinned by
-  CLI flags that outrank any config file, so a reviewer stays read-only either way — and
-  read-only turns run with hooks disabled, because hook commands execute outside the tool
-  permission layer and would otherwise let a reviewer write.
-- **Governance & CI.** MIT License, Denly attribution `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
-  and GitHub Actions CI across macOS and Linux.
+ACR uses each agent CLI's existing authentication; it does not ask you to configure API keys
+in ACR. Provider accounts, billing, model access and usage limits still apply. Login detection
+checks for credential files, not whether your session is valid or has quota.
 
-## Try it
+| Agent        | ID for `--agents` | Executable     | Minimum version checked by ACR |
+| ------------ | ----------------- | -------------- | ------------------------------ |
+| Claude Code  | `claude`          | `claude`       | 2.0.0                          |
+| Codex CLI    | `codex`           | `codex`        | 0.150.0                        |
+| Cursor Agent | `cursor`          | `cursor-agent` | 2026.7.0                       |
+| Antigravity  | `antigravity`     | `agy`          | 1.1.0                          |
+| opencode     | `opencode`        | `opencode`     | 1.18.0                         |
+
+These are adapter detection thresholds, not a guarantee that every later CLI version behaves
+identically. Run `acr doctor` to check your installation. `echo` is a test adapter, not an AI agent.
+CI covers macOS and Linux; Windows has platform-specific support but is not in the CI matrix.
+
+## Install and start
+
+Once the package is published to npm:
 
 ```sh
-npx agent-chat-room        # server + browser on http://127.0.0.1:4321
+npx agent-chat-room
 ```
 
-Node >= 20.19. Nothing else to configure: `acr` finds the agent CLIs you already have, and each
-of them finds its own login.
-
-To install it once instead of fetching it every time:
+Or install the command globally:
 
 ```sh
 npm install -g agent-chat-room
 acr
 ```
 
-<details>
-<summary>Or from a clone</summary>
+To run this checkout, including before the first npm release:
 
 ```sh
-nvm use            # Node 22.14 (>= 20.19 works)
-npm install
-npm run build      # tsc -b for the packages, vite build for the web app
-
-node packages/cli/dist/bin.js            # server + browser on http://127.0.0.1:4321
+git clone https://github.com/elia-dot/agent-chat-room.git
+cd agent-chat-room
+nvm use                 # optional: uses the Node version in .nvmrc
+npm ci
+npm run build
+npm run acr -- doctor
+npm run serve
 ```
 
-The commands below are written as `node packages/cli/dist/bin.js` for this layout; from an
-install they are all just `acr`.
+For a source checkout, replace `acr` in the examples below with `npm run acr --`.
+`better-sqlite3` is a native dependency: if no prebuilt binary is available for your Node/OS
+combination, installation requires a working native build toolchain.
 
-</details>
-
-Port 4321 is the default; if it is taken `acr` walks upward and prints the URL it actually bound.
-`acr serve --port N` pins one instead (and fails rather than moving), and `--no-open` leaves your
-browser alone.
-
-Rooms run inside that process. Closing the tab does not stop a room; Ctrl-C does.
-
-### From the terminal instead
+`acr` starts the server and opens your browser. It binds only `127.0.0.1`, starting at port
+4321 and trying higher ports if needed. Use the full URL printed in the terminal: it includes
+a token that authorizes the browser session. Keep that URL private.
 
 ```sh
-node packages/cli/dist/bin.js doctor
-node packages/cli/dist/bin.js doctor --models   # what you may pass to --model
-node packages/cli/dist/bin.js run \
-  --task "The login test is flaky. Find out why and fix it." \
-  --agents claude,codex \
-  --model claude=opus \
-  --cwd ~/code/your-repo
+acr serve --port 4321 --no-open
+```
 
-# A discussion instead of a build: everyone answers, everyone reacts, the last agent merges.
-node packages/cli/dist/bin.js run \
-  --mode brainstorm \
+An explicit port fails if occupied. Closing the browser tab leaves rooms running; stopping
+the server with Ctrl-C stops its active turns. Room history persists across restarts.
+
+## Your first room
+
+1. Open **rooms**, then **new room**, and choose a local repository.
+2. Choose **build-review** to change code or **brainstorm** to discuss an approach.
+3. Enter a task with the intended behavior and how to verify it. Choose at least two agents,
+   their roles and optionally models. Use **doctor** if a runtime is unavailable.
+4. Keep **Work in an isolated git worktree** enabled for a separate checkout. Fresh worktrees
+   have no ignored dependencies or build artifacts; configure setup below if the project needs them.
+5. Create the room and watch the transcript. Use the composer to send instructions or
+   `@mention` a participant. **Pause** holds the work; **Continue** resumes the round loop.
+6. Inspect the changed files and diff in the room panel. Use **actions** to commit unfinished
+   work, merge locally, open a PR, or export the conversation.
+
+Messages can interrupt active work and steer the next turn. A message to the worker in a
+finished room that produces no changes can finish without another review; Continue requests
+a full round. Between turns you can change models, swap the worker, or replace a runtime.
+Changing a model or role keeps its session; replacing a runtime starts a new session.
+The model picker includes **Custom…** for identifiers missing from its catalog.
+
+Attach files with the paperclip, drag and drop, or paste a screenshot. Agents receive local
+file paths to inspect. Type `#` to attach a snapshot of another room's transcript; it is not a
+live reference. Exports and attachments can contain source code and private conversation data.
+
+## Terminal usage
+
+```sh
+acr doctor
+acr doctor --models       # model discovery may contact the provider
+acr run --cwd ~/code/my-repo \
+  --task "Find and fix the flaky login test, then run its test suite." \
+  --agents claude,codex --model claude=opus
+
+acr run --cwd ~/code/my-repo --mode brainstorm \
   --task "How should we restructure the pricing module?" \
-  --agents claude,codex,cursor,antigravity
+  --agents claude,codex,cursor
 
-node packages/cli/dist/bin.js rooms ls
-node packages/cli/dist/bin.js rooms show <id>
-node packages/cli/dist/bin.js rooms export <id> --out room.md
-node packages/cli/dist/bin.js rooms resume <id>
-node packages/cli/dist/bin.js rooms merge <id>
-node packages/cli/dist/bin.js rooms close <id>
-node packages/cli/dist/bin.js rooms purge <id>
-node packages/cli/dist/bin.js data-path
+acr rooms ls
+acr rooms show <id>
+acr rooms resume <id>
+acr rooms export <id> --out room.md
+acr rooms merge <id>
+acr rooms close <id>
+acr rooms purge <id>
+acr data-path
+acr --help
 ```
 
-Driving one room from the browser and a terminal `acr run` at the same time is refused rather
-than merely discouraged: a room takes a cross-process lock for the whole loop, so the second
-driver fails fast naming the pid that has it. Two rooms on _different_ repos never contend.
+`--task-file path` reads a task from disk (`-` reads stdin). `--json` on `run` emits a JSON
+summary. `--room <id>` resumes a room. `--timeout <seconds>` sets the per-read stall timeout
+(default 1800 seconds), and `--retries <n>` retries failed turns up to 0–10 times (default 0).
+A turn you stop is not automatically retried. After a failure, fix the cause and Continue or
+resume to retry the interrupted round with the saved runtime session.
 
-In a `build-review` room the first runtime in `--agents` is the worker and edits files; every
-other one is a reviewer and runs read-only. In a `brainstorm` room the _last_ one is the
-moderator and nobody edits. There is no limit of two either way.
+### How the modes finish
 
-### Modes
+- **Build-review:** the first agent is the worker; the rest review in parallel. All reviewers
+  must approve before the engine commits the approved work on the room branch. A question
+  or failure hands the room back to you (`needs-you`). There is no round limit, so monitor
+  usage and pause or stop when needed. Agent approval does not replace your own review.
+- **Brainstorm:** everyone answers, everyone reacts, then the last agent (moderator) merges
+  the discussion into a proposal. The three phases use read-only permissions by default.
+  A finished proposal is shown as **proposed** (`needs-you` internally). **Promote** creates
+  a new build-review room from it, with the moderator as worker.
 
-A room is either a `build-review` room or a `brainstorm` room, and the mode is fixed when the
-room opens.
+For `acr run`, exit codes are `0` for approval or a completed brainstorm proposal, `1` for
+runtime/internal failure, `2` for invalid usage, and `3` for a question or stopped/unapproved run.
 
-### The loop (`build-review`)
+## Git behavior and additional folders
 
-```
-you post the task
-   -> round 1: worker turn (permission: edits), engine captures the diff
-   -> reviewer turns, in parallel (permission: read-only), each ending in a verdict
-   -> all approve?  yes: commit the round on acr/<slug>, room = approved
-                    no:  round 2 with the reviews, and so on until they approve or you stop it
-```
+Both the browser and CLI default to a branch named `acr/<slug>` in
+`~/.config/agent-chat-room/worktrees/<roomId>`. Rooms start from the detected base branch:
+local `origin/HEAD` metadata, then local `main` or `master`, then the current branch as fallback.
+ACR fetches the base from `origin` when configured, preserves local commits ahead of it, and
+refuses divergent histories or a failed fetch. It does not start from an arbitrary feature
+branch just because that branch is checked out.
 
-A `question` verdict stops the room immediately: it is addressed to you, so there is nobody else to
-ask. A review with no verdict block counts as _not approved_ – `acr` never guesses an approval.
+Providing a title determines the branch slug locally. Without one, ACR may ask an agent to
+name it; set `ACR_NO_AUTO_BRANCH_NAME=1` to skip that extra turn.
 
-### Brainstorm
+`--no-worktree` (or disabling isolation in the dialog) switches your checkout to a new room
+branch and edits there. A dirty checkout is refused unless you explicitly pass `--allow-dirty`;
+that option can include existing changes in room commits.
 
-```
-you post the question
-   -> round 1: every participant answers, in parallel (permission: read-only)
-   -> round 2: every participant reacts to the other answers
-   -> round 3: the moderator (the last agent in the roster) writes a merged proposal
-   -> room = needs-you, holding the proposal
-```
+- **Commit** stages and commits room changes on demand; approval also triggers a commit.
+- **Merge** merges the room branch into its recorded base branch in your original checkout.
+  That checkout must be clean, on the base branch, and free of an in-progress Git operation.
+  A conflicting merge started by ACR is aborted.
+- **Open PR** explicitly pushes the room branch and calls `gh pr create`. It can also open
+  PRs for writable additional repositories. It requires your own Git/`gh` authentication.
+- **Close** removes the room worktree and keeps its branch and history. Save or commit work
+  before closing. **Purge** additionally deletes database records, turn logs and spilled diffs;
+  it is not a secure erase of all copies, and currently does not remove attachment files.
 
-Nobody edits, so there is no diff, no verdict and no commit. A brainstorm never reaches
-`approved`: `needs-you` holding a proposal _is_ the finish line, the sidebar says "proposed",
-and `acr run --mode brainstorm` exits 0. Promote turns the proposal into the task of a fresh
-`build-review` room in the same repo, with the moderator as the worker.
+Additional folders are accessed in place, not isolated worktrees. `read` folders are context
+and edits there are reverted at the end of a turn. `write` folders join the room's diff and
+commits; ACR branches those repositories and may include pre-existing uncommitted changes.
+Merge operates on the primary repository only; merge additional repositories yourself.
 
-### Files and other rooms in the composer
+## Repository configuration
 
-Drop a file on the composer, paste a screenshot, or press the **paperclip** button in it. The file is taken into
-`~/.config/agent-chat-room/attachments/<roomId>/`, that folder is granted to every runtime in the
-room as an extra read root, and the next prompt names each attachment by absolute path. Images are
-never inlined into the prompt – no CLI runtime accepts that – so an agent that needs to look at one
-opens the file.
+Commit an optional `.acr.json` at the repository root. This is strict JSON (no comments or
+trailing commas). For an npm project with a lockfile, for example:
 
-Typing `#` offers the other rooms. Referencing one snapshots its transcript to a markdown file and
-attaches it the same way, so "do what we decided in #auth-spike" is something the agents can
-actually read. It is a snapshot, taken when you sent the message, not a live link.
-
-Naming an agent in a finished room reopens it, exactly as before. If you named the **worker** and it
-answers without changing a file, the room stops there rather than asking every reviewer for a review
-of a diff that does not exist; **continue** runs a full round.
-
-### Swapping roles and models
-
-Models are **picked, not typed**. The new-room dialog and the right panel both show a list
-per runtime, served by `GET /api/runtimes/models`: live from the CLI where a runtime can list
-its own models (`cursor-agent --list-models`, which is account-specific, and `agy models`),
-from Codex's account-specific local model cache, and a written-down list where neither is
-available (`claude`). The list is a picker seed, never a validator – it can go stale the week
-a model ships – so `Custom…` is always there for the strings no list can hold, such as
-`claude-opus-5[1m]` or
-`claude-opus-4-8[context=1m,effort=high]`. Opening a room with a name the runtime has never
-reported warns and continues; it is never refused, and if the vendor does reject it the turn
-error names the model and says where to change it.
-
-You can make a different agent the worker between rounds, or change any participant's model,
-from the right panel or with `PATCH /api/rooms/:id/participants/:runtime`. The room has to be
-held first – the permission a turn was spawned with is baked into that child process, so a
-swap mid-round would be a lie – and promoting a reviewer demotes the incumbent worker in the
-same step, so there is never briefly more than one writer.
-
-Sessions are kept, which is the point of swapping rather than opening a new room. That does
-mean a swapped agent's session still remembers being the other role, so the engine prepends a
-"your role has changed" block to its next prompt: Claude would notice on its own through
-`--append-system-prompt`, but Codex, Cursor, Antigravity and opencode only see role instructions
-on the first prompt of a session.
-
-The same control **replaces a runtime in place** – swap Codex out for opencode without
-reopening the room. That is the one roster change no session can survive, since a session id
-names a conversation only the old binary can resume, so the replacement starts cold: its
-model is cleared too (model ids belong to the runtime that offered them) and it is handed the
-whole transcript on its first turn rather than only the messages since a turn it never took.
-A swap will not put the same runtime in the room twice – two participants under one name are
-what an `@mention` cannot tell apart – though a room opened that way on purpose
-(`--agents opencode,opencode`) is legal, and the roster is addressed by participant id so the
-right one is still reachable.
-
-### When a turn fails
-
-By default the first failure hands the room back to you: it lands in `needs-you`, the round
-counter rewinds so **Continue** retries that same round, and the failed agent's session is
-kept so the retry resumes rather than starting cold.
-
-A room can be told to retry first. `maxTurnRetries` – set in the new-room dialog, in
-`.acr.json`, with `--retries n`, or changed at any time from the right panel – runs a failed
-turn again up to _n_ times before giving up. Every attempt writes its own turn row, so
-`rooms show` reports what actually happened rather than hiding a failure behind a success.
-
-Two things it deliberately will not do. It never retries a turn **you** stopped, because that
-would be arguing with you. And it does not change what a failed round _means_: once the
-budget is spent the room still rewinds and asks you, exactly as it always did. The default is
-0 – retrying costs another turn each time, and that is the room owner's decision to make, not
-a default that quietly spends their tokens twice.
-
-### Commit, Merge, Open PR, Export
-
-- **Commit** stages and commits the room's working tree, for the common case of a `needs-you`
-  room whose last round is real work sitting uncommitted.
-- **Merge** merges `acr/<slug>` into the branch the room was cut from, with `--no-ff`, so the
-  round stays attributable to the room after the branch is gone. This is the one action that
-  writes to the checkout you are standing in, which is why it asks first and refuses more than
-  it helps: the room may not have uncommitted work, your checkout has to be sitting on the base
-  branch, clean, and not part-way through a merge, rebase, cherry-pick or revert of its own,
-  and a merge _it started_ that conflicts is aborted rather than handed back to you
-  half-applied. A merge already in progress is left strictly alone – it is not enough to ask
-  whether the tree is dirty, because resolving a conflict back to `HEAD` leaves a clean tree
-  with `MERGE_HEAD` still set. It holds the room lock and the repo write lock throughout, so
-  two rooms on one repository cannot check and merge interleaved. It touches the room repo
-  only – a writable additional folder branched inside
-  your own checkout, so merging that one is a `git merge` you do yourself. `acr rooms merge <id>`
-  is the same action from the terminal.
-- **Open PR** pushes the room branch and runs `gh pr create`. It is the only thing `acr` does
-  that leaves your machine, so it never happens implicitly: it needs an explicit press, it
-  names the remote and branch first, and the push and the resulting url both
-  land in the transcript. `gh` is an optional dependency – without it the button explains
-  itself rather than failing on click. `acr` never reads your GitHub token either; `gh` finds
-  its own login exactly the way the agent CLIs do.
-- **Export markdown** writes the whole room – roster, task, transcript, verdicts, activity,
-  diffs and usage – as one file. `acr rooms export <id> [--out room.md]` is the same function.
-
-### Worktrees
-
-Each room gets `~/.config/agent-chat-room/worktrees/<roomId>` on branch `acr/<slug>`, created from
-the HEAD your checkout was on. The slug comes from the room title when you give one; without a title
-the worker runtime is asked for a short name in one read-only turn, falling back to a condensed
-version of the task when it is unavailable or unhelpful. Set `ACR_NO_AUTO_BRANCH_NAME=1` to skip that
-extra call and always condense locally. That branch is what you merge or open a PR from; `acr rooms close`
-removes the worktree and keeps the branch.
-
-Pass `--no-worktree` to work in the checkout instead (useful with submodules or tooling that dislikes
-worktrees, and the default in the web dialog, where a fresh worktree's missing `node_modules` is
-usually the bigger nuisance). In that mode `acr` refuses to start on a dirty tree unless you also pass
-`--allow-dirty`, because otherwise a room's diff is not attributable to the room.
-
-**A room branches either way.** Without a worktree the branch is cut in the checkout you are standing
-in – `git checkout -b acr/<slug> <fetched base>`, named the same way – so the round's commits land
-somewhere that can be reviewed and opened as a pull request rather than straight onto the trunk.
-
-It is cut _at the freshly fetched base_, not at your HEAD, so you do not have to be standing on the
-trunk to open a room: start one mid-feature and the room begins from the trunk while the branch you
-were on is left exactly where it is. Your checkout does move to the room's branch – `git switch -` puts
-you back. A dirty tree is still refused without `--allow-dirty`, because a room's diff has to be
-attributable to the room. Rooms opened before any of this existed have no branch of their own, and
-Open PR stays disabled for them and says so.
-
-Note that a fresh worktree has no `node_modules` and no build output. You can provide automated
-post-creation commands via the `"setup"` array in `.acr.json`.
-
-### `.acr.json`
-
-Optional, committed at the repo root. CLI flags beat it, and it beats the built-in defaults:
-
-```jsonc
+```json
 {
-  "agents": ["claude", "codex"], // the first one is the worker
+  "agents": ["claude", "codex"],
   "worktree": true,
   "timeoutSeconds": 1800,
-  "models": { "claude": "opus", "cursor": "auto" },
-  "permissions": { "worker": "edits" }, // "edits" edits and runs commands; "full" skips every check
-  // Extra folders. A bare path means read & write; use the object form for read-only.
-  "additional_dirs": ["/path/to/app", { "path": "/path/to/shared/lib", "access": "read" }],
-  "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
-  "testCommand": "npm test", // run between worker and reviewer turns; results injected under ## Test Results
-  "maxTurnRetries": 0, // retries per failed turn before the room stops and asks you
-  // Load your own CLI config - skills, plugins, MCP servers, instructions - so an agent in
-  // a room behaves like the same agent in your terminal. Defaults to true. How much
-  // `false` can claw back differs per runtime; see the table below. Never widens a
-  // room's permissions, and reviewers never run hooks either way.
-  "userConfig": true,
+  "models": { "claude": "opus" },
+  "permissions": { "worker": "edits", "reviewer": "read-only" },
+  "setup": ["npm ci", "npm run build"],
+  "testCommand": "npm test",
+  "maxTurnRetries": 0,
+  "userConfig": true
 }
 ```
 
-#### What `userConfig` reaches, per runtime
+Adapt or omit setup and test commands for your project. Setup runs before agent turns in an
+isolated worktree and is skipped once all steps have succeeded. A failed setup stops for your
+input; retrying can rerun earlier steps. `testCommand` runs between worker and reviewer turns
+and its results are included for review. These commands execute in your local shell outside
+agent permission controls; only use repository hooks you trust.
 
-Each CLI exposes a different amount of control, so `userConfig` is honest about being uneven:
+Explicit CLI/API options override repository defaults, which override built-in defaults.
+The browser supplies its selected form values explicitly. Unknown keys and invalid fields
+warn and are ignored. Optional `additional_dirs` takes objects such as
+`{ "path": "/absolute/path/to/library", "access": "read" }`; a bare path string means **write**.
 
-| runtime    | `true` (default)                                  | `false`                                                                                             |
-| ---------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `claude`   | all setting sources: skills, plugins, MCP servers | `--setting-sources project` — the one runtime where opting out is close to total                    |
-| `codex`    | `~/.codex/config.toml`: instructions, MCP servers | `--ignore-user-config` — drops `config.toml` only; `~/.codex/skills` still loads                    |
-| `agy`      | skills load; `/name` invocation stays disabled    | **no effect** — skills are available either way, so the slash-command guard is kept unconditionally |
-| `opencode` | config merged, as it always is                    | `--pure` — drops external plugins only; config still merges                                         |
-| `cursor`   | always at parity                                  | **no effect** — cursor-agent exposes no isolation flag                                              |
+### Permissions and user configuration
 
-`userConfig: false` is a best-effort narrowing, not a boundary — no CLI here declines
-everything, and `cursor` declines nothing. Do not use it as a security control.
+Workers default to `edits`, reviewers to `read-only`. Permissions map to each vendor's flags
+or configuration; they are not a uniform operating-system sandbox. In particular, denying
+opencode's `webfetch` tool does not block networking through an allowed shell command.
+Antigravity's `edits` mode cannot run shell commands, so a worker needing tests requires `full`.
+`full` bypasses the runtime's permission checks, including protection of files outside the
+workspace. Review the mappings in
+[`permissions.ts`](https://github.com/elia-dot/agent-chat-room/blob/main/packages/core/src/permissions.ts).
 
-What _is_ a boundary is the permission floor, enforced separately by CLI flags that outrank any
-config file, so none of the above widens what a turn may do. Sandboxed turns additionally
-suppress hooks — `disableAllHooks` on `claude`, `--disable hooks` on `codex` — because hook
-commands run as processes rather than tool calls and so escape the sandbox entirely; on
-`claude` a hook was measured writing into the worktree during a read-only turn. `codex` also
-gets `--ignore-rules` and a pinned `approval_policy`. None of that depends on `userConfig`.
+`userConfig` defaults to `true`, loading the runtime's own skills, plugins, MCP servers and
+instructions. Sandboxed Claude/Codex turns suppress hooks separately. Setting it to `false`
+is best-effort configuration narrowing, not a security boundary:
 
-Unknown keys warn and are ignored, so a file written by a newer `acr` never bricks an older one.
+| Runtime             | Effect of `userConfig: false`                                      |
+| ------------------- | ------------------------------------------------------------------ |
+| Claude              | Uses project setting sources only                                  |
+| Codex               | Ignores user `config.toml`; local skills may still load            |
+| opencode            | Uses `--pure` to omit external plugins; configuration still merges |
+| Cursor, Antigravity | No user-configuration isolation flag is applied                    |
 
-### State on disk
+## Local data and troubleshooting
 
-```
-~/.config/agent-chat-room/
-  acr.db                  rooms, participants, messages, turns, recent repos (schema v6)
-  server.token            capability session authorization token (mode 0600)
-  turns/<turnId>.jsonl    every raw line a runtime emitted, for debugging an adapter
-  worktrees/<roomId>/     the room's checkout
-  diffs/<messageId>.diff  diffs too large to keep in a row
-  attachments/<roomId>/   files you put into the chat, granted to that room's runtimes
-  locks/<hash>.lock       the advisory per-repo write lock
-  locks/room-<id>.lock    the advisory per-room lock, held for a whole run
-```
+`acr data-path` prints the data directory, normally `~/.config/agent-chat-room`.
+`ACR_CONFIG_DIR` overrides it. It contains `acr.db` (rooms, messages, participants and turns),
+`server.token`, worktrees, raw runtime logs in `turns/`, spilled `diffs/`, `attachments/`,
+and lock files. Back it up along with room branches if you need to keep the work.
+Set `ACR_NO_NOTIFY=1` to disable macOS room notifications.
 
-`ACR_CONFIG_DIR` moves all of it, which is how the tests keep it disposable.
+The server is local, but agent requests go to their providers, Git can contact remotes, and
+configured tools/hooks can use the network. The UI also requests Google Fonts, with system
+font fallbacks. This is not an offline service or a hosted multi-user server.
+All API routes except `/api/health`, plus WebSocket connections, require the capability
+token through a session cookie or `Authorization: Bearer <token>`. See
+[SECURITY.md](https://github.com/elia-dot/agent-chat-room/blob/main/SECURITY.md).
 
-Exit codes, so it is usable from a script:
+| Problem                            | What to check                                                                                                        |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Runtime missing or unusable        | Install/login through that CLI, ensure it is on the server process's `PATH`, then run `acr doctor`.                  |
+| Authentication/model/quota error   | Run that CLI directly to verify its account and model access; change the room's model or runtime before retrying.    |
+| Missing dependencies in a room     | Configure `setup` or prepare the displayed worktree yourself; your original checkout's ignored files are not copied. |
+| Cannot update the base branch      | Check Git credentials, network access, and local/remote divergence before retrying.                                  |
+| Browser unauthorized/disconnected  | Open the full token-bearing URL printed by the running server; verify that process is still running.                 |
+| Port occupied                      | Use the URL ACR actually prints, or pick a free explicit `--port`.                                                   |
+| Native SQLite install/load failure | Check Node compatibility and native build tools; rebuild dependencies for the Node version you are running.          |
 
-| code | meaning                                                                      |
-| ---- | ---------------------------------------------------------------------------- |
-| 0    | the reviewers approved                                                       |
-| 1    | acr or a runtime failed                                                      |
-| 2    | bad usage                                                                    |
-| 3    | the reviewers did not approve (a `question` for you, or the run was stopped) |
+## Development and contributions
 
-A brainstorm room has no reviewers, so it exits 0 when it produced a proposal.
-
-## Verdicts
-
-Every reviewer message ends with a fenced block, which is what makes the loop deterministic instead
-of grepping for "LGTM":
-
-````
-```verdict
-{ "decision": "approve" | "request-changes" | "question", "blocking": ["..."], "nits": ["..."] }
-```
-````
-
-The fence is the portable path and works for any runtime. `--json-schema` (Claude) and
-`--output-schema` (Codex) are wired up as an optional extra, never as something the loop depends on.
-
-### Mechanical Goalpost Enforcement (Round 3+)
-
-To prevent endless review loops on unchanged code:
-
-- In **Round 1 and 2**, reviewers may raise blocking issues on any file.
-- Starting in **Round 3**, reviewer `file:line` citations are mechanically validated against modified hunks from `git diff base..HEAD`.
-- Blocking citations referencing untouched code outside the worker's diff hunks are automatically downgraded to non-blocking nits. If no valid blocking issues remain, the verdict is automatically converted to `approve`.
-
-## Development
+Issues and pull requests are welcome:
+[report a bug or request a feature](https://github.com/elia-dot/agent-chat-room/issues), or
+read [CONTRIBUTING.md](https://github.com/elia-dot/agent-chat-room/blob/main/CONTRIBUTING.md)
+for the contribution and adapter guide.
 
 ```sh
-npm run build       # tsc -b across the workspace, then vite build for the web app
-npm test            # vitest, hermetic: no network, no agent CLI required
-npm run lint        # eslint, type-aware
+npm ci
+npm run build
+npm test
 npm run typecheck
-npm run format
+npm run lint
+npm run format:check
 ```
 
-Two terminals, for working on the UI:
+For UI development, run the built API on port 4321 in one terminal and Vite in another:
 
 ```sh
-npm run build:ts && npm run dev:server   # the API on :4321, no browser
-npm run dev:web                          # Vite on :5173, proxying /api and the WebSocket
+npm run acr -- serve --port 4321 --no-open
+npm run dev:web                           # open http://localhost:5173
 ```
 
-The server tests drive every route through `app.inject()` and never open a port, except the
-WebSocket ones, which listen on port 0. The web tests run in `node`, not jsdom: everything worth
-pinning – the event reducer, mention parsing, diff parsing – is a pure module, deliberately, so
-there are no DOM component tests to need a browser environment.
+Rebuild TypeScript after changing core/server/CLI code. Vite reloads web source changes.
+The default tests use fixtures and the `echo` adapter; they do not invoke real agent CLIs.
+Some server tests bind temporary loopback ports. Live acceptance tests are opt-in:
+`ACR_LIVE=1 npm test -- live` (requires authenticated CLIs and can consume provider usage).
 
-`npm test` never spawns an agent CLI. The adapter tests replay recorded fixtures
-(`packages/core/test/fixtures/`), the process tests drive a tiny `node -e` child, and everything
-above the adapter layer runs against the `echo` test-double adapter. Tests that touch the store or a
-worktree point `ACR_CONFIG_DIR` at a throwaway directory.
-
-The tests that talk to real CLIs are the M1 and M3 acceptance tests, and they are opt in:
-
-```sh
-ACR_LIVE=1 npm test -- live
-```
-
-### Adding a runtime
-
-Implement `AgentAdapter` from `packages/core/src/types.ts` – an id, `detect()`, `capabilities`, and
-`run(req, sink)` – and register it in `packages/core/src/adapters/index.ts`. Two rules keep the rest
-of the system honest:
-
-- **Vendor flags only live in `permissions.ts`.** The engine speaks `read-only | edits | full`.
-- **Never fail on an unknown event.** Runtimes add event types between releases; an adapter that
-  throws on one breaks every room on the next upgrade.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the complete guide to writing an adapter and using `EchoAdapter` as a reference.
-
-#### Runtime Capability Profiles & Permissions
-
-Every adapter maps the engine's 3 permission tiers to CLI flags:
-
-| Runtime      | Adapter       | `read-only`                                     | `edits`                                             | `full`                                       |
-| ------------ | ------------- | ----------------------------------------------- | --------------------------------------------------- | -------------------------------------------- |
-| Claude Code  | `claude`      | `--permission-mode plan --tools Read,Glob,Grep` | `--permission-mode acceptEdits --allowedTools Bash` | `--permission-mode bypassPermissions`        |
-| Codex CLI    | `codex`       | `-s read-only`                                  | `-s workspace-write`                                | `--dangerously-bypass-approvals-and-sandbox` |
-| Cursor Agent | `cursor`      | `--mode ask --sandbox enabled --trust`          | `--trust`                                           | `--force --trust`                            |
-| Antigravity  | `antigravity` | `--sandbox`                                     | `--mode accept-edits`                               | `--dangerously-skip-permissions`             |
-| opencode     | `opencode`    | `permission.edit/bash: deny`                    | `edit/bash: allow`, `webfetch: deny`                | `edit/bash/webfetch: allow`                  |
-
-`edits` is the level a worker gets by default: it may edit the repository **and run
-commands in it**, because a worker that cannot build, test or lint the change it just wrote
-cannot tell you whether the change works. What it does not get is the network, which is the
-line between `edits` and `full`; `full` – set in the new-room dialog, or as
-`"permissions": { "worker": "full" }` – skips every permission check, files outside the
-workspace included. Reviewers stay `read-only` throughout, which is plan mode: read-only
-shell commands run, writes do not.
-
-Antigravity is the exception, and the table says so rather than pretending: `agy` offers
-only `accept-edits`, `plan`, `--sandbox` and `--dangerously-skip-permissions`, with nothing
-in between, and `accept-edits` auto-denies `run_command`. An Antigravity worker that has to
-run a test suite needs `full`. Every other runtime honours `edits` as written above.
-
-opencode is the one runtime with no permission flags at all, so its row is the `permission`
-block of a config document handed over in `OPENCODE_CONFIG_CONTENT` rather than argv. Two
-things make that safe, both probed rather than assumed: `deny` withholds the tool from the
-model instead of merely refusing the call, and the environment beats the target repo's own
-`opencode.json`, so a repository cannot widen the permission level of a room pointed at it.
-Note also that with no config at all opencode allows both edits and shell, so every level
-states its denials outright – there is no safe default to fall back on.
-
-`packages/core/src/process/runTurn.ts` is the only place in the project that spawns an agent
-process, so adapters stay a pair of pure pieces: an argv builder and a stream parser.
-Likewise `packages/core/src/store/rooms.ts` is the only place that holds SQL, so swapping
-`better-sqlite3` for something else is one file rather than a refactor.
-
-The engine emits the event stream the WebSocket forwards, unchanged:
-
-```ts
-type EngineEvent =
-  | { type: 'room.state'; roomId: string; state: RoomState; round: number }
-  | { type: 'room.paused'; roomId: string; paused: boolean }
-  | { type: 'room.roster'; roomId: string; participants: Participant[] }
-  | {
-      type: 'message.start';
-      roomId: string;
-      messageId: string;
-      author: string;
-      role: string;
-      round: number;
-    }
-  | { type: 'message.delta'; roomId: string; messageId: string; text: string }
-  | { type: 'message.done'; roomId: string; message: Message }
-  | { type: 'turn.activity'; roomId: string; turnId: string; event: TurnEvent };
-```
-
-The terminal renderer consumes exactly that, and so does the WebSocket – `/api/ws` forwards these
-values verbatim after one `snapshot` frame – so the CLI and the browser end up being two views of
-one loop rather than two implementations of it.
-
-### The HTTP surface
-
-Everything is under `/api`, bound to `127.0.0.1`, and origin-checked. All mutating requests
-(`POST`, `PATCH`, `PUT`, `DELETE`) and WebSocket upgrades (`/api/ws`) require authorization via the
-capability token stored at `~/.config/agent-chat-room/server.token` (sent via `Authorization: Bearer <token>`
-or redeemed as a `SameSite=Strict; HttpOnly` session cookie on first navigation `GET /?token=...`):
-
-| method + path                                                               | what it does                                                     |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `GET /api/health`                                                           | `{ ok, version }`                                                |
-| `GET /api/runtimes`                                                         | `acr doctor --json`, plus `gh` detection for the PR button       |
-| `GET /api/runtimes/models?runtime=`                                         | what the model picker offers, per runtime; `acr doctor --models` |
-| `GET /api/rooms`                                                            | `?repo=&open=&limit=`                                            |
-| `POST /api/rooms`                                                           | open a room; `start: true` kicks the loop off                    |
-| `GET /api/rooms/:id`                                                        | room, roster, transcript, turns, and the in-flight turn buffer   |
-| `GET /api/rooms/:id/messages`                                               | `?afterSeq=&limit=` – the tail, not the history                  |
-| `GET /api/rooms/:id/diff?message=`                                          | `text/plain`, following a diff that spilled to disk              |
-| `GET /api/rooms/:id/files`                                                  | changed files and `git diff --stat` against the room's base      |
-| `POST /api/rooms/:id/messages`                                              | say something; holds the loop, sets the next speaker             |
-| `POST /api/rooms/:id/start` \| `/pause` \| `/resume` \| `/stop` \| `/close` | drive the room                                                   |
-| `POST /api/rooms/:id/purge`                                                 | remove room worktree, diffs, turn logs, and SQLite record        |
-| `PATCH /api/rooms/:id`                                                      | `{ title?, additionalDirs? }`                                    |
-| `PATCH /api/rooms/:id/participants/:runtime`                                | `{ role?, model? }` – the role swap and the model picker         |
-| `POST /api/rooms/:id/commit`                                                | `{ message? }` – commit the working tree                         |
-| `POST /api/rooms/:id/merge`                                                 | `{ message? }` – merge the room branch into its base branch      |
-| `POST /api/rooms/:id/pr`                                                    | `{ title?, body?, remote?, draft? }` – push, then `gh pr create` |
-| `POST /api/rooms/:id/promote`                                               | a brainstorm proposal becomes a new `build-review` room          |
-| `GET /api/rooms/:id/export.md`                                              | the whole room as markdown                                       |
-| `GET /api/repos` \| `/api/repos/browse?path=`                               | the repo picker                                                  |
-| `GET /api/repos/picker`                                                     | whether this host can show a native folder dialog                |
-| `POST /api/repos/pick`                                                      | `{ path? }` – open that dialog; `{ path, repoRoot }` back        |
-
-Attachments are two more routes on the same terms. `POST /api/rooms/:id/attachments` takes
-`{ name, mime, data }` with `data` base64 (20 MB ceiling; JSON rather than multipart, so the server
-keeps its one body parser) and answers with the handle to send along in
-`POST /api/rooms/:id/messages` as `attachments`, next to `rooms` for the transcripts to pull in. The
-handle is an id, never a path: the file is written as `<id><ext>` under the room's own folder and the
-path is rebuilt from that id, so nothing a client sends decides where a byte lands or is read from.
-`GET /api/rooms/:id/attachments/:attachmentId` reads one back, `inline` only for raster image types
-and `attachment` for everything else – SVG included, since it carries script.
-
-`GET /api/repos/browse` reads directories and `POST /api/rooms` spawns an agent CLI with `edits`
-permission, so the origin check and capability token are load-bearing rather than a nicety: without them,
-any page open in your browser or malicious local script could POST to `127.0.0.1:4321`. `POST /api/repos/pick`
-raises the stakes again – it opens a native folder dialog on the machine running the server. On a headless host
-`GET /api/repos/picker` reports `available: false` (as it does when `ACR_NO_PICKER` is set) and the in-app
-directory browser is what the dialog falls back to.
+Maintainers: see the [release checklist](https://github.com/elia-dot/agent-chat-room/blob/main/docs/RELEASING.md)
+for public GitHub settings, package inspection and npm publishing. The
+[design plan](https://github.com/elia-dot/agent-chat-room/blob/main/docs/PLAN.md) is historical
+context; [token efficiency](https://github.com/elia-dot/agent-chat-room/blob/main/docs/TOKEN_EFFICIENCY.md)
+describes prompt and review behavior in more detail.
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+[MIT](LICENSE). See [NOTICE](NOTICE) for attribution.

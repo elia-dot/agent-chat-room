@@ -4,3 +4,7 @@ Copyright (c) 2026 agent-chat-room contributors
 This project includes ideas, architecture patterns, and CLI adapter designs
 clean-ported from Denly, reimagined as a pure TypeScript, local-first
 multi-agent coordination room.
+
+Built with the help of Denly (https://denly.dev).
+The Denly logo is included for attribution; it identifies Denly and does not
+imply endorsement of forks or third-party distributions.

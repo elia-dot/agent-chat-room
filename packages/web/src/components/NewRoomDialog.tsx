@@ -518,7 +518,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 }`}
               >
                 {workerPermission === 'edits'
-                  ? 'default · edits files and runs commands in the workspace, so it can build, test and lint what it wrote · no network'
+                  ? 'default · workspace edits; command and network access depend on the runtime · Antigravity needs full access to run tests'
                   : 'every permission check is skipped, the network and files outside the workspace included · reviewers stay read-only either way'}
               </span>
             </span>
