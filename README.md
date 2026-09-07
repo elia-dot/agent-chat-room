@@ -279,7 +279,7 @@ Some server tests bind temporary loopback ports. Live acceptance tests are opt-i
 `ACR_LIVE=1 npm test -- live` (requires authenticated CLIs and can consume provider usage).
 
 Maintainers: see the [release checklist](https://github.com/elia-dot/agent-chat-room/blob/main/docs/RELEASING.md)
-for public GitHub settings, package inspection and npm publishing. The
+for package validation, the tarball smoke test and npm publishing. The
 [design plan](https://github.com/elia-dot/agent-chat-room/blob/main/docs/PLAN.md) is historical
 context; [token efficiency](https://github.com/elia-dot/agent-chat-room/blob/main/docs/TOKEN_EFFICIENCY.md)
 describes prompt and review behavior in more detail.

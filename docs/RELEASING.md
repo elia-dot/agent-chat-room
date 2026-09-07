@@ -1,4 +1,4 @@
-# Public release checklist
+# Release checklist
 
 Publish the **root `agent-chat-room` package**. The four workspace packages are private
 implementation details; the root artifact includes their compiled output and the web app.
@@ -7,31 +7,12 @@ implementation details; the root artifact includes their compiled output and the
 
 - Keep source, tests, the lockfile, docs, license and contribution templates tracked.
   Dependencies, build output, `.env` files, logs, tarballs and `.codegraph/` are ignored.
-  You do not need to delete local worktrees or installed dependencies to go public.
-- Inspect `git status --short` and `git ls-files`. Review tracked content **and Git history**
-  for credentials, private code/data, personal paths and third-party assets before exposing
-  the repository. Ignore rules do not remove previously committed content. Also review old
-  issues, PRs and Actions logs that will become visible. Rotate any exposed credentials.
+- Inspect `git status --short` and release the revision you actually validated. Review new
+  commits for credentials, private data and personal paths; ignore rules do not remove
+  content already committed, so rotate anything that slipped in rather than deleting it.
 - Keep the Denly attribution and logo; confirm rights to included third-party material.
 - Run the checks below on the final release revision. Do not use `git clean -fdx` as a
   publication step: it deletes ignored local files and is unnecessary.
-
-## GitHub settings (repository administrator)
-
-These are hosted settings; changing files in a checkout cannot enable them.
-
-1. In repository **Settings → General → Danger Zone**, change visibility to **Public** after
-   reviewing GitHub's disclosure warning. See [GitHub's visibility guide](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility).
-2. Under **Features**, enable **Issues**. The existing bug/feature issue templates and PR
-   template will guide contributors. Accept contributions through forks and pull requests
-   against `main`; contributors do not need write access to this repository.
-3. Enable [private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
-   so the private reporting link in `SECURITY.md` works.
-4. Require passing CI and review on `main` using a branch rule/ruleset. Keep Actions
-   permissions read-only for untrusted pull requests and review outside-contributor workflow
-   runs before approving them. Confirm the CI workflow runs on a fork PR.
-5. Check the README, logo, Issues, contribution guide and security reporting link while
-   signed out. Visibility and enabled features must be verified separately from this checklist.
 
 ## Validate and inspect the package
 
@@ -94,5 +75,5 @@ Do not publish all workspaces individually. Verify the published version with a 
 `npx agent-chat-room@<version> --version` and startup smoke test, then create release notes
 for that revision through the project's version-control/release process.
 
-A successful local build or pack is not evidence that npm publication, GitHub visibility,
-issue settings or private reporting have been enabled.
+A successful local build or pack is not evidence that the version was actually published.
+Verify the published artifact itself.
