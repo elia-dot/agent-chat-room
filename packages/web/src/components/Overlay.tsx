@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 export interface OverlayProps {
   title: string;
@@ -7,6 +7,105 @@ export interface OverlayProps {
   side?: 'right' | 'left' | 'center';
   onClose: () => void;
   children: React.ReactNode;
+}
+
+/** What Tab can land on. Disabled controls and `tabindex="-1"` are deliberately excluded. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The last thing focused outside a dialog: what a modal should hand focus back to.
+ *
+ * A modal cannot work this out for itself once it is mounted. React honours `autoFocus` by
+ * calling `focus()` during commit, before passive effects and before an ancestor's layout
+ * effect (host mounts run bottom-up), so by the time any hook in `Overlay` runs,
+ * `document.activeElement` in `RoomsOverlay` is already its own filter box rather than the
+ * control behind it. Reading it during render would be early enough but is a ref write and
+ * an impure global read in the render phase, which `react-hooks/refs` and
+ * `react-hooks/purity` both reject.
+ *
+ * Tracking it continuously sidesteps the ordering question entirely. Anything inside a
+ * dialog is ignored, so a modal's own `autoFocus` never overwrites the answer.
+ */
+let lastFocusedOutsideDialog: Element | null = null;
+document.addEventListener(
+  'focusin',
+  (event) => {
+    const target = event.target;
+    if (target instanceof Element && !target.closest('[role="dialog"]')) {
+      lastFocusedOutsideDialog = target;
+    }
+  },
+  true,
+);
+
+/**
+ * Trap Tab inside a container and hand focus back to whatever opened it.
+ *
+ * Shared by the two modal surfaces. Split into two effects on purpose: the keydown handler
+ * has to see the latest `onClose`, which is an inline arrow at every call site and so has a
+ * new identity every render, while the focus save/restore must run exactly once. Putting
+ * them together would restore focus on every render.
+ */
+export function useModalFocus<T extends HTMLElement>(
+  container: React.RefObject<T | null>,
+  onClose: () => void,
+): void {
+  /** Whatever inside the panel held focus when this effect last tore down. */
+  const inside = useRef<HTMLElement | null>(null);
+  /** Resolved on mount rather than during render: see `lastFocusedOutsideDialog`. */
+  const opener = useRef<Element | null>(null);
+
+  useEffect(() => {
+    const node = container.current;
+    if (!node) return;
+    opener.current ??= lastFocusedOutsideDialog;
+    const previous = inside.current?.isConnected === true ? inside.current : null;
+    if (previous) {
+      // A remount. StrictMode does one of these on every mount in development, and its
+      // simulated teardown has already handed focus back to the opener; re-taking the panel
+      // here is what would defeat `autoFocus` a second time.
+      previous.focus();
+    } else if (!node.contains(document.activeElement)) {
+      // Only take focus if nothing inside already has it. `RoomsOverlay` autofocuses its
+      // filter so you can type the moment ⌘K lands; moving focus to the panel would undo
+      // exactly the thing that `autoFocus` is there for.
+      node.focus();
+    }
+    return () => {
+      const active = document.activeElement;
+      inside.current = node.contains(active) && active instanceof HTMLElement ? active : null;
+      const back = opener.current;
+      // `isConnected` because the opener may itself have been unmounted while the overlay
+      // was up – focusing a detached node does nothing and loses the caret to the body.
+      if (back instanceof HTMLElement && back.isConnected) back.focus();
+    };
+  }, [container]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !container.current) return;
+      const nodes = Array.from(container.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (nodes.length === 0) return;
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      const active = document.activeElement;
+      // Wrapping from the container itself covers the first Tab after it takes focus.
+      if (event.shiftKey && (active === first || active === container.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [container, onClose]);
 }
 
 /**
@@ -23,13 +122,9 @@ export function Overlay({
   onClose,
   children,
 }: OverlayProps): React.ReactElement {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useModalFocus(panel, onClose);
 
   const position =
     side === 'center'
@@ -40,17 +135,22 @@ export function Overlay({
 
   return (
     <div className="fixed inset-0 z-30">
-      <button
-        type="button"
-        aria-label="close"
-        onClick={onClose}
-        className="absolute inset-0 bg-black/45"
-      />
+      {/* Not a button: Escape and the `esc` control already close this, and a full-viewport
+          tab stop labelled "close" only gets in the way of the trap below. */}
+      <div aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-black/45" />
       <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={`absolute flex max-h-[86vh] flex-col border-line bg-ground shadow-2xl ${position}`}
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
-          <h2 className="font-mono text-[11px] tracking-[0.14em] text-ink-dim uppercase">
+          <h2
+            id={titleId}
+            className="font-mono text-[11px] tracking-[0.14em] text-ink-dim uppercase"
+          >
             {title}
           </h2>
           {hint && <span className="font-mono text-[10px] text-ink-faint">{hint}</span>}

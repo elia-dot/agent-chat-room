@@ -92,9 +92,11 @@ Options for \`run\`:
   --json                   Print a JSON summary instead of a human transcript.
   --no-color               Disable colour.
 
-Every room runs on its own branch \`acr/<slug>\` in a git worktree under
-~/.config/agent-chat-room/worktrees, so your checkout is never touched. The engine commits
-the round that everyone approved. Per-repo defaults go in a committed \`.acr.json\`.
+Every room runs on its own branch \`acr/<slug>\`. By default that branch is checked out in a
+git worktree under ~/.config/agent-chat-room/worktrees, so your own checkout is never
+touched; \`--no-worktree\` works in the checkout instead, and moves it to the room branch.
+The engine commits the round that everyone approved. Per-repo defaults go in a committed
+\`.acr.json\`.
 
 Exit codes:
   0  the reviewers approved

@@ -153,6 +153,30 @@ pre,
 }
 
 /*
+ * One focus indicator for the whole app.
+ *
+ * The inputs used to clear the UA outline and replace it with a one-pixel border shift from
+ * `line` to `line-strong`, which is a change most people cannot see on a control that
+ * already has a border; the purge input cleared it and replaced it with nothing. This is
+ * `:focus-visible` rather than `:focus`, which is what those overrides were reaching for:
+ * no ring when you click a control, a ring when you tab to it.
+ */
+:focus-visible {
+  outline: 2px solid var(--acr-live);
+  outline-offset: 2px;
+}
+
+/*
+ * The one exception. A modal panel takes focus programmatically so the Tab trap has
+ * somewhere to start, and because the shortcut that opened it was a keypress the browser
+ * counts that as keyboard focus. Ringing the whole sheet says nothing: the panel is a
+ * container, not a control, and the first Tab moves to something that does show the ring.
+ */
+[role='dialog']:focus-visible {
+  outline: none;
+}
+
+/*
  * Liveness animations. Three states the eye reads without labels: something is alive
  * (pulse), something is being written right now (caret), and a turn is in flight with no
  * knowable duration (bar).

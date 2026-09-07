@@ -152,7 +152,7 @@ export function RoomOverlay(props: RoomOverlayProps): React.ReactElement {
         {files === null ? (
           <p className="font-mono text-[11px] text-ink-faint">loading…</p>
         ) : files.changed.length === 0 ? (
-          <p className="font-mono text-[11px] text-ink-faint">Nothing changed yet.</p>
+          <p className="font-mono text-[11px] text-ink-faint">nothing changed yet</p>
         ) : (
           <ul className="space-y-0.5">
             {files.changed.map((path) => (
@@ -224,7 +224,7 @@ function AdditionalFolders({
       <AdditionalDirsEditor value={dirs} onChange={setDirs} disabled={locked} />
       {dirs.length === 0 && (
         <p className="mt-1 font-mono text-[11px] text-ink-faint">
-          Only the room repository is accessible.
+          only the room repository is accessible
         </p>
       )}
       <button

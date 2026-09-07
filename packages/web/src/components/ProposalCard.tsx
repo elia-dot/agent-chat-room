@@ -61,7 +61,7 @@ export function ProposalCard(props: ProposalCardProps): React.ReactElement {
 
       <footer className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
         <span className="min-w-0 flex-1 font-mono text-[11px] text-ink-faint">
-          no verdicts in brainstorm mode — the proposal is the output
+          no verdicts in brainstorm mode – the proposal is the output
         </span>
         <a
           href={props.exportHref}

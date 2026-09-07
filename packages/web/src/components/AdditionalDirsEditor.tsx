@@ -105,7 +105,7 @@ export function AdditionalDirsEditor({
           }}
           placeholder="/absolute/path/to/folder"
           aria-label="additional folder"
-          className="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-1.5 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
+          className="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-1.5 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:border-line-strong disabled:opacity-40"
         />
         <AccessToggle value={access} disabled={disabled} onChange={setAccess} />
         <button
@@ -114,7 +114,7 @@ export function AdditionalDirsEditor({
           onClick={() => add(draft)}
           className="rounded border border-line px-3 py-1.5 font-mono text-[11.5px] text-ink-dim hover:border-line-strong hover:text-ink disabled:opacity-40"
         >
-          Add
+          add
         </button>
         {nativePicker && (
           <FolderPickerButton

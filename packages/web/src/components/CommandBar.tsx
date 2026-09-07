@@ -2,7 +2,7 @@ import type { Participant, Room } from '@agent-chat-room/core';
 
 import type { ConnectionState } from '../api/socket.js';
 import type { AgentTint } from '../lib/format.js';
-import { initials, tintOf } from '../lib/format.js';
+import { basename, initials, tintOf } from '../lib/format.js';
 import { StatePill } from './StatusDot.js';
 
 export interface LiveTurn {
@@ -41,7 +41,11 @@ export function CommandBar(props: CommandBarProps): React.ReactElement {
   const connected = props.connection === 'open';
 
   return (
-    <header className="flex h-[46px] shrink-0 items-center gap-3.5 border-b border-line bg-surface px-3.5">
+    // `overflow-hidden` because everything but the room title is `shrink-0`: past a certain
+    // width the row has nothing left to give and used to spill out of the 46px strip. The
+    // pieces that drop out at narrow widths below are the ones with another route to them
+    // (⌘K, ⌥R, ⌥A) or that repeat what the transcript already shows.
+    <header className="flex h-[46px] shrink-0 items-center gap-3.5 overflow-hidden border-b border-line bg-surface px-3.5">
       <div className="flex shrink-0 items-center gap-2">
         <span
           title={connected ? 'connected' : props.connection}
@@ -56,7 +60,7 @@ export function CommandBar(props: CommandBarProps): React.ReactElement {
         className="shrink-0 rounded border border-line bg-raised px-2 py-1 font-mono text-[11px] text-ink-dim hover:border-line-strong"
       >
         rooms <span className="text-ink-faint">{props.roomCount}</span>{' '}
-        <span className="text-ink-faint">⌘K</span>
+        <span className="hidden text-ink-faint sm:inline">⌘K</span>
       </button>
 
       {room && (
@@ -75,7 +79,7 @@ export function CommandBar(props: CommandBarProps): React.ReactElement {
       <span className="flex-1" />
 
       {live && (
-        <div className="flex shrink-0 items-center gap-2 rounded border border-line bg-raised px-2.5 py-1 font-mono text-[11px]">
+        <div className="hidden shrink-0 items-center gap-2 rounded border border-line bg-raised px-2.5 py-1 font-mono text-[11px] sm:flex">
           <span
             className={`size-1.5 rounded-full acr-pulse ${tintOf(tints[live.author]).rule.replace('/40', '')}`}
           />
@@ -86,7 +90,7 @@ export function CommandBar(props: CommandBarProps): React.ReactElement {
       )}
 
       {participants.length > 0 && (
-        <div className="flex shrink-0 items-center">
+        <div className="hidden shrink-0 items-center md:flex">
           {participants.map((participant, index) => {
             const tint = tintOf(tints[participant.runtime]);
             return (
@@ -105,8 +109,12 @@ export function CommandBar(props: CommandBarProps): React.ReactElement {
       <div className="flex shrink-0 items-center gap-1">
         {room && (
           <>
-            <BarButton onClick={props.onRoomOverlay}>room ⌥R</BarButton>
-            <BarButton onClick={props.onActions}>actions ⌥A</BarButton>
+            <BarButton onClick={props.onRoomOverlay}>
+              room <span className="hidden text-ink-faint sm:inline">⌥R</span>
+            </BarButton>
+            <BarButton onClick={props.onActions}>
+              actions <span className="hidden text-ink-faint sm:inline">⌥A</span>
+            </BarButton>
           </>
         )}
         <button
@@ -138,9 +146,4 @@ function BarButton({
       {children}
     </button>
   );
-}
-
-function basename(path: string): string {
-  const trimmed = path.replace(/\/+$/, '');
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed;
 }

@@ -96,7 +96,10 @@ export function Composer({
     <div className="shrink-0 border-t border-line bg-surface">
       <div className="mx-auto flex w-full max-w-[940px] flex-col gap-2.5 px-5 py-3">
         {needsYou && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-question-line bg-question-bg px-3 py-2">
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-question-line bg-question-bg px-3 py-2"
+          >
             <span className="font-mono text-[11px] tracking-[0.1em] text-question">NEEDS YOU</span>
             <span className="h-3.5 w-px bg-question-line" />
             <span className="text-[13px] text-ink-soft">
@@ -107,7 +110,10 @@ export function Composer({
         )}
 
         {approved && !completedBrainstorm && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-approve-line bg-approve-bg px-3 py-2">
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-approve-line bg-approve-bg px-3 py-2"
+          >
             <span className="font-mono text-[11px] tracking-[0.1em] text-approve">FINISHED</span>
             <span className="h-3.5 w-px bg-approve-line" />
             <span className="text-[13px] text-ink-soft">
@@ -152,7 +158,7 @@ export function Composer({
                 closed
                   ? 'This room is closed.'
                   : offline
-                    ? 'Disconnected — reconnect to send.'
+                    ? 'Disconnected – reconnect to send.'
                     : `Message the room…  ${runtimes.map((r) => `@${r}`).join(' ')}`
               }
               onChange={(e) => {
@@ -163,7 +169,7 @@ export function Composer({
               onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
               onClick={(e) => setCaret(e.currentTarget.selectionStart)}
               onKeyDown={onKeyDown}
-              className="min-w-0 flex-1 resize-none bg-transparent text-[14px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
+              className="min-w-0 flex-1 resize-none bg-transparent text-[14px] text-ink placeholder:text-ink-faint disabled:opacity-60"
             />
             <span className="shrink-0 pt-0.5 font-mono text-[11px] text-ink-faint">
               ↵ send · ⇧↵ newline
@@ -178,13 +184,16 @@ export function Composer({
                 next turn: <span className="text-ink">{parsed.mention}</span>
               </>
             ) : offline ? (
-              'the room keeps working — this browser is what lost the connection'
+              'the room keeps working – this browser is what lost the connection'
             ) : completedBrainstorm ? (
               `reply, or @${moderator ?? 'the moderator'} to re-merge with your decision`
             ) : running ? (
-              'interject any time — the room keeps working'
+              // `postUserMessage` sets `paused: true`, so sending does not just add a note
+              // to a room that carries on. The turn in flight finishes; the round after it
+              // does not start until you say so. This used to claim the opposite.
+              'sending holds the room after this turn – continue when you are ready'
             ) : (
-              'interject any time — the room keeps working'
+              'your message picks who speaks next – continue to run it'
             )}
           </span>
 
@@ -197,7 +206,9 @@ export function Composer({
               onClick={onContinue}
               disabled={busy || locked || approved || completedBrainstorm}
             >
-              {room.paused || room.state === 'idle' ? 'continue' : 'start'}
+              {/* `needs-you` is neither paused nor idle, but the band above it offers to
+                  "continue as it stands", so the button has to be the one it names. */}
+              {room.paused || room.state === 'idle' || needsYou ? 'continue' : 'start'}
             </Button>
           )}
           <Button onClick={onStop} disabled={busy || !running || offline} tone="danger">

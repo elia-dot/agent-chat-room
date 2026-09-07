@@ -13,11 +13,27 @@ export interface RoundStripProps {
 }
 
 const CELL: Record<RoundOutcome, string> = {
-  approved: 'bg-approve-bg border-b-2 border-b-approve',
-  changes: 'bg-changes-bg border-b-2 border-b-changes',
-  question: 'bg-question-bg border-b-2 border-b-question',
-  errored: 'bg-error-bg border-b-2 border-b-error',
-  none: 'bg-raised border-b-2 border-b-line-strong',
+  approved: 'bg-approve-bg border-b-2 border-b-approve text-approve',
+  changes: 'bg-changes-bg border-b-2 border-b-changes text-changes',
+  question: 'bg-question-bg border-b-2 border-b-question text-question',
+  errored: 'bg-error-bg border-b-2 border-b-error text-error',
+  none: 'bg-raised border-b-2 border-b-line-strong text-ink-faint',
+  running: '',
+};
+
+/**
+ * The same rule `VerdictPill` states: an outcome is never carried by hue alone.
+ *
+ * Four low-chroma tints in a 26px cell are the hardest possible case for it – there is no
+ * label to read and no context to infer from – so each cell carries the glyph its verdict
+ * carries elsewhere.
+ */
+const GLYPH: Record<RoundOutcome, string> = {
+  approved: '✓',
+  changes: '!',
+  question: '?',
+  errored: '×',
+  none: '·',
   running: '',
 };
 
@@ -55,10 +71,13 @@ export function RoundStrip(props: RoundStripProps): React.ReactElement {
               type="button"
               onClick={() => props.onJump(entry.round)}
               title={`round ${entry.round}: ${label(entry)}`}
-              className={`h-4 w-[26px] shrink-0 rounded-[2px] ${CELL[entry.outcome]} ${
-                entry.round === props.current ? 'ring-1 ring-line-strong' : ''
-              }`}
-            />
+              className={`flex h-[18px] w-[26px] shrink-0 items-center justify-center rounded-[2px] font-mono text-[10px] leading-none ${
+                CELL[entry.outcome]
+              } ${entry.round === props.current ? 'ring-1 ring-line-strong' : ''}`}
+            >
+              <span aria-hidden="true">{GLYPH[entry.outcome]}</span>
+              <span className="sr-only">{`round ${entry.round}: ${label(entry)}`}</span>
+            </button>
           ),
         )}
       </div>
@@ -66,16 +85,24 @@ export function RoundStrip(props: RoundStripProps): React.ReactElement {
       <span className="shrink-0 font-mono text-[11px] text-ink-faint">
         round {props.current}
         {props.progress ? ` · ${props.progress}` : ''}
-        {props.age ? ` · ${props.age} in room` : ''}
+        {props.age ? ` · open ${props.age}` : ''}
       </span>
 
       <span className="flex-1" />
 
-      <div className="hidden shrink-0 items-center gap-3 font-mono text-[10px] text-ink-faint xl:flex">
-        <Key className="bg-changes">changes</Key>
-        <Key className="bg-error">errored</Key>
-        <Key className="bg-question">question</Key>
-        <Key className="bg-approve">approved</Key>
+      <div className="hidden shrink-0 items-center gap-3 font-mono text-[10px] text-ink-faint lg:flex">
+        <Key className="text-changes" glyph="!">
+          changes
+        </Key>
+        <Key className="text-error" glyph="×">
+          errored
+        </Key>
+        <Key className="text-question" glyph="?">
+          question
+        </Key>
+        <Key className="text-approve" glyph="✓">
+          approved
+        </Key>
       </div>
 
       <button
@@ -92,13 +119,17 @@ export function RoundStrip(props: RoundStripProps): React.ReactElement {
 function Key({
   children,
   className,
+  glyph,
 }: {
   children: React.ReactNode;
   className: string;
+  glyph: string;
 }): React.ReactElement {
   return (
     <span className="flex items-center gap-1.5">
-      <span className={`size-2 rounded-[2px] ${className}`} />
+      <span aria-hidden="true" className={`w-2 text-center leading-none ${className}`}>
+        {glyph}
+      </span>
       {children}
     </span>
   );

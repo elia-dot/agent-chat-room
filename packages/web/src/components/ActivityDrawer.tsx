@@ -12,14 +12,14 @@ export function ActivityDrawer({ activity }: { activity: TurnEvent[] }): React.R
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-xs text-zinc-500 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100"
+        className="font-mono text-[11px] text-ink-faint hover:text-ink hover:underline"
       >
         {open ? '▾' : '▸'} activity ({entries.length} {entries.length === 1 ? 'call' : 'calls'})
       </button>
       {open && (
-        <ol className="mt-1 space-y-0.5 border-l border-zinc-200 pl-3 dark:border-zinc-800">
+        <ol className="mt-1 space-y-0.5 border-l border-line pl-3">
           {entries.map((event, i) => (
-            <li key={i} className="font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
+            <li key={i} className="font-mono text-[11px] text-ink-dim">
               {event.type === 'tool' ? (
                 <>
                   <b className="font-semibold">{event.name}</b> {event.summary}

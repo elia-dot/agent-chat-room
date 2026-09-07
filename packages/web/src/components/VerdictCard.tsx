@@ -65,7 +65,7 @@ export function VerdictCard({
         </>
       ) : (
         <p className="font-mono text-[11.5px] text-error">
-          verdict block could not be read — counted as not approved
+          verdict block could not be read – counted as not approved
         </p>
       )}
 

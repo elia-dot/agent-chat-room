@@ -51,7 +51,7 @@ export function RoomsOverlay(props: RoomsOverlayProps): React.ReactElement {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="filter rooms…"
           aria-label="filter rooms"
-          className="w-full rounded border border-line bg-surface px-2.5 py-1.5 text-[13px] placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          className="w-full rounded border border-line bg-surface px-2.5 py-1.5 text-[13px] placeholder:text-ink-faint focus:border-line-strong"
         />
         {repos.length > 1 && (
           <select
@@ -161,7 +161,7 @@ export function EmptyState({
       <div className="w-full max-w-lg">
         <h2 className="font-mono text-[11px] tracking-[0.14em] text-ink-faint">NO ROOM SELECTED</h2>
         <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
-          You post a task. One agent builds in an isolated worktree, the others review it, and they
+          You post a task. One agent builds on a branch of its own, the others review it, and they
           keep going until every reviewer approves, someone asks you a question, or you step in.
         </p>
 

@@ -1,6 +1,8 @@
 import type { Detection, Room } from '@agent-chat-room/core';
+import { useState } from 'react';
 
 import { api } from '../api/client.js';
+import { shortId } from '../lib/format.js';
 import { HoldToConfirm, TypeToConfirm } from './Confirm.js';
 import { Divider, Overlay } from './Overlay.js';
 
@@ -30,6 +32,7 @@ export interface ActionsOverlayProps {
  */
 export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
   const { room, busy } = props;
+  const [confirmPr, setConfirmPr] = useState(false);
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
   const closed = room.closedAt !== null;
@@ -58,7 +61,7 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
             disabled={busy || closed || room.state === 'approved' || completedBrainstorm}
             title={
               room.state === 'approved'
-                ? 'this room is finished — @mention an agent in the composer to reopen it'
+                ? 'this room is finished – @mention an agent in the composer to reopen it'
                 : undefined
             }
           >
@@ -81,16 +84,58 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
             <Action onClick={props.onCommit} disabled={busy || running || closed}>
               commit
             </Action>
-            <Action
-              onClick={() => props.onOpenPr('origin')}
-              disabled={busy || running || closed || Boolean(prBlocked)}
-              title={
-                prBlocked ??
-                `pushes ${room.roomBranch} to origin, then opens a PR into ${room.baseBranch}`
-              }
-            >
-              {room.prUrl ? 'pr opened' : 'open pr'}
-            </Action>
+            {/* Once there is a PR, the row's second slot is a fact, not a verb. It used to
+                relabel itself "pr opened" and stay pressable, which is a control telling
+                you something while still offering to act. */}
+            {room.prUrl ? (
+              <a
+                href={room.prUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 rounded border border-line px-2.5 py-2 text-center font-mono text-[11.5px] text-live hover:border-line-strong"
+              >
+                view pull request
+              </a>
+            ) : (
+              <Action
+                onClick={() => setConfirmPr(true)}
+                disabled={busy || running || closed || Boolean(prBlocked)}
+                title={
+                  prBlocked ??
+                  `pushes ${room.roomBranch} to origin, then opens a PR into ${room.baseBranch}`
+                }
+              >
+                open pr
+              </Action>
+            )}
+          </div>
+        )}
+
+        {/* The one outward-facing action gets the one confirmation, in the room's own
+            voice. This was a `window.confirm`, which cannot be styled, ignores the app's
+            Escape handling and is the only place the interface stopped sounding like
+            itself. */}
+        {confirmPr && (
+          <div className="flex flex-col gap-2 rounded-md border border-question-line bg-question-bg p-3">
+            <p className="text-[12.5px] leading-relaxed text-ink-soft">
+              Push <span className="font-mono">{room.roomBranch}</span> to origin and open a pull
+              request into <span className="font-mono">{room.baseBranch}</span>?
+            </p>
+            <p className="font-mono text-[10.5px] text-question">
+              this is the only thing acr does that leaves your machine
+            </p>
+            <div className="flex gap-2">
+              <Action onClick={() => setConfirmPr(false)}>cancel</Action>
+              <Action
+                onClick={() => {
+                  setConfirmPr(false);
+                  props.onOpenPr('origin');
+                }}
+                disabled={busy}
+              >
+                push & open pr
+              </Action>
+            </div>
           </div>
         )}
         <a
@@ -110,9 +155,13 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
           onConfirm={props.onCloseRoom}
         />
         <span className="h-px bg-error-line" />
+        {/* The room id, not the title. Titles default to the first line of the task, so
+            `expect` used to be a whole sentence – which is a copy-paste exercise, not a
+            confirmation, and the quickest way through it is to select the placeholder. */}
         <TypeToConfirm
           label="Purge worktree & data"
-          expect={room.title}
+          expect={shortId(room.id)}
+          hint="type room id"
           disabled={busy || running}
           onConfirm={props.onPurgeRoom}
         />

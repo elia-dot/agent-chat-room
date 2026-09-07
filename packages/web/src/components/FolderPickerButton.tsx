@@ -21,7 +21,7 @@ export function FolderPickerButton({
       disabled={disabled || picking}
       aria-label={accessibleLabel}
       title={accessibleLabel}
-      className={`flex size-8 shrink-0 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 ${
+      className={`flex size-8 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-ink-dim hover:border-line-strong hover:text-ink disabled:opacity-40 ${
         picking ? 'animate-pulse' : ''
       }`}
     >
