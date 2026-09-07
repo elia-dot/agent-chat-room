@@ -136,7 +136,9 @@ describe('acr argument handling', () => {
     const help = out.join('');
     expect(help).toContain('acr serve [--port N] [--no-open]');
     expect(help).toContain('127.0.0.1');
-    expect(help).toContain('acr rooms ls | show <id> | export <id> | resume <id> | close <id>');
+    expect(help).toContain(
+      'acr rooms ls | show <id> | export <id> | resume <id> | merge <id> | close <id> | purge <id>',
+    );
     expect(help).not.toContain('--rounds');
     expect(help).toContain('--no-worktree');
     expect(help).toContain('.acr.json');
