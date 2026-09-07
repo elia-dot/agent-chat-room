@@ -7,6 +7,9 @@ import type {
   TurnRecord,
 } from '@agent-chat-room/core';
 
+import type { StreamSegment } from './segments.js';
+import { withStreamActivity, withStreamText } from './segments.js';
+
 /**
  * A turn that is still streaming: a bubble with no persisted `Message` behind it yet.
  *
@@ -14,13 +17,23 @@ import type {
  * for the real row. Keeping them in a separate list rather than faking a `Message` means
  * nothing downstream has to wonder whether a `Message` it is holding is real.
  */
-export interface PendingMessage {
+export interface LiveMessage {
   messageId: string;
   author: string;
   role: string;
   round: number;
   text: string;
   activity: TurnEvent[];
+}
+
+export interface PendingMessage extends LiveMessage {
+  /**
+   * The same prose and tool calls in the order they arrived, which is the order the bubble
+   * renders them in. `text` and `activity` stay: the verdict card reads the whole text,
+   * and a browser that connects mid-turn gets a snapshot with no order in it, so its
+   * segments start empty and the bubble falls back to prose-then-log until the next delta.
+   */
+  segments: StreamSegment[];
 }
 
 export interface RoomView {
@@ -50,7 +63,7 @@ export interface Snapshot {
   participants: Participant[];
   messages: Message[];
   turns: TurnRecord[];
-  live: PendingMessage[];
+  live: LiveMessage[];
   running: boolean;
 }
 
@@ -75,7 +88,9 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
         participants: frame.participants,
         messages: frame.messages,
         turns: frame.turns,
-        pending: frame.live,
+        // A snapshot carries no ordering, so segments start empty and the bubbles it opens
+        // render prose-then-log until the turn's next delta starts building the order.
+        pending: frame.live.map((live) => ({ ...live, segments: [] })),
         running: frame.running,
       };
 
@@ -115,6 +130,7 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
             round: frame.round,
             text: '',
             activity: [],
+            segments: [],
           },
         ],
       };
@@ -127,7 +143,13 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
       // bubble for it is strictly better than dropping the text on the floor.
       const pending = known
         ? state.pending.map((p) =>
-            p.messageId === frame.messageId ? { ...p, text: p.text + frame.text } : p,
+            p.messageId === frame.messageId
+              ? {
+                  ...p,
+                  text: p.text + frame.text,
+                  segments: withStreamText(p.segments, frame.text),
+                }
+              : p,
           )
         : [
             ...state.pending,
@@ -138,6 +160,7 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
               round: state.room?.round ?? 0,
               text: frame.text,
               activity: [],
+              segments: withStreamText([], frame.text),
             },
           ];
       return { ...state, pending };
@@ -169,7 +192,11 @@ export function applyEvent(state: RoomView, frame: IncomingFrame): RoomView {
       if (state.pending.length !== 1) return state;
       return {
         ...state,
-        pending: state.pending.map((p) => ({ ...p, activity: [...p.activity, frame.event] })),
+        pending: state.pending.map((p) => ({
+          ...p,
+          activity: [...p.activity, frame.event],
+          segments: withStreamActivity(p.segments, frame.event),
+        })),
       };
     }
 

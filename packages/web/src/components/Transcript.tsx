@@ -119,6 +119,7 @@ export function Transcript({
             round={pending.round}
             text={pending.text}
             activity={pending.activity}
+            segments={pending.segments}
             {...(tints[pending.author] ? { tint: tints[pending.author] } : {})}
             basePath={basePath}
             streaming

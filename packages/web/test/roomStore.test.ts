@@ -187,7 +187,15 @@ describe('applyEvent', () => {
       { type: 'message.delta', roomId: ROOM_ID, messageId: 'm9', text: 'orphaned' },
     ]);
     expect(state.pending).toEqual([
-      { messageId: 'm9', author: 'agent', role: '', round: 2, text: 'orphaned', activity: [] },
+      {
+        messageId: 'm9',
+        author: 'agent',
+        role: '',
+        round: 2,
+        text: 'orphaned',
+        activity: [],
+        segments: [{ kind: 'text', text: 'orphaned' }],
+      },
     ]);
   });
 
@@ -283,6 +291,79 @@ describe('applyEvent', () => {
     // Guessing which of two parallel turns a tool call belongs to would be worse than
     // waiting for `message.done`, which carries the persisted list.
     expect(two.pending.map((p) => p.activity.length)).toEqual([1, 0]);
+  });
+
+  it('keeps prose and tool calls in the order they arrived, not prose then log', () => {
+    // The complaint this fixes: a turn that reads, says something, reads again and says
+    // something else used to render as one run-on paragraph with the whole tool log under
+    // it. The socket delivers the two frame kinds in order, so the order is recoverable.
+    const state = fold([
+      snapshot(),
+      {
+        type: 'message.start',
+        roomId: ROOM_ID,
+        messageId: 'a',
+        author: 'claude',
+        role: 'worker',
+        round: 1,
+      },
+      { type: 'message.delta', roomId: ROOM_ID, messageId: 'a', text: 'Reading x.' },
+      {
+        type: 'turn.activity',
+        roomId: ROOM_ID,
+        turnId: 't1',
+        event: { type: 'tool', name: 'Read', summary: 'x.js' },
+      },
+      {
+        type: 'turn.activity',
+        roomId: ROOM_ID,
+        turnId: 't1',
+        event: { type: 'tool', name: 'Read', summary: 'y.js' },
+      },
+      // The engine puts the paragraph break in front of prose that follows a tool call.
+      { type: 'message.delta', roomId: ROOM_ID, messageId: 'a', text: '\n\nNow the test.' },
+    ]);
+
+    expect(state.pending[0]!.segments).toEqual([
+      { kind: 'text', text: 'Reading x.' },
+      {
+        kind: 'activity',
+        events: [
+          { type: 'tool', name: 'Read', summary: 'x.js' },
+          { type: 'tool', name: 'Read', summary: 'y.js' },
+        ],
+      },
+      { kind: 'text', text: 'Now the test.' },
+    ]);
+    // The flat accumulations stay: the verdict card reads the whole text, and a bubble with
+    // no segments yet still has something to render.
+    expect(state.pending[0]!.text).toBe('Reading x.\n\nNow the test.');
+    expect(state.pending[0]!.activity).toHaveLength(2);
+  });
+
+  it('never opens a segment for an event the activity drawer would not render', () => {
+    const state = fold([
+      snapshot(),
+      {
+        type: 'message.start',
+        roomId: ROOM_ID,
+        messageId: 'a',
+        author: 'claude',
+        role: 'worker',
+        round: 1,
+      },
+      { type: 'message.delta', roomId: ROOM_ID, messageId: 'a', text: 'one' },
+      {
+        type: 'turn.activity',
+        roomId: ROOM_ID,
+        turnId: 't1',
+        event: { type: 'started', sessionId: 's1' },
+      },
+      { type: 'message.delta', roomId: ROOM_ID, messageId: 'a', text: ' two' },
+    ]);
+    // `started` splitting the paragraph would put an empty tool log in the middle of a
+    // sentence, which is worse than the run-on this whole thing is fixing.
+    expect(state.pending[0]!.segments).toEqual([{ kind: 'text', text: 'one two' }]);
   });
 
   it('ignores every event for a room it is not looking at', () => {

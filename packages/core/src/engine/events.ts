@@ -58,6 +58,8 @@ export class TurnStream {
   text = '';
   sessionId: string | undefined;
   readonly activity: TurnEvent[] = [];
+  /** True when a tool call has landed since the last prose, so the next prose is a new paragraph. */
+  private interrupted = false;
 
   constructor(
     private readonly roomId: string,
@@ -73,18 +75,29 @@ export class TurnStream {
         this.sessionId = event.sessionId;
         this.activityEvent(event);
         return;
-      case 'text':
+      case 'text': {
         if (event.text.length === 0) return;
-        this.text += event.text;
+        // Runtimes emit one `text` event per content block, and a block that follows a tool
+        // call is a new paragraph, not a continuation. Concatenating them raw is what turns
+        // "reading x." and "reading y." into "reading x. reading y." – so the break goes in
+        // here, once, where both the accumulated text and the delta stream pick it up.
+        const separated =
+          this.interrupted && this.text.length > 0 && !this.text.endsWith('\n')
+            ? `\n\n${event.text}`
+            : event.text;
+        this.interrupted = false;
+        this.text += separated;
         this.emit({
           type: 'message.delta',
           roomId: this.roomId,
           messageId: this.messageId,
-          text: event.text,
+          text: separated,
         });
         return;
+      }
       case 'tool':
       case 'file':
+        this.interrupted = true;
         this.activity.push(event);
         this.activityEvent(event);
         return;

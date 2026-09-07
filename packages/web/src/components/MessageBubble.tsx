@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import type { AgentTint } from '../lib/format.js';
 import { initials, relativeTime, tintOf } from '../lib/format.js';
 import { verdictForDisplay } from '../lib/verdict.js';
+import type { StreamSegment } from '../state/segments.js';
 import { ActivityDrawer } from './ActivityDrawer.js';
 import { Markdown } from './Markdown.js';
 import { VerdictCard } from './VerdictCard.js';
@@ -24,6 +25,12 @@ export interface BubbleProps {
   onOpenDiff?: () => void;
   diffLabel?: string;
   streaming?: boolean;
+  /**
+   * Prose and tool calls in the order they happened. Present on a streaming bubble, where
+   * it is what the body is built from: a turn reads, says something, reads again, and
+   * rendering all the prose and then all the tool calls is not the shape of that.
+   */
+  segments?: StreamSegment[];
   /** Files the human put into the chat. Needs the room id to build their URLs. */
   attachments?: Attachment[];
   roomId?: string;
@@ -43,6 +50,9 @@ export interface BubbleProps {
  */
 export function MessageBubble(props: BubbleProps): React.ReactElement {
   const { author, role, round, text, activity, verdict, basePath, streaming } = props;
+  // Segments only exist while a turn streams, and only carry what a reader can see, so an
+  // empty list means "nothing has arrived yet", not "render an empty body".
+  const interleaved = props.segments && props.segments.length > 0 ? props.segments : null;
   // The reviewer's ```verdict block is lifted out of the prose and rendered as a card:
   // as markdown it is a sideways-scrolling box repeating what the pill already says.
   const display = verdictForDisplay({ text, role, verdict });
@@ -97,7 +107,27 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
         </header>
 
         <div className="text-[14.5px] leading-relaxed text-ink-soft">
-          {display.body ? (
+          {interleaved ? (
+            <div className="space-y-2">
+              {interleaved.map((segment, i) =>
+                segment.kind === 'text' ? (
+                  <div key={i}>
+                    <Markdown
+                      text={verdictForDisplay({ text: segment.text, role, verdict }).body}
+                      basePath={basePath}
+                    />
+                    {i === interleaved.length - 1 && (
+                      <span aria-hidden="true" className="ml-0.5 inline-block acr-caret">
+                        ▍
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <ActivityDrawer key={i} activity={segment.events} />
+                ),
+              )}
+            </div>
+          ) : display.body ? (
             <>
               <Markdown text={display.body} basePath={basePath} />
               {streaming && (
@@ -128,9 +158,9 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
           basePath={basePath}
         />
 
-        {(activity.length > 0 || props.onOpenDiff) && (
+        {((activity.length > 0 && !interleaved) || props.onOpenDiff) && (
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <ActivityDrawer activity={activity} />
+            {!interleaved && <ActivityDrawer activity={activity} />}
             {props.onOpenDiff && (
               <button
                 type="button"
