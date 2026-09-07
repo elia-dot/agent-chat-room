@@ -1,6 +1,16 @@
 import type { BrainstormPhase, Role } from './roles.js';
 import { roleInstructions } from './roles.js';
 
+/** A file the human attached to a message, as the prompt needs to describe it. */
+export interface PromptAttachment {
+  name: string;
+  mime: string;
+  path: string;
+  kind: 'image' | 'doc' | 'room';
+  /** Set on a `room` attachment: the room whose transcript was snapshotted. */
+  roomRef?: { slug: string; title: string };
+}
+
 /** One entry in the "new messages since your last turn" section. */
 export interface PromptMessage {
   author: string;
@@ -8,6 +18,7 @@ export interface PromptMessage {
   round?: number;
   text: string;
   verdict?: string;
+  attachments?: PromptAttachment[];
 }
 
 export interface BuildTurnPromptInput {
@@ -51,6 +62,18 @@ export interface BuildTurnPromptInput {
 }
 
 export const DEFAULT_MAX_INLINE_DIFF_BYTES = 60 * 1024;
+
+/** One attachment, as a line an agent can act on. */
+function describeAttachment(attachment: PromptAttachment): string {
+  if (attachment.kind === 'room' && attachment.roomRef) {
+    return (
+      `transcript of room "${attachment.roomRef.title}" (\`${attachment.roomRef.slug}\`), ` +
+      `snapshotted when it was referenced: \`${attachment.path}\``
+    );
+  }
+  const what = attachment.kind === 'image' ? 'image' : 'document';
+  return `${what} \`${attachment.name}\` (${attachment.mime}): \`${attachment.path}\``;
+}
 
 /**
  * The per-turn prompt layout from PLAN.md section 4.2.
@@ -100,6 +123,14 @@ export function buildTurnPrompt(input: BuildTurnPromptInput): string {
       const verdict = m.verdict ? ` (verdict: ${m.verdict})` : '';
       parts.push(`[${meta}]${verdict}`);
       parts.push(m.text.trim());
+      // Named as absolute paths rather than pasted in: an image cannot be inlined into a
+      // text prompt at all, and a referenced room's transcript is usually longer than the
+      // message it is attached to. Every runtime here can open a file.
+      if (m.attachments?.length) {
+        parts.push('');
+        parts.push('Attached, on disk – open these files:');
+        for (const attachment of m.attachments) parts.push(`- ${describeAttachment(attachment)}`);
+      }
       parts.push('');
     }
     if (parts[parts.length - 1] === '') parts.pop();

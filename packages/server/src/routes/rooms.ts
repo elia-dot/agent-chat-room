@@ -1,9 +1,15 @@
-import type { Message, Room } from '@agent-chat-room/core';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
+
+import type { Attachment, AttachmentKind, Message, Room } from '@agent-chat-room/core';
 import {
   AdditionalDirSchema,
   EngineError,
+  attachmentPath,
   git,
   listModels,
+  roomAttachmentsDir,
   roomToMarkdown,
 } from '@agent-chat-room/core';
 import type { FastifyInstance } from 'fastify';
@@ -66,9 +72,40 @@ const PromoteBody = z
   .optional()
   .default({});
 
+/**
+ * Attachments, base64 in a JSON body.
+ *
+ * Multipart would be the obvious shape, but it costs a dependency (`@fastify/multipart`)
+ * for one route on a loopback server that already speaks JSON everywhere else. The size
+ * ceiling is what keeps that honest: a room is for a screenshot and a spec, not a video.
+ */
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+/** Base64 is 4 bytes per 3, plus the JSON wrapper. */
+const ATTACHMENT_BODY_LIMIT = Math.ceil(MAX_ATTACHMENT_BYTES * 1.4);
+
+const UploadBody = z.object({
+  name: z.string().min(1).max(255),
+  mime: z.string().min(1).max(200).optional(),
+  /** The file, base64-encoded, with no `data:` prefix. */
+  data: z.string().min(1),
+});
+
+/** What a client hands back when it sends a message: an id it was given, never a path. */
+const AttachmentRef = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(255),
+  mime: z.string().min(1).max(200),
+  size: z.number().int().nonnegative(),
+  kind: z.enum(['image', 'doc', 'room']),
+});
+
 const MessageBody = z.object({
   text: z.string().min(1, 'a message needs some text'),
   mention: z.string().min(1).optional(),
+  attachments: z.array(AttachmentRef).max(20).optional(),
+  /** Other rooms to put in front of the agents, by id, id prefix or slug. */
+  rooms: z.array(z.string().min(1)).max(10).optional(),
 });
 
 const StartBody = z
@@ -201,8 +238,81 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
     const body = MessageBody.parse(request.body);
     const message = await supervisor.say(room.id, body.text, {
       ...(body.mention ? { mention: body.mention } : {}),
+      ...(body.attachments?.length
+        ? { attachments: resolveAttachments(room.id, body.attachments) }
+        : {}),
+      ...(body.rooms?.length ? { rooms: body.rooms } : {}),
     });
     await reply.status(201).send({ message, room: store.getRoom(room.id) });
+  });
+
+  /**
+   * Take a file into the room, before the message that carries it is sent.
+   *
+   * Uploading first is what makes "too big" and "the disk is full" a sentence next to the
+   * composer rather than a failed send. The id minted here is the only handle the client
+   * gets: the path is derived from it server-side, so nothing a browser types can steer
+   * the write – or a later read – out of this room's folder.
+   */
+  app.post(
+    '/api/rooms/:id/attachments',
+    { bodyLimit: ATTACHMENT_BODY_LIMIT },
+    async (request, reply) => {
+      const room = requireRoom(supervisor, request.params);
+      const body = UploadBody.parse(request.body);
+
+      const bytes = Buffer.from(body.data, 'base64');
+      if (bytes.length === 0) throw new EngineError(`"${body.name}" is empty`);
+      if (bytes.length > MAX_ATTACHMENT_BYTES) {
+        const mb = Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024));
+        throw new EngineError(`"${body.name}" is larger than the ${mb} MB attachment limit`);
+      }
+
+      const id = randomUUID();
+      const mime = normalizeMime(body.mime, body.name);
+      const path = attachmentPath(room.id, id, safeExtension(body.name));
+      mkdirSync(roomAttachmentsDir(room.id), { recursive: true });
+      writeFileSync(path, bytes);
+
+      const attachment: Attachment = {
+        id,
+        name: body.name,
+        mime,
+        size: bytes.length,
+        kind: mime.startsWith('image/') ? 'image' : 'doc',
+        path,
+      };
+      await reply.status(201).send({ attachment });
+    },
+  );
+
+  /** The bytes back, so the transcript can show a thumbnail instead of a filename. */
+  app.get('/api/rooms/:id/attachments/:attachmentId', async (request, reply) => {
+    const room = requireRoom(supervisor, request.params);
+    const { attachmentId } = z.object({ attachmentId: z.string().uuid() }).parse(request.params);
+
+    const file = attachmentFile(room.id, attachmentId);
+    if (!file) throw new NotFoundError(`no attachment "${attachmentId}" in this room`);
+    const recorded = store
+      .listMessages(room.id)
+      .flatMap((m: Message) => m.attachments)
+      .find((a: Attachment) => a.id === attachmentId);
+
+    const mime = recorded?.mime ?? guessMime(file);
+    await reply
+      .type(mime)
+      // Only the raster image types render in place. Everything else – SVG included, since
+      // it carries script – downloads instead, so nothing the human dropped into a room can
+      // be navigated to and executed on this app's own origin.
+      .header(
+        'content-disposition',
+        contentDisposition(
+          INLINE_IMAGE_MIMES.has(mime) ? 'inline' : 'attachment',
+          recorded?.name ?? attachmentId,
+        ),
+      )
+      .header('x-content-type-options', 'nosniff')
+      .send(readFileSync(file));
   });
 
   app.post('/api/rooms/:id/start', async (request) => {
@@ -330,6 +440,120 @@ async function unknownModelWarnings(models: Record<string, string> | undefined):
     );
   }
   return warnings;
+}
+
+const INLINE_IMAGE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+]);
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.md': 'text/markdown',
+  '.txt': 'text/plain',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+};
+
+function guessMime(name: string): string {
+  return MIME_BY_EXTENSION[extname(name).toLowerCase()] ?? 'application/octet-stream';
+}
+
+/** `type/subtype`, and nothing else – no parameters, no spaces, no line breaks. */
+const MEDIA_TYPE_RE = /^[A-Za-z0-9][\w.+-]*\/[A-Za-z0-9][\w.+-]*$/;
+
+/**
+ * The mime to store and later serve.
+ *
+ * The browser's `File.type` is taken on trust for the ordinary types, but it is a string a
+ * client chose and it ends up in a `Content-Type` header, so anything that is not plainly a
+ * media type falls back to what the extension says rather than being echoed back.
+ */
+function normalizeMime(value: string | undefined, name: string): string {
+  const mime = value?.trim().toLowerCase() ?? '';
+  return MEDIA_TYPE_RE.test(mime) ? mime : guessMime(name);
+}
+
+/**
+ * `Content-Disposition` for a filename that is not necessarily ASCII (RFC 6266 / RFC 5987).
+ *
+ * A header value is latin-1 at best, and Node refuses to send one containing anything above
+ * `\xff` – so a real filename like `מסמך.pdf`, or one with an emoji in it, used to make
+ * downloading the attachment fail outright with `ERR_INVALID_CHAR`. The fix is the one the
+ * specs describe: a flattened ASCII `filename` every client understands, plus a
+ * percent-encoded `filename*` that every current browser prefers.
+ */
+function contentDisposition(type: 'inline' | 'attachment', name: string): string {
+  // Quotes and backslashes would end the quoted string early; anything outside printable
+  // ASCII cannot travel in a header at all.
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return `${type}; filename="${ascii || 'attachment'}"; filename*=UTF-8''${encodeRfc5987(name)}`;
+}
+
+/**
+ * `encodeURIComponent`, tightened to RFC 5987's `attr-char`. It leaves `!'()*~` alone, and
+ * of those only `!` and `~` are legal here.
+ */
+function encodeRfc5987(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
+ * The extension of the uploaded name, when it is one. Everything else about the filename is
+ * discarded: the name on disk is the id, so a name of `../../.ssh/authorized_keys` is just a
+ * label in the transcript rather than a path.
+ */
+function safeExtension(name: string): string {
+  const ext = extname(name).toLowerCase();
+  return /^\.[a-z0-9]{1,12}$/.test(ext) ? ext : '';
+}
+
+/** The file an id names, found by its stem so the extension does not have to be guessed. */
+function attachmentFile(roomId: string, attachmentId: string): string | undefined {
+  const dir = roomAttachmentsDir(roomId);
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return undefined;
+  }
+  const match = entries.find(
+    (entry) => entry === attachmentId || entry.startsWith(`${attachmentId}.`),
+  );
+  return match ? join(dir, match) : undefined;
+}
+
+/**
+ * Turn the ids a client hands back into real attachments.
+ *
+ * The path is rebuilt from the id rather than trusted from the body, and an id with no file
+ * behind it is refused rather than silently dropped – an agent told to read a file that is
+ * not there is worse than a send that failed.
+ */
+function resolveAttachments(
+  roomId: string,
+  refs: { id: string; name: string; mime: string; size: number; kind: AttachmentKind }[],
+): Attachment[] {
+  return refs.map((ref) => {
+    const path = attachmentFile(roomId, ref.id);
+    if (!path) throw new NotFoundError(`the upload for "${ref.name}" is no longer on disk`);
+    return { ...ref, mime: normalizeMime(ref.mime, ref.name), path };
+  });
 }
 
 function requireRoom(supervisor: RoomSupervisor, params: unknown): Room {

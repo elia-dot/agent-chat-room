@@ -1,5 +1,6 @@
 import type {
   AdditionalDirInput,
+  Attachment,
   CreateRoomInput,
   EngineEvent,
   Message,
@@ -61,6 +62,16 @@ interface Entry {
   running: Promise<RoomOutcome> | undefined;
   pending: Map<string, string>;
   timer: NodeJS.Timeout | undefined;
+  /**
+   * The human's newest message named the worker, and no run has answered it yet.
+   *
+   * Held here rather than derived from `room.nextSpeaker`, which is set by *every* user
+   * message and never cleared: reading it would make "you asked for this round" true for
+   * every Continue from then on, and a room whose worker keeps changing nothing would never
+   * be reviewed again. This is set by `say` and consumed by the next `start`, so it is true
+   * exactly once. A server restart loses it, which lands on the safe answer: a full round.
+   */
+  askedWorker: boolean;
 }
 
 const DEFAULT_COALESCE_MS = 50;
@@ -72,6 +83,7 @@ function newEntry(engine: RoomEngine): Entry {
     running: undefined,
     pending: new Map(),
     timer: undefined,
+    askedWorker: false,
   };
 }
 
@@ -181,9 +193,15 @@ export class RoomSupervisor {
     const directTurn = opts.directTurn ?? entry.engine.room.nextSpeaker ?? undefined;
     const worker = entry.engine.participants.find((p) => p.role === 'worker');
     const direct = directTurn && directTurn !== worker?.runtime ? directTurn : undefined;
+    // Naming the worker runs a whole round rather than one turn, because the worker is the
+    // one who edits. The engine still needs to know it was asked for, so a round that turns
+    // out to change nothing can stop instead of buying every reviewer a turn. Consumed here
+    // whichever path runs: the next Continue is a plain round again.
+    const askedByYou = entry.askedWorker;
+    entry.askedWorker = false;
 
     const running = entry.engine
-      .run(direct ? { directTurn: direct } : {})
+      .run(direct ? { directTurn: direct } : askedByYou ? { askedByYou: true } : {})
       .catch((err: unknown) => {
         // The room already recorded whatever went wrong; this is the last resort for an
         // error thrown outside a turn, and it must not become an unhandled rejection.
@@ -350,7 +368,11 @@ export class RoomSupervisor {
     return entry.engine.room;
   }
 
-  async say(roomId: string, text: string, opts: { mention?: string } = {}): Promise<Message> {
+  async say(
+    roomId: string,
+    text: string,
+    opts: { mention?: string; attachments?: Attachment[]; rooms?: string[] } = {},
+  ): Promise<Message> {
     const entry = await this.entry(roomId);
     const wasRunning = entry.running !== undefined;
     const completedBrainstorm =
@@ -362,6 +384,11 @@ export class RoomSupervisor {
     // Asked the engine rather than re-deciding it here: naming someone in an approved room
     // reopens it, and the engine owns that rule.
     const reopened = wasApproved && entry.engine.room.state !== 'approved';
+
+    // An explicit `@worker`, not "whoever the room would pick": a message with nobody named
+    // is an instruction to carry on, and carrying on means a reviewed round.
+    const worker = entry.engine.participants.find((p) => p.role === 'worker');
+    entry.askedWorker = opts.mention !== undefined && opts.mention === worker?.runtime;
 
     // A completed brainstorm has no loop left to pause and no useful default action other
     // than revising its proposal. Sending feedback is therefore the confirmation: start the
@@ -457,7 +484,8 @@ export class RoomSupervisor {
         break;
       case 'room.state':
         this.flushDeltas(entry);
-        this.announce(entry, event.state);
+        // A state the human's own keystroke produced is not news to them.
+        if (!event.byYou) this.announce(entry, event.state);
         break;
       default:
         break;

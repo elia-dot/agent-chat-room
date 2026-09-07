@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { constants, mkdirSync, writeFileSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute } from 'node:path';
 
@@ -9,10 +9,16 @@ import type { BranchNamer } from '../branchName.js';
 import { condenseSlug } from '../branchName.js';
 import type { AdditionalDirInput, LoadedRepoConfig } from '../config.js';
 import { loadRepoConfig, resolveRoomDefaults } from '../config.js';
+import { roomToMarkdown } from '../export.js';
 import type { CreatePrResult, GhRunner } from '../gh.js';
 import { createPr, detectGh } from '../gh.js';
 import * as git from '../git.js';
-import { diffPath as diffSpillPath, turnLogPath } from '../paths.js';
+import {
+  attachmentPath,
+  diffPath as diffSpillPath,
+  roomAttachmentsDir,
+  turnLogPath,
+} from '../paths.js';
 import { canWrite } from '../permissions.js';
 import { killProcessTree } from '../process/runTurn.js';
 import type { PromptMessage } from '../prompt.js';
@@ -23,6 +29,7 @@ import type { RoomStore } from '../store/rooms.js';
 import type {
   AdditionalDir,
   AdditionalDirAccess,
+  Attachment,
   Message,
   Participant,
   Room,
@@ -253,11 +260,33 @@ export interface RunOptions {
    * back in `idle` afterwards and the human decides what happens next.
    */
   directTurn?: string;
+  /**
+   * This round answers a message in which the human named the worker.
+   *
+   * Naming a reviewer is already a single turn, but naming the worker has to stay a round –
+   * the worker is the one who edits, and its work is what gets reviewed. When it turns out
+   * to have edited nothing, though, the answer was prose: there is no diff to review, and
+   * pulling every reviewer in to say so is a paid turn each that answers nobody. So a round
+   * that starts this way and changes nothing stops and hands the room back.
+   *
+   * Only the first round of the run is affected; if the worker did change something, the
+   * loop carries on exactly as it always did.
+   */
+  askedByYou?: boolean;
 }
 
 export interface PostUserMessageOptions {
   /** Runtime id from the room's roster. Defaults to the worker. */
   mention?: string;
+  /** Files already written into this room's attachment folder. See `attachmentPath`. */
+  attachments?: Attachment[];
+  /**
+   * Other rooms to put in front of the agents, by id, id prefix or slug. Each one's
+   * transcript is snapshotted to a file and attached, so "look at what we decided in the
+   * auth room" is a thing the agents can actually read rather than a name they cannot
+   * resolve.
+   */
+  rooms?: string[];
 }
 
 interface ReviewOutcome {
@@ -778,6 +807,9 @@ export class RoomEngine {
 
     let lastError: string | undefined;
     let commit: string | undefined;
+    // Spent after the first round: the second round of a run is the loop doing its job,
+    // not the worker answering the message the human just sent.
+    let askedByYou = opts.askedByYou ?? false;
 
     for (;;) {
       if (this.stopping) {
@@ -805,7 +837,7 @@ export class RoomEngine {
 
       let result: { done: boolean; error?: string; commit?: string };
       try {
-        result = await this.runRound(round);
+        result = await this.runRound(round, { askedByYou });
       } catch (err) {
         // Anything a turn did not report as a failure – a git command that blew up, a
         // store write that hit a busy database. Without this the room would stay in
@@ -816,6 +848,7 @@ export class RoomEngine {
         lock.release();
       }
 
+      askedByYou = false;
       if (result.error) lastError = result.error;
       if (result.commit) commit = result.commit;
       if (result.done) break;
@@ -938,6 +971,11 @@ export class RoomEngine {
       next = target.runtime;
     }
 
+    const attachments = [
+      ...(opts.attachments ?? []),
+      ...this.snapshotReferencedRooms(opts.rooms ?? []),
+    ];
+
     const message = this.store.addMessage({
       roomId: this.roomRow.id,
       author: 'you',
@@ -945,6 +983,7 @@ export class RoomEngine {
       kind: 'user',
       round: this.roomRow.round,
       text: body,
+      ...(attachments.length > 0 ? { attachments } : {}),
     });
     this.emit({ type: 'message.done', roomId: this.roomRow.id, message });
 
@@ -953,7 +992,9 @@ export class RoomEngine {
     // typing. The mention reopens the room; a message with nobody named is a note, and
     // leaves it finished.
     if (this.roomRow.state === 'approved' && opts.mention) {
-      this.setState('needs-you');
+      // `byYou`, so the desktop notification stays quiet: the human who just pressed send
+      // does not need to be told the room is waiting on them.
+      this.setState('needs-you', { byYou: true });
       this.system(`reopened by you: @${next} was asked for another turn.`, this.roomRow.round);
     }
 
@@ -962,6 +1003,64 @@ export class RoomEngine {
     this.roomRow = this.store.updateRoom(this.roomRow.id, { paused: true, nextSpeaker: next });
     this.emit({ type: 'room.paused', roomId: this.roomRow.id, paused: true });
     return message;
+  }
+
+  /**
+   * Write each referenced room's transcript into this room's attachment folder.
+   *
+   * A snapshot rather than a live link, for the same reason the diff is spilled to a file
+   * rather than re-read later: the agents should see what the human was looking at when
+   * they pointed at it. Referencing this room itself is dropped – the transcript is already
+   * the prompt – and a name that matches nothing is said out loud rather than swallowed,
+   * because a silently missing reference reads as the agents ignoring it.
+   */
+  private snapshotReferencedRooms(refs: readonly string[]): Attachment[] {
+    const attachments: Attachment[] = [];
+    const seen = new Set<string>();
+    for (const ref of refs) {
+      let source: Room | undefined;
+      try {
+        source = this.store.findRoom(ref);
+      } catch (err) {
+        this.system(err instanceof Error ? err.message : String(err));
+        continue;
+      }
+      if (!source) {
+        this.system(`no room matches "${ref}", so nothing was attached for it.`);
+        continue;
+      }
+      if (source.id === this.roomRow.id || seen.has(source.id)) continue;
+      seen.add(source.id);
+
+      const markdown = roomToMarkdown({
+        room: source,
+        participants: this.store.listParticipants(source.id),
+        messages: this.store.listMessages(source.id),
+        turns: this.store.listTurns(source.id),
+      });
+      const id = randomUUID();
+      const path = attachmentPath(this.roomRow.id, id, '.md');
+      try {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, markdown);
+      } catch (err) {
+        this.system(
+          `could not write the transcript of "${source.title}": ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+        continue;
+      }
+      attachments.push({
+        id,
+        name: `${source.slug || 'room'}.md`,
+        mime: 'text/markdown',
+        size: Buffer.byteLength(markdown, 'utf8'),
+        kind: 'room',
+        path,
+        roomRef: { id: source.id, slug: source.slug, title: source.title },
+      });
+    }
+    return attachments;
   }
 
   /**
@@ -1472,6 +1571,7 @@ export class RoomEngine {
 
   private async runRound(
     round: number,
+    opts: { askedByYou?: boolean } = {},
   ): Promise<{ done: boolean; error?: string; commit?: string }> {
     const room = this.roomRow;
     this.roomRow = this.store.updateRoom(room.id, { round });
@@ -1483,11 +1583,15 @@ export class RoomEngine {
 
     // --- worker ------------------------------------------------------------
     const readOnlyBefore = await this.snapshotReadOnly();
-    const workerDiffStat = round > 1 ? await git.diffStat(cwd, this.baseSha()) : '';
+    // Taken before the turn as well as after, so "did *this* round change anything" is
+    // answerable. The diff the reviewers judge is cumulative against the room's base, so
+    // comparing it against the base alone cannot tell a round that did nothing from a room
+    // that has done nothing.
+    const before = await this.workspaceChanges(cwd);
     const workerTurn = await this.runParticipantTurn(worker, {
       round,
       cwd,
-      diffStat: workerDiffStat,
+      diffStat: round > 1 ? before.diffStat : '',
     });
 
     if (!workerTurn.result.ok) {
@@ -1518,6 +1622,20 @@ export class RoomEngine {
 
     if (this.stopping) {
       this.setState('stopped');
+      return { done: true };
+    }
+
+    // You asked, the worker answered, and it wrote nothing. There is no new diff for the
+    // reviewers to read, so they are not asked to produce one review each about it.
+    if (opts.askedByYou && diff === before.diff) {
+      this.system(
+        `${worker.runtime} answered you without changing anything, so the reviewers were ` +
+          'not asked to review it. Continue to run a full round.',
+        round,
+      );
+      // Notified, unlike the reopen: you asked a question minutes ago and the answer is
+      // now sitting there, which is exactly what the notification is for.
+      this.setState('needs-you');
       return { done: true };
     }
 
@@ -1832,12 +1950,20 @@ export class RoomEngine {
     });
 
     const stream = new TurnStream(room.id, turnRecord.id, messageId, (event) => this.emit(event));
+    // The attachment folder is granted to the runtime, not added to the room's
+    // `additionalDirs`: the prompt points at absolute paths under it, and a sandboxed CLI
+    // refuses to open anything outside its roots. It stays out of the row on purpose, so
+    // nothing diffs, commits or reverts it.
+    const attachmentRoot = roomAttachmentsDir(room.id);
+    const extraRoots = [
+      ...room.additionalDirs.map((d) => d.path),
+      ...(existsSync(attachmentRoot) ? [attachmentRoot] : []),
+    ];
+
     const handle = adapter.run(
       {
         cwd: ctx.cwd,
-        ...(room.additionalDirs.length > 0
-          ? { additionalDirs: room.additionalDirs.map((d) => d.path) }
-          : {}),
+        ...(extraRoots.length > 0 ? { additionalDirs: extraRoots } : {}),
         prompt,
         permission: participant.permission,
         timeoutMs: this.timeoutMs,
@@ -1960,6 +2086,17 @@ export class RoomEngine {
         ...(m.round ? { round: m.round } : {}),
         text: m.text,
         ...(m.verdict ? { verdict: m.verdict.decision } : {}),
+        ...(m.attachments.length > 0
+          ? {
+              attachments: m.attachments.map((a) => ({
+                name: a.name,
+                mime: a.mime,
+                path: a.path,
+                kind: a.kind,
+                ...(a.roomRef ? { roomRef: { slug: a.roomRef.slug, title: a.roomRef.title } } : {}),
+              })),
+            }
+          : {}),
       }));
   }
 
@@ -2159,7 +2296,7 @@ export class RoomEngine {
     });
   }
 
-  private setState(state: RoomState): void {
+  private setState(state: RoomState, opts: { byYou?: boolean } = {}): void {
     if (this.roomRow.state === state) return;
     assertTransition(this.roomRow.state, state);
     this.roomRow = this.store.updateRoom(this.roomRow.id, { state });
@@ -2168,6 +2305,7 @@ export class RoomEngine {
       roomId: this.roomRow.id,
       state,
       round: this.roomRow.round,
+      ...(opts.byYou ? { byYou: true } : {}),
     });
   }
 

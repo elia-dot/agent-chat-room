@@ -28,6 +28,44 @@ describe('buildTurnPrompt', () => {
     expect(Buffer.byteLength(compact)).toBeLessThan(Buffer.byteLength(full));
   });
 
+  it('points at attached files by absolute path rather than trying to inline them', () => {
+    const prompt = buildTurnPrompt({
+      ...base,
+      newMessages: [
+        {
+          author: 'you',
+          role: 'owner',
+          text: 'this is what it looks like',
+          attachments: [
+            {
+              name: 'shot.png',
+              mime: 'image/png',
+              path: '/config/attachments/r1/a1.png',
+              kind: 'image',
+            },
+            {
+              name: 'auth.md',
+              mime: 'text/markdown',
+              path: '/config/attachments/r1/a2.md',
+              kind: 'room',
+              roomRef: { slug: 'auth-spike', title: 'The auth spike' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(prompt).toContain('Attached, on disk – open these files:');
+    expect(prompt).toContain('image `shot.png` (image/png): `/config/attachments/r1/a1.png`');
+    expect(prompt).toContain('transcript of room "The auth spike" (`auth-spike`)');
+    expect(prompt).toContain('`/config/attachments/r1/a2.md`');
+  });
+
+  it('says nothing about attachments when a message has none', () => {
+    const prompt = buildTurnPrompt({ ...base, newMessages: [{ author: 'you', text: 'go on' }] });
+    expect(prompt).not.toContain('Attached, on disk');
+  });
+
   it('retains round-specific reviewer rules in inline instructions', () => {
     expect(buildTurnPrompt({ ...base, role: 'reviewer', round: 3 })).toContain(NO_MOVING_GOALPOSTS);
   });

@@ -236,6 +236,16 @@ export function App(): React.ReactElement {
     [view.participants],
   );
 
+  // Every other room, offered behind `#` in the composer. Referencing the room you are in
+  // would attach its own transcript to itself, so it is left out of the list.
+  const referenceableRooms = useMemo(
+    () =>
+      rooms
+        .filter((r) => r.id !== room?.id)
+        .map((r) => ({ id: r.id, slug: r.slug, title: r.title })),
+    [rooms, room?.id],
+  );
+
   const rounds = useMemo(
     () => summariseRounds(view.messages, room?.round ?? 0, view.running || live),
     [view.messages, room?.round, view.running, live],
@@ -380,11 +390,13 @@ export function App(): React.ReactElement {
               running={view.running}
               busy={busy}
               offline={offline}
+              rooms={referenceableRooms}
               // Posting holds the loop on purpose (PLAN.md section 3: "You can interrupt any
               // time"), so continuing is a separate, deliberate click.
-              onSend={(text, mention) =>
-                void act(() => api.say(room.id, text, mention ?? undefined))
+              onSend={(text, mention, extra) =>
+                void act(() => api.say(room.id, text, mention ?? undefined, extra))
               }
+              onUpload={(file) => api.uploadAttachment(room.id, file)}
               onPause={() => void act(() => api.pause(room.id))}
               onContinue={() => void act(() => api.start(room.id))}
               onStop={() => void act(() => api.stop(room.id))}

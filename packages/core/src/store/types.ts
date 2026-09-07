@@ -100,6 +100,28 @@ export interface Participant {
 
 export type MessageKind = 'user' | 'agent' | 'system';
 
+/**
+ * What an attachment is for, which is the only thing the prompt and the transcript render
+ * differently. `room` is a snapshot of another room's transcript, taken when it was
+ * referenced, so re-reading it later cannot show a conversation that moved on since.
+ */
+export type AttachmentKind = 'image' | 'doc' | 'room';
+
+/** A file the human put into the chat, and that the agents are told to read. */
+export interface Attachment {
+  /** Server-minted uuid. Also the stem of the file on disk. */
+  id: string;
+  /** The original filename, for the human. Never used to build a path. */
+  name: string;
+  mime: string;
+  size: number;
+  kind: AttachmentKind;
+  /** Absolute path on the machine running the server. This is what the agents open. */
+  path: string;
+  /** Set on a `room` attachment: which room the transcript came from. */
+  roomRef?: { id: string; slug: string; title: string };
+}
+
 export interface Message {
   id: string;
   /** Monotonic within the database. The transcript's true order. */
@@ -117,6 +139,8 @@ export interface Message {
   /** Inline for diffs under `MAX_INLINE_DIFF_BYTES`; otherwise see `diffPath`. */
   diff: string | null;
   diffPath: string | null;
+  /** Files the human attached to this message. Empty for everything an agent writes. */
+  attachments: Attachment[];
   createdAt: string;
 }
 

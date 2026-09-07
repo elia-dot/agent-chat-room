@@ -1,7 +1,15 @@
-import type { Participant, Room } from '@agent-chat-room/core';
+import type { Attachment, Participant, Room } from '@agent-chat-room/core';
 import { useRef, useState } from 'react';
 
-import { applyCompletion, completions, mentionAtCaret, parseMention } from '../lib/mentions.js';
+import type { RoomOption } from '../lib/mentions.js';
+import {
+  applyCompletion,
+  completions,
+  mentionAtCaret,
+  parseMention,
+  parseRoomRefs,
+  roomCompletions,
+} from '../lib/mentions.js';
 
 export interface ComposerProps {
   room: Room;
@@ -10,7 +18,15 @@ export interface ComposerProps {
   busy: boolean;
   /** Set when the socket is down: the room cannot be driven, and the composer says so. */
   offline?: boolean;
-  onSend: (text: string, mention: string | null) => void;
+  /** The other rooms, offered behind `#`. Their transcripts travel with the message. */
+  rooms?: RoomOption[];
+  onSend: (
+    text: string,
+    mention: string | null,
+    extra: { attachments: Attachment[]; rooms: string[] },
+  ) => void;
+  /** Takes the file into the room and returns its handle. Rejects with a sentence. */
+  onUpload: (file: File) => Promise<Attachment>;
   onPause: () => void;
   onContinue: () => void;
   onStop: () => void;
@@ -30,7 +46,9 @@ export function Composer({
   running,
   busy,
   offline = false,
+  rooms = [],
   onSend,
+  onUpload,
   onPause,
   onContinue,
   onStop,
@@ -38,12 +56,34 @@ export function Composer({
   const [value, setValue] = useState('');
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
 
   const runtimes = participants.map((p) => p.runtime);
   const mention = mentionAtCaret(value, caret);
+  const roomRef = mentionAtCaret(value, caret, '#');
   const suggestions = mention ? completions(mention.query, runtimes) : [];
+  const roomSuggestions = roomRef && rooms.length > 0 ? roomCompletions(roomRef.query, rooms) : [];
   const parsed = parseMention(value, runtimes);
+  const referenced = parseRoomRefs(value, rooms);
+
+  const closed = room.closedAt !== null;
+  const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
+  const approved = room.state === 'approved';
+  const moderator = participants.find((p) => p.role === 'moderator')?.runtime;
+  const needsYou = room.state === 'needs-you' && !completedBrainstorm;
+  const locked = closed || offline;
+
+  const focusAt = (position: number): void => {
+    requestAnimationFrame(() => {
+      input.current?.focus();
+      input.current?.setSelectionRange(position, position);
+    });
+  };
 
   const complete = (runtime: string): void => {
     if (!mention) return;
@@ -51,30 +91,55 @@ export function Composer({
     setValue(next.value);
     setCaret(next.caret);
     setHighlight(0);
-    requestAnimationFrame(() => {
-      input.current?.focus();
-      input.current?.setSelectionRange(next.caret, next.caret);
-    });
+    focusAt(next.caret);
+  };
+
+  const completeRoom = (slug: string): void => {
+    if (!roomRef) return;
+    const next = applyCompletion(value, roomRef, slug, '#');
+    setValue(next.value);
+    setCaret(next.caret);
+    setHighlight(0);
+    focusAt(next.caret);
+  };
+
+  /** Uploads run as they are picked, so a failure is visible before the message is sent. */
+  const take = (files: readonly File[]): void => {
+    if (files.length === 0 || locked) return;
+    setUploadError(null);
+    for (const file of files) {
+      setUploading((n) => n + 1);
+      void onUpload(file)
+        .then((attachment) => setAttachments((current) => [...current, attachment]))
+        .catch((err: unknown) => setUploadError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setUploading((n) => n - 1));
+    }
   };
 
   const send = (): void => {
-    if (!parsed.text || busy) return;
-    onSend(parsed.text, parsed.mention);
+    if (!parsed.text || busy || uploading > 0) return;
+    onSend(parsed.text, parsed.mention, { attachments, rooms: referenced });
     setValue('');
     setCaret(0);
+    setAttachments([]);
+    setUploadError(null);
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (suggestions.length > 0) {
+    const list = suggestions.length > 0 ? suggestions : roomSuggestions.map((r) => r.slug);
+    const isRoomList = suggestions.length === 0 && roomSuggestions.length > 0;
+    if (list.length > 0) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        const delta = event.key === 'ArrowDown' ? 1 : suggestions.length - 1;
-        setHighlight((h) => (h + delta) % suggestions.length);
+        const delta = event.key === 'ArrowDown' ? 1 : list.length - 1;
+        setHighlight((h) => (h + delta) % list.length);
         return;
       }
       if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
         event.preventDefault();
-        complete(suggestions[highlight] ?? suggestions[0]!);
+        const picked = list[highlight % list.length] ?? list[0]!;
+        if (isRoomList) completeRoom(picked);
+        else complete(picked);
         return;
       }
     }
@@ -84,13 +149,6 @@ export function Composer({
       send();
     }
   };
-
-  const closed = room.closedAt !== null;
-  const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
-  const approved = room.state === 'approved';
-  const moderator = participants.find((p) => p.role === 'moderator')?.runtime;
-  const needsYou = room.state === 'needs-you' && !completedBrainstorm;
-  const locked = closed || offline;
 
   return (
     <div className="shrink-0 border-t border-line bg-surface">
@@ -123,6 +181,51 @@ export function Composer({
           </div>
         )}
 
+        {uploadError && (
+          <div
+            role="alert"
+            className="rounded-md border border-error-line bg-error-bg px-3 py-2 text-[13px] text-error"
+          >
+            {uploadError}
+          </div>
+        )}
+
+        {(attachments.length > 0 || uploading > 0) && (
+          <ul className="flex flex-wrap items-center gap-2">
+            {attachments.map((attachment) => (
+              <li
+                key={attachment.id}
+                className="flex items-center gap-2 rounded border border-line bg-ground px-2 py-1"
+              >
+                <span className="font-mono text-[11px] text-ink-faint">
+                  {attachment.kind === 'image' ? 'img' : 'doc'}
+                </span>
+                <span className="max-w-52 truncate text-[12px] text-ink-soft">
+                  {attachment.name}
+                </span>
+                <span className="font-mono text-[10px] text-ink-faint">
+                  {formatBytes(attachment.size)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`remove ${attachment.name}`}
+                  onClick={() =>
+                    setAttachments((current) => current.filter((a) => a.id !== attachment.id))
+                  }
+                  className="font-mono text-[11px] text-ink-faint hover:text-ink"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+            {uploading > 0 && (
+              <li className="font-mono text-[11px] text-ink-faint">
+                uploading {uploading} file{uploading === 1 ? '' : 's'}…
+              </li>
+            )}
+          </ul>
+        )}
+
         <div className="relative">
           {suggestions.length > 0 && (
             <ul className="absolute bottom-full left-0 mb-1.5 min-w-44 overflow-hidden rounded-md border border-line bg-ground shadow-xl">
@@ -147,7 +250,47 @@ export function Composer({
             </ul>
           )}
 
-          <div className="flex items-start gap-2.5 rounded-md border border-line bg-ground px-3 py-2.5 focus-within:border-line-strong">
+          {suggestions.length === 0 && roomSuggestions.length > 0 && (
+            <ul className="absolute bottom-full left-0 mb-1.5 min-w-72 overflow-hidden rounded-md border border-line bg-ground shadow-xl">
+              {roomSuggestions.map((option, i) => (
+                <li key={option.id}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      completeRoom(option.slug);
+                    }}
+                    className={`block w-full px-3 py-1.5 text-left ${
+                      i === highlight % roomSuggestions.length
+                        ? 'bg-raised text-ink'
+                        : 'text-ink-dim hover:bg-raised'
+                    }`}
+                  >
+                    <span className="font-mono text-[12px]">#{option.slug}</span>
+                    <span className="ml-2 text-[11px] text-ink-faint">{option.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDropping(true);
+            }}
+            onDragLeave={() => setDropping(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropping(false);
+              take([...e.dataTransfer.files]);
+            }}
+            className={`flex items-start gap-2.5 rounded-md border bg-ground px-3 py-2.5 ${
+              dropping
+                ? 'border-line-strong bg-raised'
+                : 'border-line focus-within:border-line-strong'
+            }`}
+          >
             <span className="pt-0.5 font-mono text-[13px] text-ink-faint">›</span>
             <textarea
               ref={input}
@@ -169,6 +312,14 @@ export function Composer({
               onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
               onClick={(e) => setCaret(e.currentTarget.selectionStart)}
               onKeyDown={onKeyDown}
+              // A pasted screenshot has no filename and never reaches a file picker, and it
+              // is the single most common thing anyone wants to show an agent.
+              onPaste={(e) => {
+                const files = [...e.clipboardData.files];
+                if (files.length === 0) return;
+                e.preventDefault();
+                take(files);
+              }}
               className="min-w-0 flex-1 resize-none bg-transparent text-[14px] text-ink placeholder:text-ink-faint disabled:opacity-60"
             />
             <span className="shrink-0 pt-0.5 font-mono text-[11px] text-ink-faint">
@@ -178,11 +329,29 @@ export function Composer({
         </div>
 
         <div className="flex items-center gap-2">
+          <input
+            ref={filePicker}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              take([...(e.target.files ?? [])]);
+              e.target.value = '';
+            }}
+          />
+          <Button onClick={() => filePicker.current?.click()} disabled={busy || locked}>
+            attach
+          </Button>
+
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint">
             {parsed.mention ? (
               <>
                 next turn: <span className="text-ink">{parsed.mention}</span>
               </>
+            ) : referenced.length > 0 ? (
+              `${referenced.length} room transcript${
+                referenced.length === 1 ? '' : 's'
+              } travels with this message`
             ) : offline ? (
               'the room keeps working – this browser is what lost the connection'
             ) : completedBrainstorm ? (
@@ -193,7 +362,7 @@ export function Composer({
               // does not start until you say so. This used to claim the opposite.
               'sending holds the room after this turn – continue when you are ready'
             ) : (
-              'your message picks who speaks next – continue to run it'
+              'drop files here, #name another room, @name who speaks next'
             )}
           </span>
 
@@ -214,13 +383,19 @@ export function Composer({
           <Button onClick={onStop} disabled={busy || !running || offline} tone="danger">
             stop
           </Button>
-          <Button primary onClick={send} disabled={busy || locked || !parsed.text}>
+          <Button primary onClick={send} disabled={busy || locked || !parsed.text || uploading > 0}>
             send
           </Button>
         </div>
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Button({

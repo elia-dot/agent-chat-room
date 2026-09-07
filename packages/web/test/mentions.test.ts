@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyCompletion, completions, mentionAtCaret, parseMention } from '../src/lib/mentions.js';
+import {
+  applyCompletion,
+  completions,
+  mentionAtCaret,
+  parseMention,
+  parseRoomRefs,
+  roomCompletions,
+} from '../src/lib/mentions.js';
 
 const ROSTER = ['claude', 'codex', 'cursor'];
+
+const ROOMS = [
+  { id: 'r1', slug: 'flaky-login', title: 'Fix the flaky login test' },
+  { id: 'r2', slug: 'auth-spike', title: 'The auth spike' },
+];
 
 describe('parseMention', () => {
   it('routes the next turn to a leading mention and preserves it in the transcript text', () => {
@@ -69,6 +81,41 @@ describe('mention autocomplete', () => {
     expect(applyCompletion(value, mention, 'cursor')).toEqual({
       value: 'hey @cursor how are you',
       caret: 'hey @cursor '.length,
+    });
+  });
+});
+
+describe('room references', () => {
+  it('picks up a #slug anywhere in the message, unlike an @mention', () => {
+    // A mention routes the next turn, so it has to lead. A reference means the same thing
+    // wherever it appears, so it does not.
+    expect(parseRoomRefs('compare this with #flaky-login please', ROOMS)).toEqual(['r1']);
+    expect(parseRoomRefs('#auth-spike and #flaky-login', ROOMS)).toEqual(['r2', 'r1']);
+  });
+
+  it('names each room once, however many times it is written', () => {
+    expect(parseRoomRefs('#flaky-login vs #flaky-login', ROOMS)).toEqual(['r1']);
+  });
+
+  it('leaves a hash that names no room alone', () => {
+    // `#1234` is an issue number, and `a#b` is not a reference at all.
+    expect(parseRoomRefs('see #1234 and a#flaky-login', ROOMS)).toEqual([]);
+    expect(parseRoomRefs('nothing here', ROOMS)).toEqual([]);
+  });
+
+  it('completes on slug or title, and drives the same machinery as @', () => {
+    expect(roomCompletions('auth', ROOMS).map((r) => r.id)).toEqual(['r2']);
+    expect(roomCompletions('flaky', ROOMS).map((r) => r.id)).toEqual(['r1']);
+    // The title matches too, so you can find a room you named but did not slug.
+    expect(roomCompletions('spike', ROOMS).map((r) => r.id)).toEqual(['r2']);
+    expect(roomCompletions('', ROOMS)).toHaveLength(2);
+
+    const value = 'look at #au for this';
+    const ref = mentionAtCaret(value, 11, '#')!;
+    expect(ref).toEqual({ query: 'au', at: 8 });
+    expect(applyCompletion(value, ref, 'auth-spike', '#')).toEqual({
+      value: 'look at #auth-spike for this',
+      caret: 'look at #auth-spike '.length,
     });
   });
 });

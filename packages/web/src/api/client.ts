@@ -1,5 +1,6 @@
 import type {
   AdditionalDir,
+  Attachment,
   Detection,
   Message,
   ModelCatalog,
@@ -104,6 +105,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * The file's bytes as base64, without the `data:<mime>;base64,` prefix `FileReader` adds.
+ *
+ * `FileReader` rather than looping over an `ArrayBuffer`: it does the encoding off the main
+ * thread, and a 10 MB screenshot encoded by hand in JavaScript freezes the tab.
+ */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`could not read ${file.name}`));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      resolve(result.slice(result.indexOf(',') + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function post<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method: 'POST',
@@ -140,11 +159,47 @@ export const api = {
   createRoom: (body: CreateRoomRequest) =>
     post<{ room: Room; participants: Participant[]; warnings: string[] }>('/api/rooms', body),
 
-  say: (id: string, text: string, mention?: string) =>
+  say: (
+    id: string,
+    text: string,
+    mention?: string,
+    extra: { attachments?: Attachment[]; rooms?: string[] } = {},
+  ) =>
     post<{ message: Message; room: Room }>(`/api/rooms/${id}/messages`, {
       text,
       ...(mention ? { mention } : {}),
+      // Only the handle goes back, never the path: the server rebuilds that from the id.
+      ...(extra.attachments?.length
+        ? {
+            attachments: extra.attachments.map(({ id: attachmentId, name, mime, size, kind }) => ({
+              id: attachmentId,
+              name,
+              mime,
+              size,
+              kind,
+            })),
+          }
+        : {}),
+      ...(extra.rooms?.length ? { rooms: extra.rooms } : {}),
     }),
+
+  /**
+   * Take a file into the room before the message that carries it is sent, so "too big" is a
+   * sentence next to the composer rather than a failed send. Base64 in JSON, which is what
+   * the server accepts – see the route for why it is not multipart.
+   */
+  uploadAttachment: async (roomId: string, file: File): Promise<Attachment> => {
+    const data = await fileToBase64(file);
+    const { attachment } = await post<{ attachment: Attachment }>(
+      `/api/rooms/${roomId}/attachments`,
+      { name: file.name, mime: file.type || 'application/octet-stream', data },
+    );
+    return attachment;
+  },
+
+  /** A plain URL, so an image is an `<img src>` rather than something the app buffers. */
+  attachmentUrl: (roomId: string, attachmentId: string) =>
+    `/api/rooms/${roomId}/attachments/${attachmentId}`,
 
   start: (id: string, directTurn?: string) =>
     post<{ room: Room }>(`/api/rooms/${id}/start`, directTurn ? { directTurn } : {}),

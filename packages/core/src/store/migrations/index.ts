@@ -124,12 +124,22 @@ const TURN_RETRIES = `
 ALTER TABLE rooms ADD COLUMN max_turn_retries INTEGER NOT NULL DEFAULT 0;
 `;
 
+/**
+ * M6 lets a message carry files: the images and documents the human drops into the chat,
+ * and the transcript snapshot taken when they reference another room. Nullable, so a
+ * database written by an M5 acr reads back with no attachments rather than not at all.
+ */
+const ATTACHMENTS = `
+ALTER TABLE messages ADD COLUMN attachments_json TEXT;
+`;
+
 export const migrations: readonly Migration[] = [
   { version: 1, name: '001_init', sql: INIT },
   { version: 2, name: '002_interactivity', sql: INTERACTIVITY },
   { version: 3, name: '003_m3', sql: M3 },
   { version: 4, name: '004_additional_dirs', sql: ADDITIONAL_DIRS },
   { version: 5, name: '005_turn_retries', sql: TURN_RETRIES },
+  { version: 6, name: '006_attachments', sql: ATTACHMENTS },
 ] as const;
 
 export const LATEST_VERSION: number = migrations.reduce((max, m) => Math.max(max, m.version), 0);

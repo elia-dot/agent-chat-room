@@ -45,10 +45,13 @@ export interface MentionQuery {
 /**
  * The `@` the caret is currently inside, if any. Returns null when there is nothing to
  * complete, which is the common case and has to be cheap.
+ *
+ * `symbol` is what makes the same machinery drive `#room` references: the two behave
+ * identically in the composer and differ only in what the list offers.
  */
-export function mentionAtCaret(value: string, caret: number): MentionQuery | null {
+export function mentionAtCaret(value: string, caret: number, symbol = '@'): MentionQuery | null {
   const before = value.slice(0, caret);
-  const at = before.lastIndexOf('@');
+  const at = before.lastIndexOf(symbol);
   if (at === -1) return null;
   // A mention starts a word: `foo@bar` is an email address, not a mention.
   if (at > 0 && !/\s/.test(before[at - 1] ?? '')) return null;
@@ -67,10 +70,46 @@ export function applyCompletion(
   value: string,
   mention: MentionQuery,
   runtime: string,
+  symbol = '@',
 ): { value: string; caret: number } {
-  const head = `${value.slice(0, mention.at)}@${runtime} `;
+  const head = `${value.slice(0, mention.at)}${symbol}${runtime} `;
   // The completion supplies its own trailing space, so completing mid-sentence must not
   // leave a double one where the old mention already had one after it.
   const tail = value.slice(mention.at + 1 + mention.query.length).replace(/^ /, '');
   return { value: head + tail, caret: head.length };
+}
+
+/** A room the composer can reference, as the `#` list shows it. */
+export interface RoomOption {
+  id: string;
+  slug: string;
+  title: string;
+}
+
+const ROOM_REF_RE = /(?:^|\s)#([A-Za-z0-9][\w-]*)/g;
+
+/**
+ * Every `#room-slug` in the message, as room ids.
+ *
+ * Anywhere in the text, unlike `@mentions`: a mention routes the next turn and so has to be
+ * an instruction rather than a passing reference, but "compare this with #flaky-login" means
+ * the same thing wherever it appears. An unknown slug is left alone – it is a word with a
+ * hash in front of it, which is what an issue number looks like.
+ */
+export function parseRoomRefs(input: string, rooms: readonly RoomOption[]): string[] {
+  const ids: string[] = [];
+  for (const match of input.matchAll(ROOM_REF_RE)) {
+    const slug = match[1]!.toLowerCase();
+    const room = rooms.find((r) => r.slug.toLowerCase() === slug);
+    if (room && !ids.includes(room.id)) ids.push(room.id);
+  }
+  return ids;
+}
+
+/** Rooms matching what has been typed after the `#`, newest first. Slug or title. */
+export function roomCompletions(query: string, rooms: readonly RoomOption[]): RoomOption[] {
+  if (!query) return rooms.slice(0, 6);
+  return rooms
+    .filter((r) => r.slug.toLowerCase().startsWith(query) || r.title.toLowerCase().includes(query))
+    .slice(0, 6);
 }
