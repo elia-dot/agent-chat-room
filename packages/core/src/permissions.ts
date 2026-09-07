@@ -17,9 +17,33 @@ export function isPermission(value: string): value is Permission {
 export function claudePermissionArgs(permission: Permission): string[] {
   switch (permission) {
     case 'read-only':
-      // `--permission-mode plan` already refuses edits; `--tools` narrows the surface
-      // further so a plan-mode turn cannot shell out either.
-      return ['--permission-mode', 'plan', '--tools', 'Read,Glob,Grep'];
+      // `--permission-mode plan` is what refuses edits; `--tools` picks the surface a
+      // reviewer needs to do its job. `Skill` is on the list because a reviewer that
+      // cannot load a skill cannot follow the house review rules that live in one, and
+      // `Bash` because most skills shell out to their own scripts and are inert without
+      // it – a skill only reads instructions into context, so the tools it then reaches
+      // for are checked against this same list.
+      //
+      // Adding `Bash` does not hand a reviewer a writable shell. Probed against claude
+      // 2.1.259: a plan-mode turn runs `cat`/`git log` but refuses `echo > file`, and it
+      // still refuses with `permissions.allow: ["Bash","Bash(echo:*)","Write"]` and
+      // `defaultMode: bypassPermissions` in a loaded settings file – no Bash tool call is
+      // even attempted. Allow rules raise a ceiling; they do not lift plan mode.
+      //
+      // `disableAllHooks` is the exception that had to be handled, and it is not
+      // cosmetic. Hook commands run outside the tool-permission layer entirely, so a
+      // loaded `SessionStart` hook writes to the worktree during a read-only turn: with
+      // `--tools Read` alone and no Bash at all, a hook still created its file. That
+      // breaks the invariant the room's write lock rests on – reviewers do not write.
+      // Suppressing hooks costs nothing else; all 17 skills still load with it set.
+      return [
+        '--permission-mode',
+        'plan',
+        '--tools',
+        'Read,Glob,Grep,Skill,Bash',
+        '--settings',
+        JSON.stringify({ disableAllHooks: true }),
+      ];
     case 'edits':
       return ['--permission-mode', 'acceptEdits'];
     case 'full':
@@ -27,12 +51,26 @@ export function claudePermissionArgs(permission: Permission): string[] {
   }
 }
 
+/**
+ * The three things a sandboxed codex turn pins regardless of what the developer's own
+ * configuration says. Each closes a different route around the sandbox, and none of them
+ * costs a room a skill, an MCP server or an instruction. All three are measured; see
+ * `CODEX_NEVER_ESCALATE` in `codex.ts` for the probes behind each.
+ */
+const CODEX_SANDBOX_PINS = [
+  '-c',
+  'approval_policy="never"',
+  '--ignore-rules',
+  '--disable',
+  'hooks',
+] as const;
+
 export function codexPermissionArgs(permission: Permission): string[] {
   switch (permission) {
     case 'read-only':
-      return ['-s', 'read-only'];
+      return [...CODEX_SANDBOX_PINS, '-s', 'read-only'];
     case 'edits':
-      return ['-s', 'workspace-write'];
+      return [...CODEX_SANDBOX_PINS, '-s', 'workspace-write'];
     case 'full':
       return ['--dangerously-bypass-approvals-and-sandbox'];
   }
@@ -44,6 +82,13 @@ export function codexPermissionArgs(permission: Permission): string[] {
  * edit" and no file appears – and it blocks shell commands outright, which is stronger than
  * the sandbox flag alone. `--trust` is on every level because a headless turn has nobody to
  * answer the "do you trust this workspace?" prompt.
+ *
+ * Under `userConfig` this row rests on `--sandbox enabled`, whose own help text is
+ * "explicitly enable or disable sandbox mode (overrides config)" – an argv flag that beats
+ * the config file is exactly what keeps a developer's settings from widening a reviewer.
+ * Unlike claude, codex and agy, that has NOT been re-probed live since the default changed:
+ * the account hit `ActionRequiredError: You've hit your usage limit` before a turn could
+ * run. Documented behaviour and the 2026.07.23 probe above, not a fresh measurement.
  */
 export function cursorPermissionArgs(permission: Permission): string[] {
   switch (permission) {
@@ -72,6 +117,12 @@ export function cursorPermissionArgs(permission: Permission): string[] {
  * expands a system `plan` slash command that changes the agent's persona, and a probe under
  * it answered "I have created the implementation plan… please review it" instead of doing
  * the task – which would derail a reviewer that has to emit a fenced verdict block.
+ *
+ * Re-probed once `userConfig` made loading a developer's own settings the default, because
+ * agy's denial names `permissions.allow in settings.json` as the way to lift it – the same
+ * shape of hole that let a user config defeat codex's sandbox. It does not apply here:
+ * against `--sandbox`, `command(*)`, `command` and an exact-command rule were each still
+ * denied and nothing reached disk. `--sandbox` outranks the allow list.
  */
 export function agyPermissionArgs(permission: Permission): string[] {
   switch (permission) {

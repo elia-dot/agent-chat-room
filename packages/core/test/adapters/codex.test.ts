@@ -24,11 +24,48 @@ describe('buildCodexArgs', () => {
       '--json',
       '-C',
       '/repo',
+      '-c',
+      'approval_policy="never"',
+      '--ignore-rules',
+      '--disable',
+      'hooks',
       '-s',
       'workspace-write',
       '--skip-git-repo-check',
-      '--ignore-user-config',
     ]);
+  });
+
+  it('loads the developer’s own config by default, so a room matches their terminal', () => {
+    // Skills, MCP servers and custom instructions all live in ~/.codex/config.toml.
+    expect(buildCodexArgs(baseReq)).not.toContain('--ignore-user-config');
+    expect(buildCodexArgs({ ...baseReq, userConfig: true })).not.toContain('--ignore-user-config');
+  });
+
+  it('shuts user config out again when a repo asks for it', () => {
+    expect(buildCodexArgs({ ...baseReq, userConfig: false })).toContain('--ignore-user-config');
+  });
+
+  it('pins the approval policy on every sandboxed turn, fresh or resumed', () => {
+    // The pin has to survive `exec resume`, which takes a different flag set: a resumed
+    // reviewer is exactly as able to escalate out of the sandbox as a fresh one.
+    for (const req of [
+      { ...baseReq, permission: 'read-only' as const },
+      { ...baseReq, permission: 'edits' as const },
+      { ...baseReq, permission: 'read-only' as const, sessionId: 'sess-1' },
+      { ...baseReq, permission: 'edits' as const, sessionId: 'sess-1' },
+      // Loading user config must not be what decides whether the pin is applied.
+      { ...baseReq, permission: 'read-only' as const, userConfig: false },
+    ]) {
+      expect(buildCodexArgs(req)).toEqual(
+        expect.arrayContaining(['-c', 'approval_policy="never"']),
+      );
+      // An execpolicy rule saying `decision="allow"` is a standing approval that never
+      // reaches the prompt `approval_policy` governs, so it needs its own flag.
+      expect(buildCodexArgs(req)).toContain('--ignore-rules');
+      // Hooks are the third route out: they run as processes, not as sandboxed tool
+      // calls, and load from `~/.codex/hooks` independently of `config.toml`.
+      expect(buildCodexArgs(req)).toEqual(expect.arrayContaining(['--disable', 'hooks']));
+    }
   });
 
   it('maps each permission level to the documented sandbox', () => {

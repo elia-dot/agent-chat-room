@@ -23,10 +23,36 @@ describe('the permission table', () => {
     }
   });
 
+  it('disables hooks at read-only, the one path that runs outside the tool layer', () => {
+    // Measured against claude 2.1.259: with `--tools Read` and no Bash at all, a loaded
+    // SessionStart hook still wrote its file into the worktree during a plan-mode turn.
+    // Hook commands are not tool calls, so no tool allowlist can hold them – and a
+    // reviewer that writes breaks the invariant the room's write lock depends on.
+    const args = claudePermissionArgs('read-only');
+    expect(args).toEqual(
+      expect.arrayContaining(['--settings', JSON.stringify({ disableAllHooks: true })]),
+    );
+    // Only read-only pays this: a worker running its own hooks is the parity being asked
+    // for, and a worker is allowed to write anyway.
+    expect(claudePermissionArgs('edits')).not.toContain('--settings');
+    expect(claudePermissionArgs('full')).not.toContain('--settings');
+  });
+
   it('never grants a write flag at read-only, which is what keeps reviewers honest', () => {
     expect(claudePermissionArgs('read-only')).not.toContain('acceptEdits');
     expect(claudePermissionArgs('read-only')).not.toContain('bypassPermissions');
-    expect(codexPermissionArgs('read-only')).toEqual(['-s', 'read-only']);
+    // `approval_policy="never"` belongs to the read-only guarantee, not to tidiness: a
+    // sandboxed command that fails prompts codex to offer an unsandboxed retry, and a
+    // user config that auto-approves takes the offer. Measured in `codex.ts`.
+    expect(codexPermissionArgs('read-only')).toEqual([
+      '-c',
+      'approval_policy="never"',
+      '--ignore-rules',
+      '--disable',
+      'hooks',
+      '-s',
+      'read-only',
+    ]);
     // PLAN.md section 4.1, confirmed by a live probe against cursor-agent 2026.07.23: a
     // turn in `ask` mode refuses to create a file and its shell calls come back denied.
     expect(cursorPermissionArgs('read-only')).toEqual([

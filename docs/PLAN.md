@@ -394,7 +394,8 @@ surprises are.
 | Reviewers rubber-stamp or nitpick forever | Verdict schema, `file:line` rule, no new blockers after round 2, max rounds, optional "skeptic" reviewer instructions |
 | Two agents editing at once | Write lock; reviewers read-only; worktree option |
 | Runaway usage against subscription caps | Per-room turn/time counters visible in UI; max rounds; pause on error |
-| User's global hooks/settings interfere (seen: Claude SessionStart hook) | Default to `--setting-sources project` for Claude and `--ignore-user-config` for Codex, with a per-room override |
+| User's global hooks/settings interfere (seen: Claude SessionStart hook) | `userConfig` in `.acr.json`. Default **true**: a room loads the developer's skills, plugins and MCP servers, because an agent that behaves unlike its terminal self is the wrong agent. `false` restores `--setting-sources project` / `--ignore-user-config`. Permission floors are pinned by CLI flag independently, so this is never a permission |
+| User config defeats a reviewer's sandbox (measured on codex 0.56) | `approval_policy="never"`. A blocked command makes codex offer an unsandboxed retry, which a config carrying `approval_mode = "approve"` accepts – `-s read-only` alone did **not** hold. See `CODEX_NEVER_ESCALATE` in `codex.ts` |
 | Long turns look hung | Stream activity events; per-turn timeout with "still running" heartbeat |
 
 ## 9. Lessons from an earlier runner

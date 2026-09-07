@@ -12,7 +12,9 @@ const baseReq: TurnRequest = {
 };
 
 describe('buildClaudeArgs', () => {
-  it('always runs headless stream-json with project settings only', () => {
+  it('runs headless stream-json and loads every setting source by default', () => {
+    // Skills, plugins and MCP servers are discovered per setting source, so this line is
+    // what decides whether a room's Claude is the same Claude the developer runs.
     const args = buildClaudeArgs(baseReq);
     expect(args.slice(0, 6)).toEqual([
       '-p',
@@ -20,14 +22,33 @@ describe('buildClaudeArgs', () => {
       'stream-json',
       '--verbose',
       '--setting-sources',
-      'project',
+      'user,project,local',
     ]);
+    expect(buildClaudeArgs({ ...baseReq, userConfig: true })).toContain('user,project,local');
+  });
+
+  it('narrows back to project settings when a repo opts out', () => {
+    const args = buildClaudeArgs({ ...baseReq, userConfig: false });
+    expect(args).toEqual(expect.arrayContaining(['--setting-sources', 'project']));
+    expect(args).not.toContain('user,project,local');
+  });
+
+  it('keeps plan mode at read-only no matter which settings are loaded', () => {
+    // Verified against claude 2.1.259: a turn with every user setting loaded still
+    // refuses to write under `--permission-mode plan`, so `userConfig` stays a
+    // preference rather than a permission.
+    for (const userConfig of [true, false]) {
+      const args = buildClaudeArgs({ ...baseReq, permission: 'read-only', userConfig });
+      expect(args).toEqual(expect.arrayContaining(['--permission-mode', 'plan']));
+      expect(args).not.toContain('bypassPermissions');
+      expect(args).not.toContain('acceptEdits');
+    }
   });
 
   it('maps each permission level to the documented flags', () => {
     expect(buildClaudeArgs({ ...baseReq, permission: 'read-only' })).toContain('plan');
     expect(buildClaudeArgs({ ...baseReq, permission: 'read-only' })).toEqual(
-      expect.arrayContaining(['--tools', 'Read,Glob,Grep']),
+      expect.arrayContaining(['--tools', 'Read,Glob,Grep,Skill,Bash']),
     );
     expect(buildClaudeArgs({ ...baseReq, permission: 'edits' })).toEqual(
       expect.arrayContaining(['--permission-mode', 'acceptEdits']),

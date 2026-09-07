@@ -1842,6 +1842,7 @@ export class RoomEngine {
         permission: participant.permission,
         timeoutMs: this.timeoutMs,
         turnId,
+        ...(this.repoConfig.config.userConfig === false ? { userConfig: false } : {}),
         systemAppend: roleInstructions(role, {
           round: ctx.round,
           ...(ctx.phase ? { phase: ctx.phase } : {}),

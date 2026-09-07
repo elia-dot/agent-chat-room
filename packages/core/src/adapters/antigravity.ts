@@ -64,8 +64,17 @@ export function buildAgyArgs(req: TurnRequest): string[] {
     'stream-json',
     '--input-format',
     'stream-json',
-    // The same hardening as Claude's `--setting-sources project`: a room transcript that
-    // happens to contain a `/word` must stay text, not become a command the CLI expands.
+    // A room transcript that happens to contain a `/word` must stay text, not become a
+    // command the CLI expands.
+    //
+    // The help text – "disable slash command and skill expansion in print mode" – reads
+    // like this also costs a room its skills. Measured against agy 1.1.26, it does not.
+    // With a skill installed at `~/.gemini/config/skills/zebra-probe/` and an empty
+    // workspace, a turn asked to name its skills *without opening any files* answered
+    // `agy-customizations, antigravity-guide, zebra-probe` both with the flag and
+    // without it, and used the skill's content correctly either way. What the flag stops
+    // is explicit `/name` invocation, which a room never issues; skills stay discoverable
+    // and loadable on their own. So the guard is kept unconditionally – it is free.
     '--disable-slash-commands',
     '--add-dir',
     req.cwd,

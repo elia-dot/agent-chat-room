@@ -107,7 +107,7 @@ describe('buildTurnPrompt', () => {
   });
 
   it('points a read-only reviewer at a file when the diff is too big to inline', () => {
-    // `permissions.ts` gives a reviewer `--tools Read,Glob,Grep`, so telling it to run
+    // `permissions.ts` gives a reviewer `--tools Read,Glob,Grep,Skill,Bash`, so telling it to run
     // `git diff` is advice it cannot act on. Reading a file is something it still can do.
     const huge = `+${'x'.repeat(DEFAULT_MAX_INLINE_DIFF_BYTES + 1)}`;
     const prompt = buildTurnPrompt({

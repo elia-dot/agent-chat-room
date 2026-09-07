@@ -30,11 +30,15 @@ export function buildClaudeArgs(req: TurnRequest): string[] {
     '--output-format',
     'stream-json',
     '--verbose',
-    // The user's own global hooks and settings fire inside a headless run too, which has
-    // been observed injecting `system/hook_*` events into the stream. Loading project
-    // settings only keeps a personal SessionStart hook out of a room's turn.
+    // Which settings a turn loads decides which skills, plugins and MCP servers exist for
+    // it: they are discovered per source, so `project` alone hides everything under
+    // `~/.claude`. Parity with the terminal is the default, and `userConfig: false` buys
+    // back the old isolation for a repo that wants it.
+    //
+    // This does not loosen `permission`: checked against claude 2.1.259, a turn with every
+    // user setting loaded still refuses to write under `--permission-mode plan`.
     '--setting-sources',
-    'project',
+    req.userConfig === false ? 'project' : 'user,project,local',
     ...claudePermissionArgs(req.permission),
   ];
   if (req.additionalDirs?.length) args.push('--add-dir', ...req.additionalDirs);

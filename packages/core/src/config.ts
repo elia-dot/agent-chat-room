@@ -50,6 +50,25 @@ export const RepoConfigSchema = z.object({
    * Omitted means 0: one failure hands the room over, which is what rooms always did.
    */
   maxTurnRetries: z.number().int().min(0).max(10).optional(),
+  /**
+   * Whether a turn loads the developer's own CLI configuration – skills, plugins, MCP
+   * servers, custom instructions, hooks. Omitted means true: an agent in a room should
+   * behave like the same agent in your terminal, because a reviewer that cannot load the
+   * house review skill is not the reviewer you tested.
+   *
+   * Setting it false restores the older hardened behaviour for a repo whose contributors
+   * run `acr` with global config nobody has audited. How much it can actually claw back
+   * differs per runtime and is nowhere total – on codex it means `--ignore-user-config`,
+   * whose contract is only "do not load `$CODEX_HOME/config.toml`", and a probe confirms
+   * `~/.codex/skills` survives it; on cursor there is no isolation flag at all. The
+   * README carries the per-runtime table. Treat this as a preference, never as a
+   * boundary.
+   *
+   * This never widens a room's permission level. Each adapter pins its floor with a CLI
+   * flag that outranks any config file – see `permissions.ts` and the note in `codex.ts`,
+   * where getting that wrong let user config defeat a reviewer's read-only sandbox.
+   */
+  userConfig: z.boolean().optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;

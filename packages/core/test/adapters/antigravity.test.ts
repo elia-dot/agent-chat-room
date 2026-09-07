@@ -39,6 +39,18 @@ describe('buildAgyArgs', () => {
     ]);
   });
 
+  it('keeps the slash-command guard on every turn, because skills do not need it off', () => {
+    // agy's help text implies this flag also costs a room its skills. Probed against agy
+    // 1.1.26 with a skill outside the workspace, it does not: the turn listed
+    // `zebra-probe` among its skills with the flag set, without opening any file. So the
+    // guard is free and stays on, `userConfig` or not.
+    for (const userConfig of [undefined, true, false]) {
+      expect(
+        buildAgyArgs({ ...baseReq, ...(userConfig === undefined ? {} : { userConfig }) }),
+      ).toContain('--disable-slash-commands');
+    }
+  });
+
   it('binds the turn to the repo with --add-dir', () => {
     // Probed against agy 1.1.26: with only the spawn `cwd` set the agent went looking
     // through `$HOME` and offered to write into `~/.gemini/antigravity-cli/scratch/`.

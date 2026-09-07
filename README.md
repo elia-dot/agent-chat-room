@@ -63,7 +63,12 @@ M4 brings complete production-readiness and the next-generation feature set:
   re-run, and each agent keeps its own runtime session – so only the turn is repeated, not the
   conversation.
 - **`.acr.json`** – optional, committed per-repo defaults supporting `additional_dirs` (with per-folder
-  `access`), `setup`, `testCommand`, and `maxTurnRetries`.
+  `access`), `setup`, `testCommand`, `maxTurnRetries`, and `userConfig`.
+- **Terminal parity.** Turns load your own skills, plugins and MCP servers by default, so a room
+  runs the agent you configured rather than a stripped-down one. Permission levels are pinned by
+  CLI flags that outrank any config file, so a reviewer stays read-only either way — and
+  read-only turns run with hooks disabled, because hook commands execute outside the tool
+  permission layer and would otherwise let a reviewer write.
 - **Governance & CI.** MIT License, Denly attribution `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
   and GitHub Actions CI across macOS and Linux.
 
@@ -259,8 +264,35 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
   "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
   "testCommand": "npm test", // run between worker and reviewer turns; results injected under ## Test Results
   "maxTurnRetries": 0, // retries per failed turn before the room stops and asks you
+  // Load your own CLI config - skills, plugins, MCP servers, instructions - so an agent in
+  // a room behaves like the same agent in your terminal. Defaults to true. How much
+  // `false` can claw back differs per runtime; see the table below. Never widens a
+  // room's permissions, and reviewers never run hooks either way.
+  "userConfig": true,
 }
 ```
+
+#### What `userConfig` reaches, per runtime
+
+Each CLI exposes a different amount of control, so `userConfig` is honest about being uneven:
+
+| runtime    | `true` (default)                                  | `false`                                                                                             |
+| ---------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `claude`   | all setting sources: skills, plugins, MCP servers | `--setting-sources project` — the one runtime where opting out is close to total                    |
+| `codex`    | `~/.codex/config.toml`: instructions, MCP servers | `--ignore-user-config` — drops `config.toml` only; `~/.codex/skills` still loads                    |
+| `agy`      | skills load; `/name` invocation stays disabled    | **no effect** — skills are available either way, so the slash-command guard is kept unconditionally |
+| `opencode` | config merged, as it always is                    | `--pure` — drops external plugins only; config still merges                                         |
+| `cursor`   | always at parity                                  | **no effect** — cursor-agent exposes no isolation flag                                              |
+
+`userConfig: false` is a best-effort narrowing, not a boundary — no CLI here declines
+everything, and `cursor` declines nothing. Do not use it as a security control.
+
+What _is_ a boundary is the permission floor, enforced separately by CLI flags that outrank any
+config file, so none of the above widens what a turn may do. Sandboxed turns additionally
+suppress hooks — `disableAllHooks` on `claude`, `--disable hooks` on `codex` — because hook
+commands run as processes rather than tool calls and so escape the sandbox entirely; on
+`claude` a hook was measured writing into the worktree during a read-only turn. `codex` also
+gets `--ignore-rules` and a pinned `approval_policy`. None of that depends on `userConfig`.
 
 Unknown keys warn and are ignored, so a file written by a newer `acr` never bricks an older one.
 

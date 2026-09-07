@@ -87,10 +87,11 @@ export function buildCodexArgs(req: TurnRequest, opts: CodexArgsOptions = {}): s
     // `acr run` may target a subdirectory, and the engine already knows the repo root, so
     // codex does not need to do its own git check.
     '--skip-git-repo-check',
-    // Keeps the user's ~/.codex/config.toml (custom instructions, MCP servers, hooks) out
-    // of a room's turn. Auth still comes from CODEX_HOME, which is the whole point.
-    '--ignore-user-config',
   );
+  // ~/.codex/config.toml is where a developer's custom instructions and MCP servers live,
+  // so a room loads it by default. `userConfig: false` shuts it back out; auth still comes
+  // from CODEX_HOME either way, which is why this was ever safe to drop.
+  if (req.userConfig === false) args.push('--ignore-user-config');
   if (req.model) args.push('-m', req.model);
   if (opts.schemaPath) args.push('--output-schema', opts.schemaPath);
   return args;
@@ -99,8 +100,61 @@ export function buildCodexArgs(req: TurnRequest, opts: CodexArgsOptions = {}): s
 function codexResumeSandboxArgs(permission: Permission): string[] {
   if (permission === 'full') return ['--dangerously-bypass-approvals-and-sandbox'];
   const mode = permission === 'read-only' ? 'read-only' : 'workspace-write';
-  return ['-c', `sandbox_mode="${mode}"`];
+  return ['-c', `sandbox_mode="${mode}"`, ...CODEX_NEVER_ESCALATE];
 }
+
+/**
+ * The pin that makes loading a user's config safe, and it is not optional.
+ *
+ * A sandboxed command that fails does not just fail: codex offers to re-run it outside the
+ * sandbox, and a `~/.codex/config.toml` carrying `approval_mode = "approve"` takes that
+ * offer. Measured on codex 0.56 against a read-only turn, `echo written > proof.txt`:
+ *
+ *   -c sandbox_mode=read-only, user config loaded ......... file written, exit 0
+ *   -c sandbox_mode=read-only + --ignore-user-config ...... "operation not permitted"
+ *   -c sandbox_mode=read-only -c approval_policy=never .... "operation not permitted"
+ *
+ * So the sandbox flag alone never held the line – `--ignore-user-config` did, as a side
+ * effect of hiding the approval settings. Pinning the policy holds it directly, which is
+ * what lets `userConfig` be a preference rather than a permission.
+ */
+const CODEX_NEVER_ESCALATE = [
+  '-c',
+  'approval_policy="never"',
+  // `--ignore-rules` ("do not load user or project execpolicy `.rules` files") closes the
+  // second door into the same room. `approval_policy` governs the *prompt*; an execpolicy
+  // rule that already says `decision="allow"` is a standing approval that never needs one,
+  // and codex may treat a match as trusted enough to run unsandboxed. This machine has no
+  // `.rules` file to reproduce that against, so it is applied on the documented behaviour
+  // of the flag rather than on a measurement – cheap, because `.rules` files carry exec
+  // policy only, so dropping them costs a room no skill, MCP server or instruction.
+  '--ignore-rules',
+  // Third door, and the same one claude had: codex 0.153.4 ships command hooks
+  // (`SessionStart`, `PreToolUse`, `PostToolUse` are all in the binary) that run as
+  // processes rather than as sandboxed tool calls, and they load from `~/.codex/hooks`
+  // independently of `config.toml` – so `--ignore-user-config` never reached them. The
+  // equivalent hook on claude demonstrably wrote into the worktree during a read-only
+  // turn, which is the invariant the room's write lock rests on.
+  //
+  // Measured against codex 0.153.4 with a real `~/.codex/hooks.json` – the schema is
+  // `{ hooks: { SessionStart: [ { matcher, hooks: [ { type: "command", command } ] } ] } }`,
+  // three levels: event, matcher group, handlers.
+  //
+  //   trusted hook, no --disable hooks .... hook ran, wrote its file mid read-only turn
+  //   trusted hook, --disable hooks ....... hook did not run
+  //
+  // So this flag is the thing standing between a reviewer and a write. Codex does gate
+  // hooks on trust – an untrusted definition is skipped, and the probe above needed
+  // `--dangerously-bypass-hook-trust` to fire at all – which narrows the exposure to
+  // hooks the developer has already trusted. That is precisely the case a room hits:
+  // their own everyday hooks, running in a turn that must not write.
+  //
+  // `--disable hooks` is sugar for `-c features.hooks=false`, documented as covering
+  // both `hooks.json` and inline `[hooks]` in `config.toml`, and it costs nothing else –
+  // every skill still lists with it set.
+  '--disable',
+  'hooks',
+] as const;
 
 /**
  * Codex has no system-prompt flag, so role instructions are prepended to the first turn's

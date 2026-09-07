@@ -39,6 +39,11 @@ export function buildOpencodeArgs(req: TurnRequest): string[] {
   // turn that blocks on one would burn its stall timeout and die for no reason. The denials
   // in `opencodePermissionConfig` outrank it, which is the probe recorded there.
   const args = ['run', '--format', 'json', '--auto'];
+  // `--pure` ("run without external plugins") is the only isolation lever opencode offers.
+  // It is a partial one – the developer's config is merged in either way, which a probe of
+  // `opencode debug config` confirms – so `userConfig: false` is weaker here than on claude
+  // or codex. Documented per runtime in the README rather than papered over.
+  if (req.userConfig === false) args.push('--pure');
   if (req.model) args.push('-m', req.model);
   if (req.sessionId) args.push('-s', req.sessionId);
   // No `--output-schema` equivalent: `capabilities.structuredOutput` is false and the fenced

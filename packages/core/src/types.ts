@@ -50,6 +50,16 @@ export interface TurnRequest {
   timeoutMs: number;
   /** Stable id used for the turn's raw JSONL log. Generated when omitted. */
   turnId?: string;
+  /**
+   * Load the developer's own CLI config (skills, plugins, MCP servers, instructions).
+   * Undefined means true – parity with the terminal is the default.
+   *
+   * `false` is a best-effort narrowing, not isolation: what each CLI can decline varies,
+   * and none of them decline everything. See `RepoConfigSchema.userConfig` and the
+   * README table. It never widens `permission`, and sandboxed turns suppress hooks
+   * regardless of this flag.
+   */
+  userConfig?: boolean;
 }
 
 export type TurnEvent =

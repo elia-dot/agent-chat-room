@@ -47,6 +47,13 @@ const WRITE_TOOLS = new Set([
 ]);
 
 export function buildCursorArgs(req: TurnRequest): string[] {
+  // `userConfig` is deliberately unused here: cursor-agent 2026.07.23 exposes no flag that
+  // declines the developer's rules, MCP servers or settings – there is no `--ignore-*` and
+  // no `--pure`. So a cursor turn is always at parity and `userConfig: false` cannot be
+  // honoured. Saying so is the point; the README's per-runtime table carries it, because a
+  // repo that sets `userConfig: false` for isolation deserves to know where it does not
+  // apply. What does hold is the permission floor: `--sandbox enabled` is documented as
+  // overriding config, so a user setting cannot widen a reviewer.
   const args = ['-p', '--output-format', 'stream-json', '--stream-partial-output'];
   args.push(...cursorPermissionArgs(req.permission));
   // The spawn already sets the working directory; naming it as the workspace as well is
