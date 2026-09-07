@@ -460,3 +460,19 @@ M3 decisions, 2026-09-03:
   and it explains itself. Nothing pushes without an explicit press.
 - **A room now takes a cross-process lock** for the whole loop, so `acr run --room X` against
   a room the server is driving fails fast instead of interleaving state writes.
+
+M4 decisions:
+
+- **Merge landed, with the M3 objection answered rather than waived.** It writes to the
+  branch the human is standing on, so it refuses more than it helps: the room may not have
+  uncommitted work, the checkout has to be sitting on the base branch, clean, and not
+  part-way through a merge, rebase, cherry-pick or revert of its own, `--no-ff` keeps the
+  round attributable after the branch is gone, and a conflicting merge *it started* is
+  aborted instead of handed back half-applied. Two details are load-bearing: "is the tree
+  dirty" does not answer "is a merge open" – a conflict resolved back to `HEAD` leaves a
+  clean tree with `MERGE_HEAD` set – and the abort is conditional on merge state this
+  operation created, so a failure never undoes somebody else's merge. It runs under the
+  room lock and the repo write lock, because check-then-act on a working tree with an
+  undo in the failure path is exactly what those locks are for. Scope is the room repo
+  only – a writable additional folder branched inside the human's own checkout, and
+  merging there means switching branches under them, which is theirs to do.

@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 
 import type { Message, Room, RoomStore as RoomStoreType } from '@agent-chat-room/core';
 import {
+  EngineError,
   RoomEngine,
   RoomStore,
   decisionLabel,
@@ -43,6 +44,8 @@ export async function rooms(opts: RoomsOptions): Promise<ExitCode> {
         return listRooms(store, r, opts);
       case 'show':
         return showRoom(store, r, opts);
+      case 'merge':
+        return await mergeRoom(store, r, opts);
       case 'close':
         return await closeRoom(store, r, opts);
       case 'resume':
@@ -53,7 +56,7 @@ export async function rooms(opts: RoomsOptions): Promise<ExitCode> {
         return await purgeRooms(store, r, opts);
       default:
         throw new UsageError(
-          `unknown rooms subcommand "${opts.subcommand}". Try: ls, show, export, resume, close, purge.`,
+          `unknown rooms subcommand "${opts.subcommand}". Try: ls, show, export, resume, merge, close, purge.`,
         );
     }
   } finally {
@@ -105,6 +108,35 @@ function showRoom(store: RoomStoreType, r: Renderer, opts: RoomsOptions): ExitCo
   );
 
   for (const message of messages) r.transcriptMessage(message);
+  return EXIT.ok;
+}
+
+/**
+ * `acr rooms merge <id>` – the terminal half of the right panel's "Merge into <base>".
+ *
+ * The engine refuses a running room, a room with uncommitted work and a checkout that is
+ * not sitting clean on the base branch, so this only has to render the answer.
+ */
+async function mergeRoom(store: RoomStoreType, r: Renderer, opts: RoomsOptions): Promise<ExitCode> {
+  const room = requireRoom(store, opts.id);
+  const engine = await RoomEngine.load(room.id, { store });
+  // The engine's own refusals are answers, not crashes, so they print as one line rather
+  // than as the stack `main` gives anything that is not a `UsageError`.
+  const result = await engine.merge().catch((err: unknown) => {
+    if (err instanceof EngineError) throw new UsageError(err.message);
+    throw err;
+  });
+  if (!result.ok) {
+    // Every way this fails is a state of your checkout – wrong branch, dirty tree, a
+    // conflict – not acr breaking, which is what `usage` already covers.
+    r.error(result.error ?? 'could not merge');
+    return EXIT.usage;
+  }
+  if (result.alreadyUpToDate) {
+    r.info(`${room.baseBranch} already contains ${room.roomBranch}: nothing to merge.`);
+    return EXIT.ok;
+  }
+  r.info(`merged ${room.roomBranch} into ${room.baseBranch} as ${result.shortSha}.`);
   return EXIT.ok;
 }
 

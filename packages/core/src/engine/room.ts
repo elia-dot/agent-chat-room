@@ -316,6 +316,13 @@ const BRAINSTORM_PHASES: Record<number, BrainstormPhase> = {
 const ROOM_LOCK_TIMEOUT_MS = 2000;
 
 /**
+ * How long a merge waits for the repo write lock. Longer than the room lock, because a
+ * turn on another room in the same repo legitimately holds it and is worth a short wait;
+ * far shorter than a turn, because a merge is a button press with a human behind it.
+ */
+const MERGE_LOCK_TIMEOUT_MS = 10_000;
+
+/**
  * Pause between retries of a failed turn, multiplied by the attempt number. Short on
  * purpose: the failures worth retrying are transient (a dropped connection, a brief 429),
  * and a room owner watching the transcript should not think it has wedged.
@@ -1569,6 +1576,92 @@ export class RoomEngine {
     return first ?? { ok: false, error: 'nothing was pushed' };
   }
 
+  /**
+   * Merge the room branch into the branch the room was cut from, in the human's own checkout.
+   *
+   * PLAN.md section 4.2 asks for this next to "Open PR"; section 10 held it back from M3
+   * because it writes to the branch the human is standing on, which every other part of the
+   * design avoids. It lands here with that objection answered rather than waived: it refuses
+   * a room with uncommitted work, `git.mergeBranch` refuses a checkout that is not on the
+   * base branch, is not clean, or is part-way through a merge of its own, and a conflicted
+   * merge it started is aborted instead of left open.
+   *
+   * It holds both locks for the whole thing – the room lock so a browser and a terminal
+   * `acr rooms merge` cannot drive one room at once, and the per-repo write lock so two
+   * rooms on one repo cannot check, merge and clean up interleaved. Check-then-act on a
+   * working tree is exactly what those locks exist for, and the failure path here can undo
+   * a merge, so a race is not merely a lost update.
+   *
+   * Only the room repo. A writable additional folder branched inside the human's own
+   * checkout, so merging it means switching branches there – a different act, and theirs.
+   */
+  async merge(opts: { message?: string } = {}): Promise<git.MergeResult> {
+    const roomLock = await acquireRoomLock(this.roomRow.id, {
+      timeoutMs: ROOM_LOCK_TIMEOUT_MS,
+      pollMs: 100,
+    }).catch((err: unknown) => {
+      throw new EngineError(
+        `${err instanceof Error ? err.message : String(err)}. Another acr process is driving this room; stop it, or use that one.`,
+      );
+    });
+    try {
+      // Taken after the room lock, the same order `run()` takes them in, so two engines
+      // cannot hold one of each and wait on the other. The timeout bounds the wait on
+      // *another process* – "held by pid N" is a better answer to a button press than a
+      // hanging request. A turn in this process still queues ahead of it unbounded, which
+      // is the behaviour worth keeping: that lock is held by work, not by a stale file.
+      const repoLock = await this.acquireLock({
+        // An explicitly configured wait wins: the default is a guess about human patience,
+        // and a caller that stated one knows better.
+        timeoutMs: this.lockOptions.timeoutMs ?? MERGE_LOCK_TIMEOUT_MS,
+      }).catch((err: unknown) => {
+        throw new EngineError(err instanceof Error ? err.message : String(err));
+      });
+      try {
+        return await this.mergeLocked(opts);
+      } finally {
+        repoLock.release();
+      }
+    } finally {
+      roomLock.release();
+    }
+  }
+
+  /** The body of `merge`, with the room lock and the repo write lock both held. */
+  private async mergeLocked(opts: { message?: string }): Promise<git.MergeResult> {
+    const room = this.reload();
+    if (room.state === 'running' || room.state === 'waiting-reviews') {
+      throw new EngineError('a turn is in flight. Pause or stop the room before merging.');
+    }
+    if (room.roomBranch === room.baseBranch) {
+      throw new EngineError(
+        `this room ran directly in your ${room.baseBranch} checkout rather than on a room branch, so there is nothing to merge.`,
+      );
+    }
+    if (await git.isDirty(this.workdir())) {
+      throw new EngineError(
+        'this room has uncommitted work. Commit it first – a merge only moves commits.',
+      );
+    }
+
+    const message = opts.message?.trim() || `${commitSubject(room.title)}\n\nRoom: ${room.id}`;
+    const result = await git.mergeBranch(room.repoRoot, room.roomBranch, {
+      into: room.baseBranch,
+      message,
+    });
+
+    if (result.alreadyUpToDate) {
+      this.system(`${room.baseBranch} already contains ${room.roomBranch}: nothing to merge.`);
+    } else if (result.ok) {
+      this.system(
+        `merged ${room.roomBranch} into ${room.baseBranch} as ${result.shortSha} in ${room.repoRoot}.`,
+      );
+    } else {
+      this.system(`could not merge into ${room.baseBranch}: ${result.error ?? 'unknown error'}`);
+    }
+    return result;
+  }
+
   private async runRound(
     round: number,
     opts: { askedByYou?: boolean } = {},
@@ -2282,9 +2375,10 @@ export class RoomEngine {
     return this.roomRow.baseSha ?? undefined;
   }
 
-  private acquireLock(): Promise<LockHandle> {
+  private acquireLock(opts: AcquireLockOptions = {}): Promise<LockHandle> {
     return acquireRepoLock(this.roomRow.repoRoot, {
       ...this.lockOptions,
+      ...opts,
       onWait: (holder) => {
         this.system(
           `waiting for the write lock on ${this.roomRow.repoRoot}` +

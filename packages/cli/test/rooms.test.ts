@@ -254,6 +254,30 @@ describe('acr rooms', () => {
     ).rejects.toThrow(/no room matches "nope"/);
   });
 
+  it('merges a room branch into the checkout it was cut from', async () => {
+    const dir = repo();
+    const summary = await seed(dir, [
+      workerTurn(1, 'Swapped operator.', { 'math.js': FIXED }),
+      reviewTurn(1, verdict('approve')),
+    ]);
+    // Until the merge the human's checkout is untouched – that is the worktree design.
+    expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(BROKEN);
+
+    const capture = new Capture();
+    const code = await rooms({
+      subcommand: 'merge',
+      id: summary.roomId,
+      cwd: dir,
+      store,
+      renderer: new Renderer({ color: false, write: capture.write }),
+    });
+
+    expect(code).toBe(EXIT.ok);
+    expect(capture.text).toContain('merged');
+    expect(readFileSync(join(dir, 'math.js'), 'utf8')).toBe(FIXED);
+    expect(gitIn(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+  });
+
   it('refuses to purge an open room', async () => {
     const dir = repo();
     const summary = await seed(dir, [

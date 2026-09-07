@@ -479,6 +479,12 @@ export function App(): React.ReactElement {
           onContinue={() => void act(() => api.start(room.id))}
           onStop={() => void act(() => api.stop(room.id))}
           onCommit={() => void act(() => api.commit(room.id))}
+          onMerge={() =>
+            void act(async () => {
+              const { room: updated } = await api.merge(room.id);
+              store.merge({ room: updated });
+            })
+          }
           // The confirmation lives in the overlay, in the app's own voice, rather than in a
           // `window.confirm` the app cannot style or dismiss with its own Escape handling.
           onOpenPr={(remote) =>

@@ -16,6 +16,7 @@ export interface ActionsOverlayProps {
   onContinue: () => void;
   onStop: () => void;
   onCommit: () => void;
+  onMerge: () => void;
   onOpenPr: (remote: string) => void;
   onPromote: () => void;
   onCloseRoom: () => void;
@@ -33,6 +34,7 @@ export interface ActionsOverlayProps {
 export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
   const { room, busy } = props;
   const [confirmPr, setConfirmPr] = useState(false);
+  const [confirmMerge, setConfirmMerge] = useState(false);
   const running = room.state === 'running' || room.state === 'waiting-reviews';
   const completedBrainstorm = room.mode === 'brainstorm' && room.round >= room.maxRounds;
   const closed = room.closedAt !== null;
@@ -47,6 +49,14 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
       : ghReady
         ? undefined
         : (props.gh?.note ?? 'checking for gh…');
+  // Merge needs the same room branch as a PR, but nothing else: it is the offline half of
+  // the pair, so it stays available on a repo with no remote and no `gh`.
+  const mergeBlocked =
+    room.roomBranch === room.baseBranch
+      ? `this room ran in your ${room.baseBranch} checkout rather than on a room branch, so there is nothing to merge`
+      : undefined;
+  const mergeTitle =
+    mergeBlocked ?? `merges ${room.roomBranch} into ${room.baseBranch} in ${room.repoRoot}`;
 
   return (
     <Overlay title="Actions" hint="⌥A" onClose={props.onClose}>
@@ -108,6 +118,45 @@ export function ActionsOverlay(props: ActionsOverlayProps): React.ReactElement {
                 open pr
               </Action>
             )}
+          </div>
+        )}
+
+        {/* Merge is the local counterpart of Open PR, and it is the only action that writes
+            to the checkout you are standing in – so it sits on its own row rather than
+            beside commit, and asks first. */}
+        {room.mode !== 'brainstorm' && (
+          <Action
+            onClick={() => setConfirmMerge(true)}
+            disabled={busy || running || closed || Boolean(mergeBlocked)}
+            title={mergeTitle}
+          >
+            merge into {room.baseBranch}
+          </Action>
+        )}
+
+        {confirmMerge && (
+          <div className="flex flex-col gap-2 rounded-md border border-question-line bg-question-bg p-3">
+            <p className="text-[12.5px] leading-relaxed text-ink-soft">
+              Merge <span className="font-mono">{room.roomBranch}</span> into{' '}
+              <span className="font-mono">{room.baseBranch}</span> in{' '}
+              <span className="font-mono">{room.repoRoot}</span>?
+            </p>
+            <p className="font-mono text-[10.5px] text-question">
+              your checkout has to be on {room.baseBranch} and clean · a conflict is aborted, not
+              left open
+            </p>
+            <div className="flex gap-2">
+              <Action onClick={() => setConfirmMerge(false)}>cancel</Action>
+              <Action
+                onClick={() => {
+                  setConfirmMerge(false);
+                  props.onMerge();
+                }}
+                disabled={busy}
+              >
+                merge
+              </Action>
+            </div>
           </div>
         )}
 

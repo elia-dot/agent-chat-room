@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -352,6 +354,110 @@ export async function push(cwd: string, remote: string, branch: string): Promise
   } catch (err) {
     return { ok: false, remote, branch, error: errText(err) };
   }
+}
+
+export interface MergeResult {
+  ok: boolean;
+  /** `into` already contained every commit on `branch`, so nothing was written. */
+  alreadyUpToDate?: boolean;
+  sha?: string;
+  shortSha?: string;
+  error?: string;
+}
+
+/**
+ * Merge `branch` into the branch `cwd` is standing on.
+ *
+ * This is the one thing in the project that writes to the human's own checkout, which is
+ * exactly why the worktree design avoided it for so long (PLAN.md section 10). So it is
+ * deliberately unhelpful: it refuses unless the checkout is already on `into`, clean, and
+ * not part-way through an operation of its own, rather than switching branches or stashing
+ * on someone's behalf, and a merge *it started* that conflicts is aborted rather than left
+ * half-applied for them to discover.
+ *
+ * `--no-ff` is not a style preference: a room's rounds are a unit of work, and a merge
+ * commit is what keeps them attributable to the room after the branch is gone.
+ */
+export async function mergeBranch(
+  cwd: string,
+  branch: string,
+  opts: { into: string; message?: string },
+): Promise<MergeResult> {
+  const standingOn = await currentBranch(cwd);
+  if (standingOn !== opts.into) {
+    return {
+      ok: false,
+      error: `${cwd} is on ${standingOn}, not ${opts.into}. Check out ${opts.into} there and try again.`,
+    };
+  }
+  // Before the dirty check, because it is the case the dirty check cannot see: resolve a
+  // conflict to match HEAD and `git status --porcelain` goes quiet while MERGE_HEAD is
+  // still sitting there. Starting here would fail, and the failure path would then abort
+  // the human's merge, not ours.
+  const pending = await pendingOperation(cwd);
+  if (pending) {
+    return {
+      ok: false,
+      error: `${cwd} is part-way through a ${pending}. Finish or abort it before merging into ${opts.into}.`,
+    };
+  }
+  if (await isDirty(cwd)) {
+    return {
+      ok: false,
+      error: `${cwd} has uncommitted changes. Commit or stash them before merging into ${opts.into}.`,
+    };
+  }
+  if (!(await branchExists(cwd, branch))) {
+    return { ok: false, error: `${cwd} has no branch called ${branch}` };
+  }
+  if ((await aheadCount(cwd, opts.into, branch)) === 0) {
+    return { ok: true, alreadyUpToDate: true };
+  }
+
+  const message = opts.message?.trim() || `Merge ${branch}`;
+  try {
+    await git(cwd, ['merge', '--no-ff', '-m', message, branch]);
+  } catch (err) {
+    // A conflicted merge leaves the index half-applied. Undo it: the human asked for a
+    // merge, not for a repository to be handed back mid-conflict by a background process.
+    //
+    // Only when the merge state is ours, though. There was none when we checked above and
+    // the caller holds the repo write lock throughout, so merge state here was created by
+    // the command that just failed. A failure that left none – a bad ref, an unreadable
+    // object – has nothing to abort, and `--abort` is not a general-purpose undo.
+    if ((await pendingOperation(cwd)) === 'merge') {
+      await gitOrUndefined(cwd, ['merge', '--abort']);
+    }
+    return { ok: false, error: errText(err) };
+  }
+  return { ok: true, sha: await headSha(cwd), shortSha: await shortSha(cwd) };
+}
+
+/**
+ * Which multi-step operation `cwd` is part-way through, if any.
+ *
+ * Not the same question as `isDirty`: git records these as pseudo-refs and state
+ * directories, and a working tree can be perfectly clean while one is open.
+ */
+export async function pendingOperation(
+  cwd: string,
+): Promise<'merge' | 'cherry-pick' | 'revert' | 'rebase' | undefined> {
+  const refs = [
+    ['MERGE_HEAD', 'merge'],
+    ['CHERRY_PICK_HEAD', 'cherry-pick'],
+    ['REVERT_HEAD', 'revert'],
+  ] as const;
+  for (const [ref, name] of refs) {
+    const out = await gitOrUndefined(cwd, ['rev-parse', '--verify', '--quiet', ref]);
+    if (out?.trim()) return name;
+  }
+  // A rebase has no pseudo-ref of its own until it stops; the state directory is what is
+  // there for the whole run. `--git-path` resolves it for worktrees and `$GIT_DIR` alike.
+  for (const dir of ['rebase-merge', 'rebase-apply']) {
+    const path = (await gitOrUndefined(cwd, ['rev-parse', '--git-path', dir]))?.trim();
+    if (path && existsSync(resolve(cwd, path))) return 'rebase';
+  }
+  return undefined;
 }
 
 function errText(err: unknown): string {

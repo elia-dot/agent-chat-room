@@ -64,6 +64,11 @@ const PrBody = z
   .optional()
   .default({});
 
+const MergeBody = z
+  .object({ message: z.string().min(1).optional() })
+  .optional()
+  .default({});
+
 const PromoteBody = z
   .object({
     agents: z.array(z.string().min(1)).min(2).optional(),
@@ -376,6 +381,12 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
     const room = requireRoom(supervisor, request.params);
     const body = PrBody.parse(request.body ?? {});
     return await supervisor.openPr(room.id, body);
+  });
+
+  app.post('/api/rooms/:id/merge', async (request) => {
+    const room = requireRoom(supervisor, request.params);
+    const body = MergeBody.parse(request.body ?? {});
+    return await supervisor.merge(room.id, body);
   });
 
   app.post('/api/rooms/:id/promote', async (request, reply) => {

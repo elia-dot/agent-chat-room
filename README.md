@@ -40,9 +40,10 @@ M4 brings complete production-readiness and the next-generation feature set:
   One button turns the proposal into a `build-review` room.
 - **Roster editing.** Swap who builds mid-room and change any participant's model, without
   losing anyone's session.
-- **Commit, Open PR and Export markdown.** Commit the working tree on demand; push the room
-  branch and open a PR through your own `gh` login – one per repository the room committed in;
-  save the whole room as a markdown file.
+- **Commit, Merge, Open PR and Export markdown.** Commit the working tree on demand; merge the
+  room branch into the branch it was cut from, in your own checkout; push the room branch and
+  open a PR through your own `gh` login – one per repository the room committed in; save the
+  whole room as a markdown file.
 - **Additional folders, read or read & write.** Grant a room extra repositories. `read` is context
   only, and an edit made there is reverted at the end of the turn. `read & write` makes the folder
   part of the room: its changes join the diff the reviewers judge, the room commits them on an
@@ -75,12 +76,34 @@ M4 brings complete production-readiness and the next-generation feature set:
 ## Try it
 
 ```sh
+npx agent-chat-room        # server + browser on http://127.0.0.1:4321
+```
+
+Node >= 20.19. Nothing else to configure: `acr` finds the agent CLIs you already have, and each
+of them finds its own login.
+
+To install it once instead of fetching it every time:
+
+```sh
+npm install -g agent-chat-room
+acr
+```
+
+<details>
+<summary>Or from a clone</summary>
+
+```sh
 nvm use            # Node 22.14 (>= 20.19 works)
 npm install
 npm run build      # tsc -b for the packages, vite build for the web app
 
 node packages/cli/dist/bin.js            # server + browser on http://127.0.0.1:4321
 ```
+
+The commands below are written as `node packages/cli/dist/bin.js` for this layout; from an
+install they are all just `acr`.
+
+</details>
 
 Port 4321 is the default; if it is taken `acr` walks upward and prints the URL it actually bound.
 `acr serve --port N` pins one instead (and fails rather than moving), and `--no-open` leaves your
@@ -109,6 +132,7 @@ node packages/cli/dist/bin.js rooms ls
 node packages/cli/dist/bin.js rooms show <id>
 node packages/cli/dist/bin.js rooms export <id> --out room.md
 node packages/cli/dist/bin.js rooms resume <id>
+node packages/cli/dist/bin.js rooms merge <id>
 node packages/cli/dist/bin.js rooms close <id>
 node packages/cli/dist/bin.js rooms purge <id>
 node packages/cli/dist/bin.js data-path
@@ -223,10 +247,23 @@ budget is spent the room still rewinds and asks you, exactly as it always did. T
 0 – retrying costs another turn each time, and that is the room owner's decision to make, not
 a default that quietly spends their tokens twice.
 
-### Commit, Open PR, Export
+### Commit, Merge, Open PR, Export
 
 - **Commit** stages and commits the room's working tree, for the common case of a `needs-you`
   room whose last round is real work sitting uncommitted.
+- **Merge** merges `acr/<slug>` into the branch the room was cut from, with `--no-ff`, so the
+  round stays attributable to the room after the branch is gone. This is the one action that
+  writes to the checkout you are standing in, which is why it asks first and refuses more than
+  it helps: the room may not have uncommitted work, your checkout has to be sitting on the base
+  branch, clean, and not part-way through a merge, rebase, cherry-pick or revert of its own,
+  and a merge _it started_ that conflicts is aborted rather than handed back to you
+  half-applied. A merge already in progress is left strictly alone – it is not enough to ask
+  whether the tree is dirty, because resolving a conflict back to `HEAD` leaves a clean tree
+  with `MERGE_HEAD` still set. It holds the room lock and the repo write lock throughout, so
+  two rooms on one repository cannot check and merge interleaved. It touches the room repo
+  only – a writable additional folder branched inside
+  your own checkout, so merging that one is a `git merge` you do yourself. `acr rooms merge <id>`
+  is the same action from the terminal.
 - **Open PR** pushes the room branch and runs `gh pr create`. It is the only thing `acr` does
   that leaves your machine, so it never happens implicitly: it needs an explicit press, it
   names the remote and branch first, and the push and the resulting url both
@@ -479,6 +516,7 @@ or redeemed as a `SameSite=Strict; HttpOnly` session cookie on first navigation 
 | `PATCH /api/rooms/:id`                                                      | `{ title?, additionalDirs? }`                                    |
 | `PATCH /api/rooms/:id/participants/:runtime`                                | `{ role?, model? }` – the role swap and the model picker         |
 | `POST /api/rooms/:id/commit`                                                | `{ message? }` – commit the working tree                         |
+| `POST /api/rooms/:id/merge`                                                 | `{ message? }` – merge the room branch into its base branch      |
 | `POST /api/rooms/:id/pr`                                                    | `{ title?, body?, remote?, draft? }` – push, then `gh pr create` |
 | `POST /api/rooms/:id/promote`                                               | a brainstorm proposal becomes a new `build-review` room          |
 | `GET /api/rooms/:id/export.md`                                              | the whole room as markdown                                       |

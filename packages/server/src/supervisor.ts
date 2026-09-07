@@ -305,6 +305,21 @@ export class RoomSupervisor {
     return { room: entry.engine.room, ...(result.url ? { url: result.url } : {}) };
   }
 
+  async merge(
+    roomId: string,
+    opts: { message?: string } = {},
+  ): Promise<{ room: Room; sha?: string; alreadyUpToDate?: boolean }> {
+    const entry = await this.entry(roomId);
+    if (entry.running) throw new ConflictError(`room ${roomId.slice(0, 8)} is running`);
+    const result = await entry.engine.merge(opts);
+    if (!result.ok) throw new EngineError(result.error ?? 'could not merge');
+    return {
+      room: entry.engine.room,
+      ...(result.shortSha ? { sha: result.shortSha } : {}),
+      ...(result.alreadyUpToDate ? { alreadyUpToDate: true } : {}),
+    };
+  }
+
   /**
    * Turn a finished brainstorm into a build room: the moderator's proposal becomes the task
    * of a fresh `build-review` room on the same repo (PLAN.md section 3, "with one click").

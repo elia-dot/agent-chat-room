@@ -42,7 +42,7 @@ Usage:
   acr serve [--port N] [--no-open]
   acr doctor [--json] [--models]
   acr run --task <text> [options]
-  acr rooms ls | show <id> | export <id> | resume <id> | close <id> | purge <id>
+  acr rooms ls | show <id> | export <id> | resume <id> | merge <id> | close <id> | purge <id>
   acr data-path
   acr --help | --version
 
@@ -50,7 +50,9 @@ Commands:
   serve         Start the local server and open the web UI (the default with no arguments).
   doctor        Show which agent runtimes are installed, new enough and logged in.
   run           Run a room: the worker builds, the reviewers review, repeat until they agree.
-  rooms         List, inspect, export, resume, close and purge the rooms in the local store.
+  rooms         List, inspect, export, resume, merge, close and purge the rooms in the local
+                store. \`merge\` merges the room branch into the branch it was cut from, in your
+                own checkout, which has to be sitting clean on that branch.
   data-path     Print the directory holding database, worktrees, and logs.
 
 Options for \`doctor\`:

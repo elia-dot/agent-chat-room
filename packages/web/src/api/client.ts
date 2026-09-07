@@ -237,6 +237,12 @@ export const api = {
   openPr: (id: string, body: { title?: string; remote?: string; draft?: boolean } = {}) =>
     post<{ room: Room; url?: string }>(`/api/rooms/${id}/pr`, body),
 
+  merge: (id: string, message?: string) =>
+    post<{ room: Room; sha?: string; alreadyUpToDate?: boolean }>(
+      `/api/rooms/${id}/merge`,
+      message ? { message } : {},
+    ),
+
   promote: (id: string, body: { agents?: string[]; title?: string } = {}) =>
     post<{ room: Room; participants: Participant[] }>(`/api/rooms/${id}/promote`, body),
 
