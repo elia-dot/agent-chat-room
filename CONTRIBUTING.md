@@ -2,6 +2,17 @@
 
 Thank you for your interest in contributing to `agent-chat-room`!
 
+## Issues and pull requests
+
+[Open an issue](https://github.com/elia-dot/agent-chat-room/issues) for bugs or feature requests.
+Include reproduction steps, ACR/Node/agent CLI versions, and expected versus actual behavior.
+Remove tokens, private paths and sensitive transcript content from logs and screenshots.
+Report vulnerabilities using [SECURITY.md](SECURITY.md).
+
+For a pull request, fork the repository, make a focused change, and open a PR against `main`.
+Explain the problem and what checks you ran; add regression coverage for behavior changes.
+Discuss large changes in an issue first. Contributions are under the repository's MIT license.
+
 ## Getting Started
 
 ### Prerequisites
@@ -15,7 +26,7 @@ Thank you for your interest in contributing to `agent-chat-room`!
 ```bash
 git clone https://github.com/elia-dot/agent-chat-room.git
 cd agent-chat-room
-npm install
+npm ci
 npm run build
 npm test
 npm run lint
@@ -33,10 +44,12 @@ Adapters are pure data/function structures that translate between `agent-chat-ro
 
 ```typescript
 export interface AgentAdapter {
-  readonly id: string;
+  id: string;
+  displayName: string;
+  capabilities: AdapterCapabilities;
   detect(): Promise<Detection>;
   run(request: TurnRequest, sink: EventSink): TurnHandle;
-  listModels?(): Promise<string[]>;
+  listModels?(): Promise<ModelOption[]>;
 }
 ```
 

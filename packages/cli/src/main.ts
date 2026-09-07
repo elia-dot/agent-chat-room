@@ -106,7 +106,7 @@ Exit codes:
   2  bad usage
   3  the reviewers did not approve (a question for you, or the run was stopped)
 
-The server binds 127.0.0.1 only, so nothing about a room ever leaves your machine. Rooms
+The server binds 127.0.0.1 only. Agent CLIs contact their providers; Git may contact remotes. Rooms
 run inside the \`acr serve\` process: closing the browser tab does not stop them, Ctrl-C does.`;
 
 /** Injectable seams, so `main.test.ts` can exercise the argument handling hermetically. */

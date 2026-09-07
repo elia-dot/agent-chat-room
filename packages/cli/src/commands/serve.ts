@@ -35,7 +35,7 @@ export async function serve(opts: ServeOptions = {}): Promise<ExitCode> {
 
   const displayUrl = server.urlWithToken ?? server.url;
   r.info(`agent chat room is on ${displayUrl}`);
-  r.info('nothing listens on the network: the server is bound to 127.0.0.1 only.');
+  r.info('the server accepts local connections only (127.0.0.1); agent CLIs may use the network.');
   r.info('Ctrl-C to stop. Rooms keep running as long as this process does.');
 
   if (opts.open !== false) (opts.openBrowser ?? openBrowser)(displayUrl);

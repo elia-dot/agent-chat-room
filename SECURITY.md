@@ -9,7 +9,9 @@
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in `agent-chat-room`, please do not open a public
-issue. Instead, report it privately to the maintainers or via GitHub Security Advisories.
+issue with vulnerability details. Use [GitHub private vulnerability reporting](https://github.com/elia-dot/agent-chat-room/security/advisories/new).
+If that option is unavailable, open an issue asking for a private reporting channel without
+disclosing the vulnerability.
 
 Please include:
 
@@ -28,13 +30,19 @@ Please include:
    addresses the server by that name.
 3. **Capability Token Boundary**: Every API route except `/api/health`, and every WebSocket
    connection, requires the session capability token. The token is generated with `0600` permissions in
-   `~/.config/agent-chat-room/server.token` and redeemed via a one-time HTTP redirect into an
-   `HttpOnly; SameSite=Strict` cookie, isolating browser tabs and unauthenticated network
-   processes. (Processes running as the same local user UID share user file permissions.)
+   `~/.config/agent-chat-room/server.token` and exchanged via an HTTP redirect for an
+   `HttpOnly; SameSite=Strict` cookie. Requests without that cookie or a valid bearer token
+   are rejected. Tabs on the same origin share cookies; processes running as the same local
+   user can read files permitted to that user.
 4. **Repository Setup & Test Hooks**: Commands defined in `.acr.json` (`setup`, `testCommand`)
    execute in the worktree using the local user shell. Inspect untrusted repositories before
    opening rooms.
-5. **Isolated Worktrees**: Agent modifications take place in isolated git worktrees
-   (`~/.config/agent-chat-room/worktrees/`) rather than the user's working checkout.
-6. **No Credential Access**: `acr` never touches or reads user API keys, passwords, or
-   authentication tokens. All agent CLIs manage their own authentications independently.
+5. **Worktrees by default**: Rooms use isolated git worktrees
+   (`~/.config/agent-chat-room/worktrees/`). Disabling isolation edits the original checkout;
+   additional writable folders are always accessed in place. Runtime permissions differ
+   by adapter and are not a uniform OS sandbox.
+6. **Agent authentication**: Agent CLIs manage their own credentials. ACR checks for
+   credential-file presence and maintains its own local server capability token.
+7. **Network use**: Agent providers, Git remotes, model discovery, user tools and repository
+   hooks can use the network. The web UI loads Google Fonts. Local storage and a loopback
+   listener do not mean the application is offline.

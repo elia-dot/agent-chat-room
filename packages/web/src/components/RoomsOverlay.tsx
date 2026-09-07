@@ -203,13 +203,22 @@ export function EmptyState({
               every reviewer approved, and the round is committed
             </Legend>
             <Legend dot="bg-error" name="stopped">
-              halted, not committed
+              halted; inspect any remaining changes
             </Legend>
             <Legend dot="bg-ink-faint" name="idle">
               resumable, nothing running
             </Legend>
           </ul>
         </div>
+        <a
+          href="https://denly.dev"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-6 inline-flex items-center gap-2 text-[12px] text-ink-dim hover:text-ink"
+        >
+          <img src="/denly-logo.png" alt="Denly logo" width={28} height={28} />
+          <span>Built with the help of Denly</span>
+        </a>
       </div>
     </div>
   );
