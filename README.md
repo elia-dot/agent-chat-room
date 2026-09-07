@@ -279,8 +279,8 @@ Some server tests bind temporary loopback ports. Live acceptance tests are opt-i
 Maintainers: see the [release checklist](https://github.com/elia-dot/agent-chat-room/blob/main/docs/RELEASING.md)
 for package validation, the tarball smoke test and npm publishing. The
 [design plan](https://github.com/elia-dot/agent-chat-room/blob/main/docs/PLAN.md) is historical
-context; [token efficiency](https://github.com/elia-dot/agent-chat-room/blob/main/docs/TOKEN_EFFICIENCY.md)
-describes prompt and review behavior in more detail.
+context; [prompt construction](https://github.com/elia-dot/agent-chat-room/blob/main/docs/PROMPTS.md)
+covers how each turn's prompt is assembled and what the engine reuses between turns.
 
 ## License
 
