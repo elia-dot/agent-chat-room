@@ -66,3 +66,25 @@ export function diffsDir(): string {
 export function diffPath(messageId: string): string {
   return join(diffsDir(), `${messageId}.diff`);
 }
+
+/**
+ * Files the human dropped into a chat: images, documents, and the transcripts of rooms
+ * they referenced. One folder per room, because that folder is handed to the runtimes as
+ * an extra read root and a room has no business reading another room's uploads.
+ */
+export function attachmentsDir(): string {
+  return join(configDir(), 'attachments');
+}
+
+export function roomAttachmentsDir(roomId: string): string {
+  return join(attachmentsDir(), roomId);
+}
+
+/**
+ * Where one attachment lives. The name on disk is derived from the server-minted id plus
+ * the original extension, never from the caller's filename, so nothing a browser sends can
+ * steer the write out of the room's folder.
+ */
+export function attachmentPath(roomId: string, attachmentId: string, extension = ''): string {
+  return join(roomAttachmentsDir(roomId), `${attachmentId}${extension}`);
+}

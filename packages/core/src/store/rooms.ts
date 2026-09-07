@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { diffPath as diffFilePath } from '../paths.js';
+import { diffPath as diffFilePath, roomAttachmentsDir } from '../paths.js';
 import type { Role } from '../roles.js';
 import type { Permission, TurnEvent, Usage } from '../types.js';
 import type { Verdict } from '../verdict.js';
@@ -10,6 +10,7 @@ import type { Db } from './db.js';
 import { openDb } from './db.js';
 import type {
   AdditionalDir,
+  Attachment,
   Message,
   MessageKind,
   Participant,
@@ -67,6 +68,7 @@ export interface AddMessageInput {
   verdict?: Verdict | null;
   activity?: TurnEvent[];
   diff?: string | null;
+  attachments?: Attachment[];
 }
 
 export interface StartTurnInput {
@@ -268,6 +270,9 @@ export class RoomStore {
   /** Removes the room and, by cascade, its participants, messages and turns. */
   deleteRoom(id: string): void {
     for (const message of this.listMessages(id)) this.dropDiffFiles(message.id, message.diffPath);
+    // The whole folder, not one file per attachment: an upload the human never sent has no
+    // row to find it by, and leaving those behind is how the config directory grows forever.
+    rmSync(roomAttachmentsDir(id), { recursive: true, force: true });
     this.db.prepare('DELETE FROM rooms WHERE id = ?').run(id);
   }
 
@@ -372,9 +377,9 @@ export class RoomStore {
     this.db
       .prepare(
         `INSERT INTO messages (id, room_id, participant_id, author, role, round, kind, text,
-           verdict_json, activity_json, diff, diff_path, created_at)
+           verdict_json, activity_json, diff, diff_path, attachments_json, created_at)
          VALUES (@id, @roomId, @participantId, @author, @role, @round, @kind, @text,
-           @verdictJson, @activityJson, @diff, @diffPath, @createdAt)`,
+           @verdictJson, @activityJson, @diff, @diffPath, @attachmentsJson, @createdAt)`,
       )
       .run({
         id,
@@ -389,6 +394,7 @@ export class RoomStore {
         activityJson: input.activity?.length ? JSON.stringify(input.activity) : null,
         diff: inlineDiff,
         diffPath: path,
+        attachmentsJson: input.attachments?.length ? JSON.stringify(input.attachments) : null,
         createdAt: nowIso(),
       });
     return this.getMessage(id)!;
@@ -682,6 +688,7 @@ function toMessage(row: Row): Message {
     activity: parseJson<TurnEvent[]>(row.activity_json) ?? [],
     diff: str(row.diff),
     diffPath: str(row.diff_path),
+    attachments: parseJson<Attachment[]>(row.attachments_json) ?? [],
     createdAt: asText(row.created_at),
   };
 }

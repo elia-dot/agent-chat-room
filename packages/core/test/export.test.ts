@@ -55,6 +55,7 @@ const message = (over: Partial<Message> = {}): Message => ({
   activity: [],
   diff: null,
   diffPath: null,
+  attachments: [],
   createdAt: '2026-09-03T10:01:00.000Z',
   ...over,
 });

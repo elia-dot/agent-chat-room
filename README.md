@@ -155,6 +155,22 @@ Nobody edits, so there is no diff, no verdict and no commit. A brainstorm never 
 and `acr run --mode brainstorm` exits 0. Promote turns the proposal into the task of a fresh
 `build-review` room in the same repo, with the moderator as the worker.
 
+### Files and other rooms in the composer
+
+Drop a file on the composer, paste a screenshot, or press **attach**. The file is taken into
+`~/.config/agent-chat-room/attachments/<roomId>/`, that folder is granted to every runtime in the
+room as an extra read root, and the next prompt names each attachment by absolute path. Images are
+never inlined into the prompt – no CLI runtime accepts that – so an agent that needs to look at one
+opens the file.
+
+Typing `#` offers the other rooms. Referencing one snapshots its transcript to a markdown file and
+attaches it the same way, so "do what we decided in #auth-spike" is something the agents can
+actually read. It is a snapshot, taken when you sent the message, not a live link.
+
+Naming an agent in a finished room reopens it, exactly as before. If you named the **worker** and it
+answers without changing a file, the room stops there rather than asking every reviewer for a review
+of a diff that does not exist; **continue** runs a full round.
+
 ### Swapping roles and models
 
 Models are **picked, not typed**. The new-room dialog and the right panel both show a list
@@ -300,11 +316,12 @@ Unknown keys warn and are ignored, so a file written by a newer `acr` never bric
 
 ```
 ~/.config/agent-chat-room/
-  acr.db                  rooms, participants, messages, turns, recent repos (schema v5)
+  acr.db                  rooms, participants, messages, turns, recent repos (schema v6)
   server.token            capability session authorization token (mode 0600)
   turns/<turnId>.jsonl    every raw line a runtime emitted, for debugging an adapter
   worktrees/<roomId>/     the room's checkout
   diffs/<messageId>.diff  diffs too large to keep in a row
+  attachments/<roomId>/   files you put into the chat, granted to that room's runtimes
   locks/<hash>.lock       the advisory per-repo write lock
   locks/room-<id>.lock    the advisory per-room lock, held for a whole run
 ```
@@ -468,6 +485,15 @@ or redeemed as a `SameSite=Strict; HttpOnly` session cookie on first navigation 
 | `GET /api/repos` \| `/api/repos/browse?path=`                               | the repo picker                                                  |
 | `GET /api/repos/picker`                                                     | whether this host can show a native folder dialog                |
 | `POST /api/repos/pick`                                                      | `{ path? }` – open that dialog; `{ path, repoRoot }` back        |
+
+Attachments are two more routes on the same terms. `POST /api/rooms/:id/attachments` takes
+`{ name, mime, data }` with `data` base64 (20 MB ceiling; JSON rather than multipart, so the server
+keeps its one body parser) and answers with the handle to send along in
+`POST /api/rooms/:id/messages` as `attachments`, next to `rooms` for the transcripts to pull in. The
+handle is an id, never a path: the file is written as `<id><ext>` under the room's own folder and the
+path is rebuilt from that id, so nothing a client sends decides where a byte lands or is read from.
+`GET /api/rooms/:id/attachments/:attachmentId` reads one back, `inline` only for raster image types
+and `attachment` for everything else – SVG included, since it carries script.
 
 `GET /api/repos/browse` reads directories and `POST /api/rooms` spawns an agent CLI with `edits`
 permission, so the origin check and capability token are load-bearing rather than a nicety: without them,

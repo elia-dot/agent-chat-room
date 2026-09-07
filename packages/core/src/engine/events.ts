@@ -7,7 +7,18 @@ import type { TurnEvent } from '../types.js';
  * consume one shape, and nothing has to be re-derived when the socket lands.
  */
 export type EngineEvent =
-  | { type: 'room.state'; roomId: string; state: RoomState; round: number }
+  | {
+      type: 'room.state';
+      roomId: string;
+      state: RoomState;
+      round: number;
+      /**
+       * The human's own action put the room here – reopening an approved room by naming an
+       * agent is the only case so far. A desktop notification saying "the room is waiting
+       * on you" is wrong when you are the one who just typed, so the server skips it.
+       */
+      byYou?: boolean;
+    }
   /**
    * Not in PLAN.md section 4.4, because pausing is not a state. A browser watching a room
    * that another client paused has to learn about it without polling, and the sidebar dot

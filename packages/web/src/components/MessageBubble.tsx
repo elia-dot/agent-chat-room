@@ -1,5 +1,6 @@
-import type { Message, TurnEvent, Verdict } from '@agent-chat-room/core';
+import type { Attachment, Message, TurnEvent, Verdict } from '@agent-chat-room/core';
 
+import { api } from '../api/client.js';
 import type { AgentTint } from '../lib/format.js';
 import { initials, relativeTime, tintOf } from '../lib/format.js';
 import { verdictForDisplay } from '../lib/verdict.js';
@@ -23,6 +24,9 @@ export interface BubbleProps {
   onOpenDiff?: () => void;
   diffLabel?: string;
   streaming?: boolean;
+  /** Files the human put into the chat. Needs the room id to build their URLs. */
+  attachments?: Attachment[];
+  roomId?: string;
 }
 
 /**
@@ -113,6 +117,10 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
           )}
         </div>
 
+        {props.attachments && props.attachments.length > 0 && props.roomId && (
+          <Attachments attachments={props.attachments} roomId={props.roomId} />
+        )}
+
         <VerdictCard
           verdict={display.verdict}
           rawBlocks={display.rawBlocks}
@@ -136,6 +144,59 @@ export function MessageBubble(props: BubbleProps): React.ReactElement {
         )}
       </div>
     </article>
+  );
+}
+
+/**
+ * What the human attached: images in place, everything else as a link.
+ *
+ * A referenced room reads as the room it came from rather than as `flaky-login.md`, because
+ * that is what was meant by it – the file is an implementation detail of getting the
+ * transcript in front of the agents.
+ */
+function Attachments({
+  attachments,
+  roomId,
+}: {
+  attachments: Attachment[];
+  roomId: string;
+}): React.ReactElement {
+  return (
+    <ul className="mt-2.5 flex flex-wrap items-start gap-2">
+      {attachments.map((attachment) => {
+        const href = api.attachmentUrl(roomId, attachment.id);
+        if (attachment.kind === 'image') {
+          return (
+            <li key={attachment.id}>
+              <a href={href} target="_blank" rel="noreferrer">
+                <img
+                  src={href}
+                  alt={attachment.name}
+                  className="max-h-64 max-w-full rounded-md border border-line"
+                />
+              </a>
+            </li>
+          );
+        }
+        return (
+          <li key={attachment.id}>
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded border border-line px-2 py-1 hover:border-line-strong"
+            >
+              <span className="font-mono text-[10px] tracking-[0.08em] text-ink-faint uppercase">
+                {attachment.kind === 'room' ? 'room' : 'doc'}
+              </span>
+              <span className="max-w-64 truncate text-[12.5px] text-ink-soft">
+                {attachment.roomRef ? attachment.roomRef.title : attachment.name}
+              </span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -165,6 +226,9 @@ export function PersistedMessage({
       {...(tint ? { tint } : {})}
       {...(meta ? { meta } : {})}
       {...(hasDiff && onOpenDiff ? { onOpenDiff } : {})}
+      {...(message.attachments.length > 0
+        ? { attachments: message.attachments, roomId: message.roomId }
+        : {})}
     />
   );
 }

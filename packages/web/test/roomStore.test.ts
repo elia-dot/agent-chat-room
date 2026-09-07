@@ -45,6 +45,7 @@ const message = (id: string, seq: number, over: Partial<Message> = {}): Message 
   activity: [],
   diff: null,
   diffPath: null,
+  attachments: [],
   createdAt: 'then',
   ...over,
 });

@@ -318,6 +318,87 @@ describe('RoomSupervisor', () => {
     await expect(s.start(id)).rejects.toThrow(/is closed/);
   });
 
+  it('does not notify you that a room needs you when you are the one who reopened it', async () => {
+    writeEchoScript([
+      { when: { role: 'worker', round: 1 }, text: 'Fixed.', writeFiles: { 'math.js': FIXED } },
+      { when: { role: 'reviewer', round: 1 }, text: verdict('approve') },
+      { when: { role: 'worker', round: 2 }, text: 'Looked again.' },
+    ]);
+    const notifications: string[] = [];
+    const s = new RoomSupervisor({
+      store,
+      engine: { adapters: testAdapters, timeoutMs: 5000 },
+      coalesceMs: 0,
+      notify: {
+        platform: 'darwin',
+        disabled: false,
+        spawn: (_file, args) => notifications.push(args[1] ?? ''),
+      },
+    });
+    const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
+    const id = engine.room.id;
+
+    await s.start(id);
+    await waitFor(() => store.getRoom(id)?.state === 'approved', 'the room to approve');
+    // Approval is worth saying out loud; that one is the baseline.
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toContain('Approved');
+
+    // Reopening moves the room to `needs-you`, which is the transition that used to fire a
+    // "Needs you" notification at the person who had just pressed send.
+    await s.say(id, 'one more thing', { mention: 'echo' });
+    expect(store.getRoom(id)?.state).not.toBe('approved');
+    expect(notifications).toHaveLength(1);
+
+    // The round ending is the room talking rather than an echo, so that one still fires.
+    await waitFor(() => !s.isRunning(id), 'the reopened turn to finish');
+    expect(store.getRoom(id)?.state).toBe('needs-you');
+    expect(notifications).toHaveLength(2);
+    expect(notifications[1]).toContain('waiting on you');
+  });
+
+  it('spends a worker mention on one round, so Continue reviews again', async () => {
+    writeEchoScript([
+      // Round 1 answers the mention without touching a file, so the reviewers are skipped.
+      { when: { role: 'worker', round: 1 }, text: 'It is written that way because…' },
+      // Round 2 is a plain Continue. It changes nothing either, and must still be reviewed.
+      { when: { role: 'worker', round: 2 }, text: 'Still nothing to change.' },
+      { when: { role: 'reviewer', round: 2 }, text: verdict('question') },
+    ]);
+    const s = supervisor();
+    const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
+    const id = engine.room.id;
+
+    await s.say(id, 'why is it written this way?', { mention: 'echo' });
+    await s.start(id);
+    await waitFor(() => !s.isRunning(id), 'the asked-for round to finish');
+    expect(store.listTurns(id).filter((t) => t.role === 'reviewer')).toHaveLength(0);
+
+    // `nextSpeaker` still names the worker – nothing clears it – so this is exactly the
+    // case where the round used to keep counting as one you asked for, forever.
+    expect(store.getRoom(id)?.nextSpeaker).toBe('echo');
+    await s.start(id);
+    await waitFor(() => !s.isRunning(id), 'the plain round to finish');
+    expect(store.listTurns(id).filter((t) => t.role === 'reviewer')).toHaveLength(1);
+  });
+
+  it('treats a message that names nobody as a plain round, reviewers and all', async () => {
+    writeEchoScript([
+      { when: { role: 'worker', round: 1 }, text: 'Nothing to do.' },
+      { when: { role: 'reviewer', round: 1 }, text: verdict('question') },
+    ]);
+    const s = supervisor();
+    const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
+    const id = engine.room.id;
+
+    // No mention, so `nextSpeaker` falls back to the worker. That is the room picking a
+    // default, not you asking for a turn, and it must not skip the review.
+    await s.say(id, 'carry on');
+    await s.start(id);
+    await waitFor(() => !s.isRunning(id), 'the round to finish');
+    expect(store.listTurns(id).filter((t) => t.role === 'reviewer')).toHaveLength(1);
+  });
+
   it('purges a room and refuses to purge a running room', async () => {
     const s = supervisor();
     const engine = await s.create({ task: 'fix add()', cwd: repo(), agents: ['echo', 'echo2'] });
