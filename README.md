@@ -157,7 +157,7 @@ and `acr run --mode brainstorm` exits 0. Promote turns the proposal into the tas
 
 ### Files and other rooms in the composer
 
-Drop a file on the composer, paste a screenshot, or press **attach**. The file is taken into
+Drop a file on the composer, paste a screenshot, or press the **paperclip** button in it. The file is taken into
 `~/.config/agent-chat-room/attachments/<roomId>/`, that folder is granted to every runtime in the
 room as an extra read root, and the next prompt names each attachment by absolute path. Images are
 never inlined into the prompt – no CLI runtime accepts that – so an agent that needs to look at one

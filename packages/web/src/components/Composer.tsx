@@ -1,6 +1,7 @@
 import type { Attachment, Participant, Room } from '@agent-chat-room/core';
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
+import { composerBox } from '../lib/composer.js';
 import type { RoomOption } from '../lib/mentions.js';
 import {
   applyCompletion,
@@ -60,8 +61,22 @@ export function Composer({
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const filePicker = useRef<HTMLInputElement>(null);
+
+  // The box hugs its content: one line when the draft is one line, growing to `MAX_LINES`
+  // and scrolling after that. `height = 'auto'` before the read is what lets it shrink
+  // again after a delete – without it `scrollHeight` only ever reports the tallest it has
+  // been. Layout effect, not effect, so the resize lands in the same paint as the keystroke.
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const box = composerBox(el.scrollHeight);
+    el.style.height = `${box.height}px`;
+    setExpanded(box.expanded);
+  }, [value]);
 
   const runtimes = participants.map((p) => p.runtime);
   const mention = mentionAtCaret(value, caret);
@@ -285,17 +300,25 @@ export function Composer({
               setDropping(false);
               take([...e.dataTransfer.files]);
             }}
-            className={`flex items-start gap-2.5 rounded-md border bg-ground px-3 py-2.5 ${
+            className={`flex gap-2 rounded-md border bg-ground px-2.5 py-2 ${
+              expanded ? 'items-end' : 'items-center'
+            } ${
               dropping
                 ? 'border-line-strong bg-raised'
                 : 'border-line focus-within:border-line-strong'
             }`}
           >
-            <span className="pt-0.5 font-mono text-[13px] text-ink-faint">›</span>
+            <span
+              className={`font-mono text-[13px] leading-[22px] text-ink-faint ${
+                expanded ? 'self-start' : ''
+              }`}
+            >
+              ›
+            </span>
             <textarea
               ref={input}
               value={value}
-              rows={2}
+              rows={1}
               disabled={locked}
               placeholder={
                 closed
@@ -320,29 +343,40 @@ export function Composer({
                 e.preventDefault();
                 take(files);
               }}
-              className="min-w-0 flex-1 resize-none bg-transparent text-[14px] text-ink placeholder:text-ink-faint disabled:opacity-60"
+              className="min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-[14px] leading-[22px] text-ink placeholder:text-ink-faint disabled:opacity-60"
             />
-            <span className="shrink-0 pt-0.5 font-mono text-[11px] text-ink-faint">
-              ↵ send · ⇧↵ newline
-            </span>
+            <input
+              ref={filePicker}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                take([...(e.target.files ?? [])]);
+                e.target.value = '';
+              }}
+            />
+            <IconButton
+              label="attach files"
+              onClick={() => filePicker.current?.click()}
+              disabled={busy || locked}
+            >
+              <path d="M18 8.5 10.4 16.1a3 3 0 0 1-4.2-4.2l7.9-7.9a4.5 4.5 0 0 1 6.4 6.4l-8 8a6 6 0 0 1-8.5-8.5l7-7" />
+            </IconButton>
+            {/* The `↵ send` hint used to live in the box; the tooltip carries it now. */}
+            <IconButton
+              label="send message"
+              title="Send message (Enter)"
+              primary
+              onClick={send}
+              disabled={busy || locked || !parsed.text || uploading > 0}
+            >
+              <path d="M12 19V5" />
+              <path d="m5.5 11.5 6.5-6.5 6.5 6.5" />
+            </IconButton>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <input
-            ref={filePicker}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              take([...(e.target.files ?? [])]);
-              e.target.value = '';
-            }}
-          />
-          <Button onClick={() => filePicker.current?.click()} disabled={busy || locked}>
-            attach
-          </Button>
-
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint">
             {parsed.mention ? (
               <>
@@ -383,9 +417,6 @@ export function Composer({
           <Button onClick={onStop} disabled={busy || !running || offline} tone="danger">
             stop
           </Button>
-          <Button primary onClick={send} disabled={busy || locked || !parsed.text || uploading > 0}>
-            send
-          </Button>
         </div>
       </div>
     </div>
@@ -424,6 +455,57 @@ function Button({
       className={`shrink-0 rounded px-3 py-1.5 font-mono text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40 ${style}`}
     >
       {children}
+    </button>
+  );
+}
+
+/**
+ * A square icon button for the two message controls that live inside the box.
+ *
+ * `children` are the paths of a 24-box icon; the button supplies the svg around them so
+ * the stroke, size and `aria-hidden` match `FolderPickerButton`, the other icon-only
+ * control in the app. Icon-only means the label is the only name it has, so it is
+ * required and doubles as the tooltip unless a longer one is given.
+ */
+function IconButton({
+  children,
+  label,
+  title,
+  onClick,
+  disabled,
+  primary,
+}: {
+  children: React.ReactNode;
+  label: string;
+  title?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+}): React.ReactElement {
+  const style = primary
+    ? 'bg-ink text-ground'
+    : 'border border-line text-ink-dim hover:border-line-strong hover:text-ink';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={title ?? label}
+      className={`flex size-8 shrink-0 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-40 ${style}`}
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="size-4"
+      >
+        {children}
+      </svg>
     </button>
   );
 }
