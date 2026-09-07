@@ -201,7 +201,7 @@ Permission mapping (the only place vendor flags leak in):
 | acr permission | claude | codex | cursor | antigravity |
 |---|---|---|---|---|
 | read-only | `--permission-mode plan --tools Read,Glob,Grep` | `-s read-only` | `--mode ask --sandbox enabled --trust` | `--sandbox` |
-| edits (default worker) | `--permission-mode acceptEdits` | `-s workspace-write` | `--trust` | `--mode accept-edits` |
+| edits (default worker) | `--permission-mode acceptEdits --allowedTools Bash` | `-s workspace-write` | `--trust` | `--mode accept-edits` (no shell: `agy` has no such mode) |
 | full (explicit opt-in) | `--permission-mode bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` | `--force --trust` | `--dangerously-skip-permissions` |
 
 Cursor's read-only row was verified rather than assumed (2026-09-03): a turn in `--mode ask`

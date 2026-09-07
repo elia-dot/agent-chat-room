@@ -311,7 +311,7 @@ Optional, committed at the repo root. CLI flags beat it, and it beats the built-
   "worktree": true,
   "timeoutSeconds": 1800,
   "models": { "claude": "opus", "cursor": "auto" },
-  "permissions": { "worker": "edits" },
+  "permissions": { "worker": "edits" }, // "edits" edits and runs commands; "full" skips every check
   // Extra folders. A bare path means read & write; use the object form for read-only.
   "additional_dirs": ["/path/to/app", { "path": "/path/to/shared/lib", "access": "read" }],
   "setup": ["npm install", "npm run build"], // commands run once in the worktree upon room creation
@@ -447,13 +447,26 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the complete guide to writing an ad
 
 Every adapter maps the engine's 3 permission tiers to CLI flags:
 
-| Runtime      | Adapter       | `read-only`                                     | `edits`                         | `full`                                       |
-| ------------ | ------------- | ----------------------------------------------- | ------------------------------- | -------------------------------------------- |
-| Claude Code  | `claude`      | `--permission-mode plan --tools Read,Glob,Grep` | `--permission-mode acceptEdits` | `--permission-mode bypassPermissions`        |
-| Codex CLI    | `codex`       | `-s read-only`                                  | `-s workspace-write`            | `--dangerously-bypass-approvals-and-sandbox` |
-| Cursor Agent | `cursor`      | `--mode ask --sandbox enabled --trust`          | `--trust`                       | `--force --trust`                            |
-| Antigravity  | `antigravity` | `--sandbox`                                     | `--mode accept-edits`           | `--dangerously-skip-permissions`             |
-| opencode     | `opencode`    | `permission.edit/bash: deny`                    | `edit: allow`, `bash: deny`     | `edit/bash: allow`                           |
+| Runtime      | Adapter       | `read-only`                                     | `edits`                                             | `full`                                       |
+| ------------ | ------------- | ----------------------------------------------- | --------------------------------------------------- | -------------------------------------------- |
+| Claude Code  | `claude`      | `--permission-mode plan --tools Read,Glob,Grep` | `--permission-mode acceptEdits --allowedTools Bash` | `--permission-mode bypassPermissions`        |
+| Codex CLI    | `codex`       | `-s read-only`                                  | `-s workspace-write`                                | `--dangerously-bypass-approvals-and-sandbox` |
+| Cursor Agent | `cursor`      | `--mode ask --sandbox enabled --trust`          | `--trust`                                           | `--force --trust`                            |
+| Antigravity  | `antigravity` | `--sandbox`                                     | `--mode accept-edits`                               | `--dangerously-skip-permissions`             |
+| opencode     | `opencode`    | `permission.edit/bash: deny`                    | `edit/bash: allow`, `webfetch: deny`                | `edit/bash/webfetch: allow`                  |
+
+`edits` is the level a worker gets by default: it may edit the repository **and run
+commands in it**, because a worker that cannot build, test or lint the change it just wrote
+cannot tell you whether the change works. What it does not get is the network, which is the
+line between `edits` and `full`; `full` – set in the new-room dialog, or as
+`"permissions": { "worker": "full" }` – skips every permission check, files outside the
+workspace included. Reviewers stay `read-only` throughout, which is plan mode: read-only
+shell commands run, writes do not.
+
+Antigravity is the exception, and the table says so rather than pretending: `agy` offers
+only `accept-edits`, `plan`, `--sandbox` and `--dangerously-skip-permissions`, with nothing
+in between, and `accept-edits` auto-denies `run_command`. An Antigravity worker that has to
+run a test suite needs `full`. Every other runtime honours `edits` as written above.
 
 opencode is the one runtime with no permission flags at all, so its row is the `permission`
 block of a config document handed over in `OPENCODE_CONFIG_CONTENT` rather than argv. Two

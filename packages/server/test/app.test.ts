@@ -42,7 +42,11 @@ function repo(): string {
 
 async function createRoom(over: Record<string, unknown> = {}): Promise<{
   status: number;
-  body: { room: Room; participants: { runtime: string; role: string }[]; error?: string };
+  body: {
+    room: Room;
+    participants: { runtime: string; role: string; permission: string }[];
+    error?: string;
+  };
 }> {
   const response = await h.app.inject({
     method: 'POST',
@@ -135,6 +139,27 @@ describe('the REST surface', () => {
       expect.objectContaining({ runtime: 'echo', model: 'opus' }),
       expect.objectContaining({ runtime: 'echo2', model: 'gpt-5.3-codex' }),
     ]);
+  });
+
+  it('lets a room say what its worker may do, and defaults to the conservative level', async () => {
+    // Before this the level was invisible from the browser: `.acr.json` was the only place
+    // to raise it, and the dialog that creates the room never mentioned it existed.
+    const relaxed = await createRoom({ workerPermission: 'full' });
+    expect(relaxed.status).toBe(201);
+    expect(relaxed.body.participants.map((p) => `${p.role}:${p.permission}`)).toEqual([
+      'worker:full',
+      'reviewer:read-only',
+    ]);
+
+    const untouched = await createRoom();
+    expect(untouched.body.participants.map((p) => `${p.role}:${p.permission}`)).toEqual([
+      'worker:edits',
+      'reviewer:read-only',
+    ]);
+
+    // A worker that cannot write is not a worker, so the level never reaches the engine.
+    const refused = await createRoom({ workerPermission: 'read-only' });
+    expect(refused.status).toBe(400);
   });
 
   it('creates a room, lists it, and reads it back with its roster and transcript', async () => {

@@ -26,6 +26,11 @@ const CreateRoomBody = z.object({
   title: z.string().optional(),
   mode: z.enum(['build-review', 'brainstorm']).optional(),
   worktree: z.boolean().optional(),
+  /**
+   * What the worker may do. `read-only` is absent on purpose: a worker that cannot write
+   * is not a worker, and the engine's roster check would reject the room anyway.
+   */
+  workerPermission: z.enum(['edits', 'full']).optional(),
   modelWorker: z.string().optional(),
   modelReviewer: z.string().optional(),
   /** Per-runtime model override, the shape `.acr.json` and `--model claude=opus` produce. */
@@ -169,6 +174,7 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
       ...(body.mode ? { mode: body.mode } : {}),
       ...(body.models ? { models: body.models } : {}),
       ...(body.worktree === undefined ? {} : { worktree: body.worktree }),
+      ...(body.workerPermission ? { workerPermission: body.workerPermission } : {}),
       ...(body.modelWorker ? { modelWorker: body.modelWorker } : {}),
       ...(body.modelReviewer ? { modelReviewer: body.modelReviewer } : {}),
       ...(body.allowDirty ? { allowDirty: true } : {}),

@@ -59,6 +59,10 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
   // `false` and label that "default", which contradicted the CLI, `.acr.json` and the
   // empty state's own description of what a room does.
   const [worktree, setWorktree] = useState(true);
+  // `edits`, matching `BUILTIN_DEFAULTS.workerPermission` in core: edit the repo and run
+  // commands in it, which is what checking your own work takes. `full` is the level above,
+  // where nothing is asked about at all.
+  const [workerPermission, setWorkerPermission] = useState<'edits' | 'full'>('edits');
   const [maxTurnRetries, setMaxTurnRetries] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -157,6 +161,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
         agents,
         mode,
         worktree,
+        workerPermission,
         start: true,
         ...(Object.keys(chosen).length > 0 ? { models: chosen } : {}),
         ...(maxTurnRetries > 0 ? { maxTurnRetries } : {}),
@@ -453,7 +458,7 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                               : 'text-ink-faint'
                         }`}
                       >
-                        {access(mode, role)}
+                        {access(mode, role, workerPermission)}
                       </span>
                     </td>
                   </tr>
@@ -488,6 +493,33 @@ export function NewRoomDialog({ onClose, onCreate }: NewRoomDialogProps): React.
                 {worktree
                   ? `default · isolated worktree on ${branchHint} · fresh worktrees have no dependencies or build artifacts, so tests and project commands may fail until setup installs or builds them`
                   : `agents work in your checkout, with its installed dependencies and build artifacts · the room still branches, so your checkout moves to ${branchHint} and the trunk is left alone`}
+              </span>
+            </span>
+          </label>
+
+          <Divider label="WHAT THE WORKER MAY DO" />
+          <label className="mt-2 flex items-start gap-2.5">
+            <select
+              value={workerPermission}
+              onChange={(e) => setWorkerPermission(e.target.value === 'full' ? 'full' : 'edits')}
+              className="mt-0.5 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11.5px] text-ink"
+            >
+              <option value="edits">edit and run commands</option>
+              <option value="full">no permission checks</option>
+            </select>
+            <span>
+              <span className="block text-[13.5px] text-ink">Worker permission</span>
+              {/* Amber marks the choice that departs from the default, as it does for the
+                  worktree above: `full` stops asking about anything, including the network
+                  and files outside the workspace. */}
+              <span
+                className={`block font-mono text-[11px] ${
+                  workerPermission === 'edits' ? 'text-ink-faint' : 'text-question'
+                }`}
+              >
+                {workerPermission === 'edits'
+                  ? 'default · edits files and runs commands in the workspace, so it can build, test and lint what it wrote · no network'
+                  : 'every permission check is skipped, the network and files outside the workspace included · reviewers stay read-only either way'}
               </span>
             </span>
           </label>
@@ -564,10 +596,10 @@ function rolesFor(mode: RoomMode): string[] {
 }
 
 /** What the role actually grants the spawned process – the thing worth showing. */
-function access(mode: RoomMode, role: string): string {
+function access(mode: RoomMode, role: string, workerPermission: 'edits' | 'full'): string {
   if (role === 'off') return '–';
   if (mode === 'brainstorm') return 'READ';
-  return role === 'worker' ? 'EDITS' : 'READ';
+  return role === 'worker' ? (workerPermission === 'full' ? 'FULL' : 'EDITS') : 'READ';
 }
 
 function slugify(text: string): string {

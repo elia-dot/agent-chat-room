@@ -33,6 +33,8 @@ export interface CreateRoomRequest {
   title?: string;
   mode?: RoomMode;
   worktree?: boolean;
+  /** What the worker may do. `edits` (the default) cannot run commands; `full` can. */
+  workerPermission?: 'edits' | 'full';
   modelWorker?: string;
   modelReviewer?: string;
   /** Per-runtime model override, keyed by runtime id. */

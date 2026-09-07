@@ -56,7 +56,12 @@ describe('buildClaudeArgs', () => {
     expect(buildClaudeArgs({ ...baseReq, permission: 'full' })).toEqual(
       expect.arrayContaining(['--permission-mode', 'bypassPermissions']),
     );
+    // `--tools` narrows a reviewer's surface; a worker keeps the whole toolset and is
+    // handed Bash outright, so it can run the build and the tests on what it wrote.
     expect(buildClaudeArgs({ ...baseReq, permission: 'edits' })).not.toContain('--tools');
+    expect(buildClaudeArgs({ ...baseReq, permission: 'edits' })).toEqual(
+      expect.arrayContaining(['--allowedTools', 'Bash']),
+    );
   });
 
   it('adds resume, model, system prompt and schema only when asked', () => {

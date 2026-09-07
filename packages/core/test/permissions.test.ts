@@ -80,11 +80,12 @@ describe('the permission table', () => {
       bash: 'deny',
       webfetch: 'deny',
     });
-    // A worker that may edit is still not a worker that may run your shell, exactly as with
-    // Antigravity's `accept-edits`.
+    // A worker builds, tests and lints what it wrote, so `edits` grants the shell. The
+    // network is the line it does not cross, which is what still separates it from `full`.
     expect(opencodePermissionConfig('edits').edit).toBe('allow');
-    expect(opencodePermissionConfig('edits').bash).toBe('deny');
-    expect(opencodePermissionConfig('full').bash).toBe('allow');
+    expect(opencodePermissionConfig('edits').bash).toBe('allow');
+    expect(opencodePermissionConfig('edits').webfetch).toBe('deny');
+    expect(opencodePermissionConfig('full').webfetch).toBe('allow');
     // Every level states its denials outright: with no config at all opencode allows both
     // edit and bash, so there is no safe default to fall back on.
     for (const level of PERMISSION_LEVELS) {
@@ -97,6 +98,34 @@ describe('the permission table', () => {
     expect(canWrite('read-only')).toBe(false);
     expect(canWrite('edits')).toBe(true);
     expect(canWrite('full')).toBe(true);
+  });
+
+  it('lets a worker run the commands that check its own work', () => {
+    // The bug this pins: `--permission-mode acceptEdits` on its own auto-approves the edit
+    // tools and asks about the rest, and a headless `-p` turn has nobody to ask, so the
+    // approval is a refusal. Measured against claude 2.1.263 in a throwaway package:
+    // `npm test` came back `permission_denied` / "This command requires approval" with
+    // acceptEdits alone, and ran once `--allowedTools Bash` was added.
+    expect(claudePermissionArgs('edits')).toEqual([
+      '--permission-mode',
+      'acceptEdits',
+      '--allowedTools',
+      'Bash',
+    ]);
+    // The grant is Bash and nothing else: in the same probe WebFetch was still denied, so
+    // `full` remains the level that stops asking about everything.
+    expect(claudePermissionArgs('edits')).not.toContain('bypassPermissions');
+    expect(claudePermissionArgs('edits')).not.toContain('WebFetch');
+    // A reviewer is untouched by any of this – it is still plan mode, which refuses writes.
+    expect(claudePermissionArgs('read-only')).toContain('plan');
+
+    // codex and cursor already ran commands at this level; opencode had to be brought in
+    // line, and Antigravity cannot be: `agy` has no mode between "no commands" and
+    // "approve everything". See the note in `permissions.ts`.
+    expect(codexPermissionArgs('edits')).toEqual(expect.arrayContaining(['-s', 'workspace-write']));
+    expect(cursorPermissionArgs('edits')).toEqual(['--trust']);
+    expect(opencodePermissionConfig('edits').bash).toBe('allow');
+    expect(agyPermissionArgs('edits')).toEqual(['--mode', 'accept-edits']);
   });
 
   it('recognises exactly the three documented levels', () => {

@@ -45,7 +45,17 @@ export function claudePermissionArgs(permission: Permission): string[] {
         JSON.stringify({ disableAllHooks: true }),
       ];
     case 'edits':
-      return ['--permission-mode', 'acceptEdits'];
+      // `acceptEdits` alone auto-approves the edit tools and a narrow set of shell calls,
+      // and asks for everything else – which in a headless `-p` turn is a refusal, because
+      // nobody is there to answer. Probed against claude 2.1.263 in a throwaway package:
+      // `npm test` came back `permission_denied`, "This command requires approval", so a
+      // worker could write a change and then not build, test or lint it.
+      //
+      // `--allowedTools Bash` is what lifts that, and only that: the same probe with it
+      // set ran `npm test`, while WebFetch was still denied ("you haven't granted it
+      // yet"). So `edits` is a worker that may work in the repo, and `full` is still the
+      // level that stops asking about anything at all.
+      return ['--permission-mode', 'acceptEdits', '--allowedTools', 'Bash'];
     case 'full':
       return ['--permission-mode', 'bypassPermissions'];
   }
@@ -108,8 +118,11 @@ export function cursorPermissionArgs(permission: Permission): string[] {
  *  - `--sandbox` refuses `write_to_file` and refuses `echo X > file` at the command
  *    permission layer, while still allowing a plain read-only `ls`. Nothing reached disk.
  *  - `--mode accept-edits` wrote the file and auto-denied `run_command` with "user denied
- *    permission to run command". An `edits` turn can therefore edit but not run the test
- *    suite; `full` is the opt-in escape hatch for a worker that needs a shell.
+ *    permission to run command". This is the one runtime whose `edits` cannot mean what it
+ *    means everywhere else – `agy --help` offers only `accept-edits`, `plan`, `--sandbox`
+ *    and `--dangerously-skip-permissions`, so there is no mode between "may not run a
+ *    command" and "approves everything". An agy worker that has to build or test its own
+ *    work needs `full`; the README table says so rather than pretending otherwise.
  *  - `--dangerously-skip-permissions` reports `permission_mode: always-proceed`, and both
  *    the write and the shell ran.
  *
@@ -149,8 +162,8 @@ export function agyPermissionArgs(permission: Permission): string[] {
  *  - the default with no config at all is `allow` for *both* edit and bash, so a turn that
  *    forgets this table is a `full` turn. Every level therefore states its denials
  *    explicitly rather than relying on a safe default, because there isn't one.
- *  - `edits` denies bash for the same reason Antigravity's `accept-edits` does: a worker
- *    that may edit is not automatically a worker that may run your shell.
+ *  - `edits` allows bash and still denies webfetch: a worker is expected to build, test and
+ *    lint the change it just wrote, which is shell work, and none of it needs the network.
  *
  * Two precedence facts this relies on, both probed rather than assumed:
  *  - `--auto` does *not* override a `deny`. With `edit: deny` and `--auto` together the
@@ -165,7 +178,7 @@ export function opencodePermissionConfig(permission: Permission): Record<string,
     case 'read-only':
       return { edit: 'deny', bash: 'deny', webfetch: 'deny' };
     case 'edits':
-      return { edit: 'allow', bash: 'deny', webfetch: 'deny' };
+      return { edit: 'allow', bash: 'allow', webfetch: 'deny' };
     case 'full':
       return { edit: 'allow', bash: 'allow', webfetch: 'allow' };
   }
