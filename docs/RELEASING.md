@@ -72,8 +72,23 @@ npm publish --access public
 Only the last command publishes. Follow npm's authentication requirements for that account.
 See the [npm publish documentation](https://docs.npmjs.com/cli/v11/commands/npm-publish).
 Do not publish all workspaces individually. Verify the published version with a clean
-`npx agent-chat-room@<version> --version` and startup smoke test, then create release notes
-for that revision through the project's version-control/release process.
+`npx agent-chat-room@<version> --version` and startup smoke test.
 
 A successful local build or pack is not evidence that the version was actually published.
 Verify the published artifact itself.
+
+## Tag and create the GitHub release
+
+Tag the exact commit npm published, not whatever `main` points at now. npm records it as
+`gitHead`:
+
+```sh
+npm view agent-chat-room@<version> gitHead
+git tag v<version> <gitHead>
+git push origin v<version>
+gh release create v<version> --title "v<version>" --generate-notes --latest
+```
+
+A pushed tag alone does not create a release; the `gh release create` step does. The
+generated notes list the pull requests merged since the previous tag, so edit them on GitHub
+if a change needs more context.
