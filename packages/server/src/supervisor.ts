@@ -272,7 +272,7 @@ export class RoomSupervisor {
     roomId: string,
     /** Participant row id, or a runtime id when the roster has no duplicates. */
     target: string,
-    patch: { role?: Role; model?: string | null; runtime?: string },
+    patch: { role?: Role; model?: string | null; runtime?: string; freshSession?: boolean },
   ): Promise<Participant[]> {
     const entry = await this.entry(roomId);
     if (entry.running) {
@@ -358,6 +358,10 @@ export class RoomSupervisor {
     const promoted = await this.create({
       task: proposal.text.trim(),
       cwd: source.repoRoot,
+      // Promotion is a continuation of the room the human configured. Falling back to the
+      // global default here used to turn a deliberately non-isolated brainstorm into an
+      // isolated build room without asking.
+      worktree: source.worktreePath !== null,
       ...(source.additionalDirs.length > 0 ? { additionalDirs: source.additionalDirs } : {}),
       agents,
       ...(Object.keys(models).length > 0 ? { models } : {}),

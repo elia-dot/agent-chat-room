@@ -49,10 +49,19 @@ const ParticipantBody = z
     model: z.string().optional(),
     /** Replace the runtime in this slot, keeping the role. The session cannot come along. */
     runtime: z.string().min(1).optional(),
+    /** Explicitly discard runtime context; model and role changes preserve it by default. */
+    freshSession: z.boolean().optional(),
   })
-  .refine((v) => v.role !== undefined || v.model !== undefined || v.runtime !== undefined, {
-    message: 'nothing to change: pass a role, a model, a runtime, or several',
-  });
+  .refine(
+    (v) =>
+      v.role !== undefined ||
+      v.model !== undefined ||
+      v.runtime !== undefined ||
+      v.freshSession === true,
+    {
+      message: 'nothing to change: pass a role, a model, a runtime, freshSession, or several',
+    },
+  );
 
 const CommitBody = z
   .object({ message: z.string().min(1).optional() })
@@ -373,6 +382,7 @@ export function roomRoutes(app: FastifyInstance, supervisor: RoomSupervisor): vo
         ...(body.role ? { role: body.role } : {}),
         ...(body.model === undefined ? {} : { model: body.model.trim() || null }),
         ...(body.runtime === undefined ? {} : { runtime: body.runtime }),
+        ...(body.freshSession === true ? { freshSession: true } : {}),
       }),
     };
   });

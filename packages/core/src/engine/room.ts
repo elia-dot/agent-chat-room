@@ -1337,7 +1337,7 @@ export class RoomEngine {
    */
   setParticipant(
     target: string,
-    patch: { role?: Role; model?: string | null; runtime?: string },
+    patch: { role?: Role; model?: string | null; runtime?: string; freshSession?: boolean },
   ): Participant[] {
     const room = this.reload();
     if (room.state === 'running' || room.state === 'waiting-reviews') {
@@ -1354,8 +1354,15 @@ export class RoomEngine {
         `nobody called "${target}" is in this room. Try: ${roster.map((p) => p.runtime).join(', ')}`,
       );
     }
-    if (patch.role === undefined && patch.model === undefined && patch.runtime === undefined) {
-      throw new EngineError('nothing to change: pass a role, a model, a runtime, or several');
+    if (
+      patch.role === undefined &&
+      patch.model === undefined &&
+      patch.runtime === undefined &&
+      patch.freshSession !== true
+    ) {
+      throw new EngineError(
+        'nothing to change: pass a role, a model, a runtime, freshSession, or several',
+      );
     }
 
     const replacement = patch.runtime === slot.runtime ? undefined : patch.runtime;
@@ -1406,6 +1413,7 @@ export class RoomEngine {
       const swapped = before.runtime !== participant.runtime;
       if (
         !swapped &&
+        !(patch.freshSession && participant.id === slot.id) &&
         before.role === participant.role &&
         before.permission === participant.permission &&
         before.model === participant.model
@@ -1413,7 +1421,7 @@ export class RoomEngine {
         continue;
       }
       this.store.updateParticipant(participant.id, {
-        ...(swapped
+        ...(swapped || (patch.freshSession && participant.id === slot.id)
           ? { runtime: participant.runtime, sessionId: null, lastSeenMessageId: null }
           : {}),
         role: participant.role,
@@ -1429,7 +1437,10 @@ export class RoomEngine {
       } else {
         this.system(
           `${participant.runtime} is now ${participant.role} (${participant.permission})` +
-            `${participant.model ? ` on ${participant.model}` : ''}.`,
+            `${participant.model ? ` on ${participant.model}` : ''}.` +
+            (patch.freshSession && participant.id === slot.id
+              ? ' It will start a fresh session on its next turn and receive the whole room transcript.'
+              : ''),
         );
       }
       // An `@mention` pointing at the runtime that just left would route the next turn to
@@ -1829,7 +1840,19 @@ export class RoomEngine {
     workerSummary: string,
     changed: string[],
   ): Promise<{ done: boolean; error?: string; commit?: string }> {
-    const failed = reviews.filter((r) => !r.result.ok);
+    // Some runtimes can finish and return a complete verdict, then report a transport error
+    // in the closing envelope. The verdict is still useful and self-contained; throwing it
+    // away turns an approval into an endless retry loop. Only a failed turn with no parseable
+    // verdict is a failed review. The turn record keeps the runtime error for diagnostics.
+    const recovered = reviews.filter((r) => !r.result.ok && r.verdict.ok);
+    for (const review of recovered) {
+      this.system(
+        `${review.participant.runtime} reported an error after producing a complete verdict; ` +
+          `the verdict is being counted. Runtime error: ${review.result.error ?? 'unknown error'}`,
+        round,
+      );
+    }
+    const failed = reviews.filter((r) => !r.result.ok && !r.verdict.ok);
     for (const review of failed) {
       this.system(
         `${review.participant.runtime}'s review failed: ${review.result.error ?? 'unknown error'}`,
@@ -1852,7 +1875,7 @@ export class RoomEngine {
       return { done: true, error };
     }
 
-    const ok = reviews.filter((r) => r.result.ok);
+    const ok = reviews.filter((r) => r.result.ok || r.verdict.ok);
     for (const review of ok) {
       if (review.verdict.ok) continue;
       // Never guess an approval from prose. Quote the tail so the human can tell a

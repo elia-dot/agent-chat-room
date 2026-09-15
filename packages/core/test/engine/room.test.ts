@@ -391,6 +391,33 @@ describe('RoomEngine, the build-review loop', () => {
     ).toBe(true);
   });
 
+  it('counts a complete verdict even when the runtime reports an error afterward', async () => {
+    const dir = repo();
+    script([
+      workerTurn(1, 'Done.', { 'math.js': FIXED }),
+      {
+        when: { role: 'reviewer', round: 1 },
+        text: verdict('approve'),
+        error: 'API error: no capacity after the response completed',
+      },
+    ]);
+
+    const engine = await open(dir);
+    const outcome = await engine.run();
+
+    expect(outcome.state).toBe('approved');
+    expect(
+      store
+        .listMessages(engine.room.id)
+        .some(
+          (m) =>
+            m.kind === 'system' &&
+            m.text.includes('reported an error after producing a complete verdict'),
+        ),
+    ).toBe(true);
+    expect(store.listTurns(engine.room.id).some((turn) => turn.ok === false)).toBe(true);
+  });
+
   it('reports a failed worker turn instead of reviewing nothing', async () => {
     const dir = repo();
     script([

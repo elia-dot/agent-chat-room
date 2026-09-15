@@ -30,7 +30,7 @@ export interface RoomOverlayProps {
   onSetAdditionalDirs: (dirs: AdditionalDir[]) => void;
   onSetParticipant: (
     runtime: string,
-    patch: { role?: Role; model?: string; runtime?: string },
+    patch: { role?: Role; model?: string; runtime?: string; freshSession?: boolean },
   ) => void;
   /** Runtime ids this machine can actually run, for the roster's replace-runtime picker. */
   usableRuntimes: string[];
@@ -268,7 +268,10 @@ function ParticipantRow({
   catalog: ModelCatalog | undefined;
   usableRuntimes: string[];
   taken: string[];
-  onSet: (participantId: string, patch: { role?: Role; model?: string; runtime?: string }) => void;
+  onSet: (
+    participantId: string,
+    patch: { role?: Role; model?: string; runtime?: string; freshSession?: boolean },
+  ) => void;
 }): React.ReactElement {
   const [model, setModel] = useState(participant.model ?? '');
   const running = room.state === 'running' || room.state === 'waiting-reviews';
@@ -312,18 +315,27 @@ function ParticipantRow({
         </select>
         <Tag>{participant.permission}</Tag>
       </div>
-      <div className="pl-8">
+      <div className="flex items-center gap-2 pl-8">
         <ModelSelect
           runtime={participant.runtime}
           value={model}
           catalog={catalog}
           disabled={locked}
-          className="w-full"
+          className="min-w-0 flex-1"
           onChange={setModel}
           onCommit={(next) => {
             if (next !== (participant.model ?? '')) onSet(participant.id, { model: next });
           }}
         />
+        <button
+          type="button"
+          disabled={locked}
+          onClick={() => onSet(participant.id, { freshSession: true })}
+          className="shrink-0 rounded border border-line px-2 py-1 font-mono text-[10px] text-ink-dim hover:border-line-strong hover:text-ink disabled:opacity-40"
+          title="Discard this runtime's saved conversation. Its next turn receives the whole room transcript."
+        >
+          new session
+        </button>
       </div>
     </li>
   );

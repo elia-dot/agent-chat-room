@@ -178,6 +178,28 @@ describe('RoomEngine.setParticipant', () => {
     expect(engine.setParticipant('echo', { model: null })[0]?.model).toBeNull();
   });
 
+  it('starts a fresh session only when explicitly requested', async () => {
+    const dir = repo();
+    script([
+      { when: { role: 'worker', round: 1 }, text: 'did a thing', writeFiles: { 'math.js': 'x\n' } },
+      { when: { role: 'reviewer', round: 1 }, text: verdict('question') },
+    ]);
+
+    const engine = await open(dir);
+    await engine.run();
+    const before = engine.participants.find((p) => p.runtime === 'echo2')!;
+    expect(before.sessionId).toBeTruthy();
+    expect(before.lastSeenMessageId).toBeTruthy();
+
+    const after = engine
+      .setParticipant(before.id, { freshSession: true })
+      .find((p) => p.id === before.id)!;
+    expect(after.sessionId).toBeNull();
+    expect(after.lastSeenMessageId).toBeNull();
+    expect(after.runtime).toBe(before.runtime);
+    expect(after.model).toBe(before.model);
+  });
+
   it('refuses while a turn is in flight, because the child already has its permission', async () => {
     const dir = repo();
     script([

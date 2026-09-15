@@ -226,7 +226,7 @@ export const api = {
   setParticipant: (
     id: string,
     runtime: string,
-    body: { role?: Role; model?: string; runtime?: string },
+    body: { role?: Role; model?: string; runtime?: string; freshSession?: boolean },
   ) =>
     request<{ participants: Participant[] }>(
       `/api/rooms/${id}/participants/${encodeURIComponent(runtime)}`,

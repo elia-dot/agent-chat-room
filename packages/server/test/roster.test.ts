@@ -145,6 +145,28 @@ describe('PATCH /api/rooms/:id/participants/:participantId', () => {
     expect(cleared.json<{ participants: Participant[] }>().participants[0]?.model).toBeNull();
   });
 
+  it('can explicitly start a participant with a fresh session', async () => {
+    const room = await createRoom();
+    const participant = h.store.listParticipants(room.id)[0]!;
+    h.store.updateParticipant(participant.id, {
+      sessionId: 'old-session',
+      lastSeenMessageId: h.store.listMessages(room.id)[0]!.id,
+    });
+
+    const response = await h.app.inject({
+      method: 'PATCH',
+      url: `/api/rooms/${room.id}/participants/${participant.id}`,
+      payload: { freshSession: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const updated = response
+      .json<{ participants: Participant[] }>()
+      .participants.find((p) => p.id === participant.id)!;
+    expect(updated.sessionId).toBeNull();
+    expect(updated.lastSeenMessageId).toBeNull();
+  });
+
   it('is a 404 for a runtime that is not in the room, and a 400 for an empty patch', async () => {
     const room = await createRoom();
 
@@ -298,57 +320,66 @@ describe('POST /api/rooms/:id/pr', () => {
 });
 
 describe('POST /api/rooms/:id/promote', () => {
-  it('turns a finished brainstorm proposal into a build-review room and starts it', async () => {
-    writeEchoScript([
-      { when: { round: 1 }, text: 'a' },
-      { when: { round: 1 }, text: 'b' },
-      { when: { round: 1 }, text: 'c' },
-      { when: { round: 2 }, text: 'd' },
-      { when: { round: 2 }, text: 'e' },
-      { when: { round: 2 }, text: 'f' },
-      { when: { round: 3 }, text: 'Proposed task: split the pricing module by tier.' },
-      { when: { role: 'worker', round: 1, runtime: 'echo3' }, text: 'Building it.', delayMs: 500 },
-      { when: { role: 'reviewer', round: 1, runtime: 'echo' }, text: verdict('approve') },
-      { when: { role: 'reviewer', round: 1, runtime: 'echo2' }, text: verdict('approve') },
-    ]);
+  it.each([true, false])(
+    'turns a finished brainstorm proposal into a build-review room and preserves worktree=%s',
+    async (worktree) => {
+      writeEchoScript([
+        { when: { round: 1 }, text: 'a' },
+        { when: { round: 1 }, text: 'b' },
+        { when: { round: 1 }, text: 'c' },
+        { when: { round: 2 }, text: 'd' },
+        { when: { round: 2 }, text: 'e' },
+        { when: { round: 2 }, text: 'f' },
+        { when: { round: 3 }, text: 'Proposed task: split the pricing module by tier.' },
+        {
+          when: { role: 'worker', round: 1, runtime: 'echo3' },
+          text: 'Building it.',
+          delayMs: 500,
+        },
+        { when: { role: 'reviewer', round: 1, runtime: 'echo' }, text: verdict('approve') },
+        { when: { role: 'reviewer', round: 1, runtime: 'echo2' }, text: verdict('approve') },
+      ]);
 
-    const extra = mkdtempSync(join(tmpdir(), 'acr-extra-'));
-    repos.push(extra);
-    const room = await createRoom({
-      mode: 'brainstorm',
-      agents: ['echo', 'echo2', 'echo3'],
-      models: { echo2: 'review-model' },
-      additionalDirs: [extra],
-      start: true,
-    });
-    await waitFor(
-      () => h.store.getRoom(room.id)?.state === 'needs-you',
-      'the brainstorm to propose',
-    );
+      const extra = mkdtempSync(join(tmpdir(), 'acr-extra-'));
+      repos.push(extra);
+      const room = await createRoom({
+        mode: 'brainstorm',
+        agents: ['echo', 'echo2', 'echo3'],
+        models: { echo2: 'review-model' },
+        additionalDirs: [extra],
+        worktree,
+        start: true,
+      });
+      await waitFor(
+        () => h.store.getRoom(room.id)?.state === 'needs-you',
+        'the brainstorm to propose',
+      );
 
-    const response = await h.app.inject({
-      method: 'POST',
-      url: `/api/rooms/${room.id}/promote`,
-    });
+      const response = await h.app.inject({
+        method: 'POST',
+        url: `/api/rooms/${room.id}/promote`,
+      });
 
-    expect(response.statusCode).toBe(201);
-    const body = response.json<{ room: Room; participants: Participant[] }>();
-    expect(body.room.mode).toBe('build-review');
-    expect(body.room.task).toContain('split the pricing module by tier');
-    expect(body.room.repoRoot).toBe(h.store.getRoom(room.id)?.repoRoot);
-    expect(body.room.additionalDirs).toEqual(h.store.getRoom(room.id)?.additionalDirs);
-    // The brainstorm moderator owns the proposal and becomes the promoted build worker.
-    expect(body.participants.map((participant) => participant.runtime)).toEqual([
-      'echo3',
-      'echo',
-      'echo2',
-    ]);
-    expect(body.participants[0]?.role).toBe('worker');
-    expect(body.participants[2]?.model).toBe('review-model');
-    expect(h.supervisor.isRunning(body.room.id)).toBe(true);
+      expect(response.statusCode).toBe(201);
+      const body = response.json<{ room: Room; participants: Participant[] }>();
+      expect(body.room.mode).toBe('build-review');
+      expect(body.room.task).toContain('split the pricing module by tier');
+      expect(body.room.repoRoot).toBe(h.store.getRoom(room.id)?.repoRoot);
+      expect(body.room.worktreePath === null).toBe(!worktree);
+      expect(body.room.additionalDirs).toEqual(h.store.getRoom(room.id)?.additionalDirs);
+      // The brainstorm moderator owns the proposal and becomes the promoted build worker.
+      expect(body.participants.map((participant) => participant.runtime)).toEqual([
+        'echo3',
+        'echo',
+        'echo2',
+      ]);
+      expect(body.participants[0]?.role).toBe('worker');
+      expect(body.participants[2]?.model).toBe('review-model');
+      expect(h.supervisor.isRunning(body.room.id)).toBe(true);
 
-    await waitFor(() => !h.supervisor.isRunning(body.room.id), 'the promoted build to finish');
-  });
+      await waitFor(() => !h.supervisor.isRunning(body.room.id), 'the promoted build to finish');
+    },
+  );
 
   it('refuses to promote a build-review room, or a brainstorm with no proposal yet', async () => {
     const build = await createRoom();

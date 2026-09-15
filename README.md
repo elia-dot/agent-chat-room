@@ -91,6 +91,8 @@ Messages can interrupt active work and steer the next turn. A message to the wor
 finished room that produces no changes can finish without another review; Continue requests
 a full round. Between turns you can change models, swap the worker, or replace a runtime.
 Changing a model or role keeps its session; replacing a runtime starts a new session.
+Use **new session** beside a participant's model when you explicitly want to discard that
+runtime's saved conversation and resend the whole room transcript on its next turn.
 The model picker includes **Custom…** for identifiers missing from its catalog.
 
 Attach files with the paperclip, drag and drop, or paste a screenshot. Agents receive local

@@ -1,6 +1,6 @@
 {
   "name": "agent-chat-room",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A local chat room where your installed agent CLIs build and review code together.",
   "license": "MIT",
   "type": "module",
@@ -35,6 +35,7 @@
     "packages/server/package.json",
     "packages/web/dist",
     "!**/*.map",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "NOTICE"
